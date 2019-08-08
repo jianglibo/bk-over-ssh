@@ -20,7 +20,7 @@ pub fn setup_logger<T, I>(verbose_modules: T, other_modules: T) -> Result<(), fe
 
     for module_name in other_modules {
         base_config = base_config.level_for(
-            format!("{}", module_name.as_ref()),
+            module_name.as_ref().to_string(),
             log::LevelFilter::Trace);
     }
     // base_config.level_for("headless_chrome", log::LevelFilter::Trace);
