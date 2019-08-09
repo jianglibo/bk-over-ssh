@@ -2,6 +2,7 @@
 # sudo apt-get install openssh-server
 # change virtualbox network to host-only.
 # E:\Program Files\Oracle\VirtualBox>
+# sudo apt install pkg-config, sudo apt install libssl-dev
 
 ssh_client:
     id_rsa: C:\Users\Administrator\.ssh\id_rsa
