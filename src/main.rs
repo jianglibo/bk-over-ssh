@@ -1,4 +1,5 @@
 mod log_util;
+mod develope_data;
 use std::fs::OpenOptions;
 use std::io::prelude::*;
 
@@ -10,6 +11,7 @@ use rustyline::error::ReadlineError;
 use rustyline::highlight::{Highlighter, MatchingBracketHighlighter};
 use rustyline::hint::{Hinter, HistoryHinter};
 use rustyline::{Cmd, CompletionType, Config, Context, EditMode, Editor, Helper, KeyPress};
+
 
 struct MyHelper {
     completer: FilenameCompleter,
@@ -237,5 +239,11 @@ mod tests {
 
         write_to_file(&mut channel, "not_in_git/t.txt")?;
         Ok(())
+    }
+
+    #[test]
+    fn t_load_env() {
+        let develope_env  = develope_data::load_env();
+        assert!(develope_env.servers.ubuntu18.test_dirs.aatxt.contains("aa.txt"));
     }
 }

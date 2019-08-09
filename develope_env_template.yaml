@@ -1,0 +1,12 @@
+# change the content fit your environment and rename this file to develope_env.yaml.
+# sudo apt-get install openssh-server
+
+ssh_client:
+    id_rsa: C:\Users\Administrator\.ssh\id_rsa
+    id_rsa_pub: C:\Users\Administrator\.ssh\id_rsa.pub
+servers:
+  ubuntu18:
+    host: 10.0.2.15:22
+    username: osboxes
+    test_dirs:
+      aatxt: /home/osboxes/aa.txt
