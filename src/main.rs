@@ -3,6 +3,9 @@ extern crate derive_builder;
 mod log_util;
 mod develope_data;
 mod data_shape;
+mod actions;
+use actions::write_to_file;
+
 use std::fs::OpenOptions;
 use std::io::prelude::*;
     use sha2::{Digest, Sha224};
@@ -200,27 +203,7 @@ fn main() {
     rl.save_history("history.txt").unwrap();
 }
 
-#[allow(dead_code)]
-fn write_to_file<T: AsRef<str>>(
-    from: &mut impl std::io::Read,
-    to_file: T,
-) -> Result<(), failure::Error> {
-    let mut u8_buf = [0; 1024];
-    let mut wf = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .open(to_file.as_ref())?;
-    loop {
-        match from.read(&mut u8_buf[..]) {
-            Ok(n) if n > 0 => {
-                wf.write_all(&u8_buf[..n])?;
-                // println!("The bytes: {:?}", &u8_buf[..n]);
-            }
-            _ => break,
-        }
-    }
-    Ok(())
-}
+
 
 #[cfg(test)]
 mod tests {

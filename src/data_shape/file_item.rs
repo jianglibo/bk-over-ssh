@@ -8,6 +8,8 @@ pub struct FileItem<'a, 'b, 'c> {
     pub local_path: Option<&'b str>,
     pub sha1: &'c str,
     pub len: u64,
+    #[builder(default = "None")]
+    pub fail_reason: Option<String>,
 }
 
 #[cfg(test)]
