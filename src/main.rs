@@ -1,7 +1,14 @@
+#[macro_use]
+extern crate derive_builder;
 mod log_util;
 mod develope_data;
+mod data_shape;
 use std::fs::OpenOptions;
 use std::io::prelude::*;
+    use sha2::{Digest, Sha224};
+    use sha1::{Sha1, Digest as Digest1};
+    use std::{fs, io};
+    use std::time::Instant;
 
 use std::borrow::Cow::{self, Borrowed, Owned};
 
@@ -12,6 +19,8 @@ use rustyline::highlight::{Highlighter, MatchingBracketHighlighter};
 use rustyline::hint::{Hinter, HistoryHinter};
 use rustyline::{Cmd, CompletionType, Config, Context, EditMode, Editor, Helper, KeyPress};
 
+use std::collections::hash_map::DefaultHasher;
+use std::hash::Hasher;
 
 struct MyHelper {
     completer: FilenameCompleter,
@@ -67,6 +76,76 @@ impl Highlighter for MyHelper {
 
 impl Helper for MyHelper {}
 
+fn hash_file_2(file_name: impl AsRef<str>) -> Result<String, failure::Error> {
+    let start = Instant::now();
+
+    let mut hasher = DefaultHasher::new();
+
+    let mut file = fs::File::open(file_name.as_ref())?;
+    let mut buffer = [0; 1024];
+    let mut total = 0_usize;
+    loop {
+        let n = file.read(&mut buffer[..])?;
+        if n == 0 {
+            break
+        } else {
+            hasher.write(&buffer[..n]);
+            total += n;
+        }
+    }
+    let hash = hasher.finish();
+    println!("Bytes processed: {}", total);
+    let r = format!("{:x}", hash);
+    println!("r: {:?}, elapsed: {}",r, start.elapsed().as_millis());
+    Ok(r)
+}
+
+fn hash_file_1(file_name: impl AsRef<str>) -> Result<String, failure::Error> {
+    let start = Instant::now();
+    let mut file = fs::File::open(file_name.as_ref())?;
+    let mut hasher = Sha224::new();
+    let mut buffer = [0; 1024];
+    let mut total = 0_usize;
+    loop {
+        let n = file.read(&mut buffer[..])?;
+        if n == 0 {
+            break
+        } else {
+            hasher.input(&buffer[..n]);
+            total += n;
+        }
+    }
+    let hash = hasher.result();
+    println!("Bytes processed: {}", total);
+    let r = format!("{:x}", hash);
+    println!("r: {:?}, elapsed: {}",r, start.elapsed().as_millis());
+    Ok(r)
+}
+
+fn hash_file_3(file_name: impl AsRef<str>) -> Result<String, failure::Error> {
+    let start = Instant::now();
+    let mut file = fs::File::open(file_name.as_ref())?;
+    let mut hasher = Sha1::new();
+    let n = io::copy(&mut file, &mut hasher)?;
+    let hash = hasher.result();
+    println!("Bytes processed: {}", n);
+    let r = format!("{:x}", hash);
+    println!("r: {:?}, elapsed: {}",r, start.elapsed().as_millis());
+    Ok(r)
+}
+
+fn hash_file(file_name: impl AsRef<str>) -> Result<String, failure::Error> {
+    let start = Instant::now();
+    let mut file = fs::File::open(file_name.as_ref())?;
+    let mut hasher = Sha224::new();
+    let n = io::copy(&mut file, &mut hasher)?;
+    let hash = hasher.result();
+    println!("Bytes processed: {}", n);
+    let r = format!("{:x}", hash);
+    println!("r: {:?}, elapsed: {}",r, start.elapsed().as_millis());
+    Ok(r)
+}
+
 fn main() {
     // env_logger::init();
     let config = Config::builder()
@@ -98,6 +177,10 @@ fn main() {
             Ok(line) => {
                 rl.add_history_entry(line.as_str());
                 println!("Line: {}", line);
+                if line.starts_with("hash ") {
+                    let (_s1, s2) = line.split_at(5);
+                    hash_file_3(s2).expect("hash should success.");
+                }
             }
             Err(ReadlineError::Interrupted) => {
                 println!("CTRL-C");
@@ -151,8 +234,23 @@ mod tests {
     use std::net::TcpStream;
     use std::path::Path;
 
-    const RSA_PUB: &str = "C:/Users/Administrator/.ssh/i51.pub";
-    const RSA_PRI: &str = "C:/Users/Administrator/.ssh/i51";
+
+
+    #[test]
+    fn t_digest_file() -> Result<(), failure::Error> {
+        let f = r"E:\backups\mysql\10.19.183.53\mysqls\mysql.27\hm-log-bin.000502";
+        let r1 = hash_file(f)?;
+        let r2 = hash_file_1(f)?;
+        let r3 = hash_file_2(f)?;
+        let r4 = hash_file_2(f)?;
+        let r5 = hash_file_3(f)?;
+        let r6 = hash_file_3(f)?;
+        // let _r3 = hash_file(r"E:\data_20190429.tar.gz");
+        assert_eq!(r1, r2);
+        assert_eq!(r3, r4);
+        assert_eq!(r5, r6);
+        Ok(())
+    }
 
     #[test]
     fn t_main_password() {
@@ -166,23 +264,10 @@ mod tests {
         assert!(sess.authenticated());
     }
 
-    fn create_connected_session() -> (TcpStream, Session) {
-        // Connect to the local SSH server
-        let tcp = TcpStream::connect("10.19.183.51:8122").unwrap();
-        let mut sess = Session::new().unwrap();
-        sess.handshake(&tcp).unwrap();
-
-        info!("{:?}", sess.auth_methods("root").unwrap());
-        sess.userauth_pubkey_file("root", Some(Path::new(RSA_PUB)), Path::new(RSA_PRI), None)
-            .expect("login success.");
-        assert!(sess.authenticated());
-        (tcp, sess)
-    }
-
     #[test]
     fn t_main_pubkey() {
         log_util::setup_logger(vec![""], vec![]).expect("log should init.");
-        let (_, sess) = create_connected_session();
+        let (tcp, sess, dev_env) = develope_data::connect_to_ubuntu();
         assert!(sess.authenticated());
     }
 
@@ -206,9 +291,11 @@ mod tests {
     #[test]
     fn t_scp_file() {
         log_util::setup_logger(vec![""], vec![]).expect("log should init.");
-        let (tcp, sess) = create_connected_session();
+        let (tcp, sess, dev_env) = develope_data::connect_to_ubuntu();
         info!("{:?}", tcp);
-        let (mut remote_file, stat) = sess.scp_recv(Path::new("/root/t.txt")).unwrap();
+        let (mut remote_file, stat) = sess
+            .scp_recv(Path::new(&dev_env.servers.ubuntu18.test_dirs.aatxt))
+            .unwrap();
         println!("remote file size: {}", stat.size());
         let mut contents = Vec::new();
         remote_file.read_to_end(&mut contents).unwrap();
@@ -218,13 +305,33 @@ mod tests {
     #[test]
     fn t_sftp_file() -> Result<(), failure::Error> {
         log_util::setup_logger(vec![""], vec![]).expect("log should init.");
-        let (tcp, sess) = create_connected_session();
+        let (tcp, sess, dev_env) = develope_data::connect_to_ubuntu();
         info!("{:?}", tcp);
         let sftp = sess.sftp().expect("should got sfpt instance.");
 
-        let mut file: ssh2::File = sftp.open(Path::new("/root/t.txt"))?;
+        let mut file: ssh2::File =
+            sftp.open(Path::new(&dev_env.servers.ubuntu18.test_dirs.aatxt))?;
         let mut buf = String::new();
         file.read_to_string(&mut buf)?;
+        assert_eq!(buf, "hello\nworld\n");
+        assert_eq!(buf.len(), 12);
+        info!("{:?}", buf);
+        Ok(())
+    }
+
+    #[test]
+    fn t_sftp_resume_file() -> Result<(), failure::Error> {
+        log_util::setup_logger(vec![""], vec![]).expect("log should init.");
+        let (tcp, sess, dev_env) = develope_data::connect_to_ubuntu();
+        info!("{:?}", tcp);
+        let sftp = sess.sftp().expect("should got sfpt instance.");
+
+        let mut file: ssh2::File =
+            sftp.open(Path::new(&dev_env.servers.ubuntu18.test_dirs.aatxt))?;
+        let mut buf = String::new();
+        file.read_to_string(&mut buf)?;
+        assert_eq!(buf, "hello\nworld\n");
+        assert_eq!(buf.len(), 12);
         info!("{:?}", buf);
         Ok(())
     }
@@ -233,17 +340,21 @@ mod tests {
     fn t_channel_1() -> Result<(), failure::Error> {
         log_util::setup_logger(vec![""], vec![]).expect("log should init.");
 
-        let (_tcp, sess) = create_connected_session();
+        let (_tcp, sess, _dev_env) = develope_data::connect_to_ubuntu();
         let mut channel: ssh2::Channel = sess.channel_session().unwrap();
         channel.exec("ls").unwrap();
-
         write_to_file(&mut channel, "not_in_git/t.txt")?;
         Ok(())
     }
 
     #[test]
     fn t_load_env() {
-        let develope_env  = develope_data::load_env();
-        assert!(develope_env.servers.ubuntu18.test_dirs.aatxt.contains("aa.txt"));
+        let develope_env = develope_data::load_env();
+        assert!(develope_env
+            .servers
+            .ubuntu18
+            .test_dirs
+            .aatxt
+            .contains("aa.txt"));
     }
 }

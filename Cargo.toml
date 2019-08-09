@@ -15,6 +15,17 @@ failure = "0.1"
 rustyline = "5.0.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.8"
+serde_json = "1.0"
+sha2 = "0.8.0"
+sha-1 = "0.8.1"
+derive_builder =  "0.7.2"
 
+# [[bin]]
+# name = "mybin"
+# path = "src/main.rs"
+
+# [lib]
+# name = "ssh_client_demo"
+# path = "src/lib.rs"
 
 # http://ticki.github.io/blog/making-terminal-applications-in-rust-with-termion/
