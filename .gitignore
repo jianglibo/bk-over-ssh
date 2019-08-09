@@ -4,3 +4,5 @@
 **/*.log
 history.txt
 develope_env.yaml
+.vscode/launch.json
+.vscode/settings.json

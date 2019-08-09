@@ -1,6 +1,7 @@
 # change the content fit your environment and rename this file to develope_env.yaml.
 # sudo apt-get install openssh-server
 # change virtualbox network to host-only.
+# E:\Program Files\Oracle\VirtualBox>
 
 ssh_client:
     id_rsa: C:\Users\Administrator\.ssh\id_rsa

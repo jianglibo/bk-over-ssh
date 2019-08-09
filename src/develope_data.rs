@@ -52,7 +52,7 @@ pub fn create_connected_session(
     server: &Server,
     ssh_client: &SshClientParams,
 ) -> (TcpStream, Session) {
-    // Connect to the local SSH server
+    info!("{:?}", server);
     let tcp = TcpStream::connect(&server.host).unwrap();
     let mut sess = Session::new().unwrap();
     sess.handshake(&tcp).unwrap();
