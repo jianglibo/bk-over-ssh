@@ -1,3 +1,3 @@
 pub mod file_item;
 
-pub use file_item::FileItem;
+pub use file_item::{FileItem, RemoteFileItem};
