@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod tests {
-    use super::super::super::log_util;
+    use std::path::PathBuf;
+use super::super::super::log_util;
     use super::super::develope_data;
     use crate::actions::{copy_a_file, write_to_file};
     use crate::data_shape::{FileItem, RemoteFileItem};
@@ -11,6 +12,7 @@ mod tests {
     use std::io::prelude::*;
     use std::net::TcpStream;
     use std::path::Path;
+    use walkdir::WalkDir;
 
     #[test]
     fn t_main_password() {
@@ -83,18 +85,23 @@ mod tests {
     fn t_sftp_resume_file() -> Result<(), failure::Error> {
         log_util::setup_logger(vec![""], vec![]).expect("log should init.");
         let (_tcp, mut sess, dev_env) = develope_data::connect_to_ubuntu();
-        let file_item = FileItem::new(RemoteFileItem::new(dev_env.servers.ubuntu18.test_dirs.aatxt.as_str()));
-            // FileItemBuilder::default()
-            // .sha1("58853E8A5E8272B1012F9A52A80758B27BD0D3CB")
-            // .remote_path(dev_env.servers.ubuntu18.test_dirs.aatxt.as_str())
-            // .len(12_u64)
-            // .build()
-            // .expect("should create file item.");
+        let file_item = FileItem::new(RemoteFileItem::new(
+            dev_env.servers.ubuntu18.test_dirs.aatxt.as_str(),
+        ));
+        // FileItemBuilder::default()
+        // .sha1("58853E8A5E8272B1012F9A52A80758B27BD0D3CB")
+        // .remote_path(dev_env.servers.ubuntu18.test_dirs.aatxt.as_str())
+        // .len(12_u64)
+        // .build()
+        // .expect("should create file item.");
         let file_item = copy_a_file(&mut sess, file_item);
         info!("{:?}", file_item);
         assert_eq!(file_item.len, 12);
         assert_eq!(file_item.len, file_item.remote_item.len);
-        assert_eq!(file_item.remote_item.sha1.map(str::to_string), file_item.sha1);
+        assert_eq!(
+            file_item.remote_item.sha1.map(str::to_string),
+            file_item.sha1
+        );
         assert_eq!(file_item.get_local_path(), Some(OsStr::new("aa.txt")));
         Ok(())
     }
@@ -119,5 +126,39 @@ mod tests {
             .test_dirs
             .aatxt
             .contains("aa.txt"));
+    }
+
+    #[test]
+    fn t_walkdir() {
+        let base_path = Path::new("f:/迅雷下载")
+            .canonicalize()
+            .expect("success");
+        WalkDir::new(&base_path)
+            .follow_links(false)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|d| d.file_type().is_file())
+            .filter_map(|d| d.path().canonicalize().ok())
+            .filter_map(|d| {
+                d.strip_prefix(&base_path)
+                    .ok().map(|d|d.to_path_buf())
+                    // .map(|dd| dd.to_str().map(|s| s.to_string()))
+            })
+            .for_each(|d| println!("{:?}", d.to_str()));
+        // assert_eq!(WalkDir::new("f:/").into_iter().filter_map(|e| e.ok()).count(), 33);
+    }
+
+    #[test]
+    fn t_components() {
+        let p = Path::new("./fixtures/a/b b/")
+            .canonicalize()
+            .expect("success");
+        println!("{:?}", p);
+
+        let rp = Path::new("fixtures").canonicalize().expect("success");
+
+        let pp = p.strip_prefix(rp).expect("success");
+
+        println!("{:?}", pp.as_os_str());
     }
 }
