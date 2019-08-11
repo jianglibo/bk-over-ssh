@@ -99,7 +99,7 @@ use super::super::super::log_util;
         assert_eq!(file_item.len, 12);
         assert_eq!(file_item.len, file_item.remote_item.len);
         assert_eq!(
-            file_item.remote_item.sha1.map(str::to_string),
+            file_item.remote_item.sha1,
             file_item.sha1
         );
         assert_eq!(file_item.get_local_path(), Some(OsStr::new("aa.txt")));

@@ -32,16 +32,32 @@ pub fn write_to_file<T: AsRef<OsStr>>(
     Ok((length, format!("{:X}", hasher.result())))
 }
 
-pub fn hash_file_sha1(file_name: impl AsRef<OsStr>) -> Result<String, failure::Error> {
-    let start = Instant::now();
-    let mut file = fs::File::open(file_name.as_ref())?;
-    let mut hasher = Sha1::new();
-    let n = io::copy(&mut file, &mut hasher)?;
-    let hash = hasher.result();
-    println!("Bytes processed: {}", n);
-    let r = format!("{:x}", hash);
-    println!("r: {:?}, elapsed: {}",r, start.elapsed().as_millis());
-    Ok(r)
+pub fn hash_file_sha1(file_name: impl AsRef<Path>) -> Option<String> {
+    // let start = Instant::now();
+    let file_r = fs::File::open(file_name.as_ref());
+    match file_r {
+        Ok(mut file) => {
+            let mut hasher = Sha1::new();
+            let n_r = io::copy(&mut file, &mut hasher);
+            match n_r {
+                Ok(n) => {
+                    let hash = hasher.result();
+                    // println!("Bytes processed: {}", n);
+                    let r = format!("{:x}", hash);
+                    // println!("r: {:?}, elapsed: {}",r, start.elapsed().as_millis());
+                    Some(r)
+                }
+                Err(err) => {
+                    error!("hash_file_sha1 copy stream failed: {:?}, {:?}", file_name.as_ref(), err);
+                    None
+                }
+            }
+        }
+        Err(err) => {
+            error!("hash_file_sha1 failed: {:?}, {:?}", file_name.as_ref(), err);
+            None
+        }
+    }
 }
 
 // one possible implementation of walking a directory only visiting files
@@ -61,12 +77,12 @@ pub fn visit_dirs(dir: &Path, cb: &Fn(&fs::DirEntry)) -> io::Result<()> {
     Ok(())
 }
 
-pub fn copy_a_file<'a>(
+pub fn copy_a_file(
     session: &mut ssh2::Session,
-    mut file_item: FileItem<'a>,
-) -> FileItem<'a> {
+    mut file_item: FileItem,
+) -> FileItem {
     let sftp = session.sftp().expect("should got sfpt instance.");
-    match sftp.open(Path::new(file_item.remote_item.path)) {
+    match sftp.open(Path::new(file_item.remote_item.path.as_str())) {
         Ok(mut file) => {
             if let Some(lp) = file_item.get_local_path() {
                 match write_to_file(&mut file, lp) {
