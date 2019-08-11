@@ -68,7 +68,7 @@ impl Highlighter for MyHelper {
 
 impl Helper for MyHelper {}
 
-fn main() {
+fn main_client() {
     // env_logger::init();
     let config = Config::builder()
         .history_ignore_space(true)
@@ -120,4 +120,8 @@ fn main() {
         count += 1;
     }
     rl.save_history("history.txt").unwrap();
+}
+
+fn main() {
+    main_client();
 }

@@ -2,6 +2,7 @@
 # sudo apt-get install openssh-server
 # change virtualbox network to host-only.
 # E:\Program Files\Oracle\VirtualBox>
+# .\VBoxManage.exe modifyvm "ubuntubionic" --natdnshostresolver1 on
 # sudo apt install pkg-config, sudo apt install libssl-dev
 
 ssh_client:
