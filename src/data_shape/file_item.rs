@@ -192,6 +192,8 @@ mod tests {
     fn t_from_path() {
         log_util::setup_logger(vec![""], vec![]).expect("log should init.");
         let rd = RemoteFileItemDir::load_dir("fixtures");
+        let json_str = serde_json::to_string(&rd).expect("deserialize should success.");
+        println!("{:?}", json_str);
         assert_eq!(rd.items.len(), 4_usize);
     }
 }
