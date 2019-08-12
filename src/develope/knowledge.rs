@@ -3,7 +3,7 @@ mod tests {
     use std::path::PathBuf;
 use super::super::super::log_util;
     use super::super::develope_data;
-    use crate::actions::{copy_a_file, write_to_file};
+    use crate::actions::{copy_a_file, write_stream_to_file};
     use crate::data_shape::{FileItem, RemoteFileItem};
     use failure;
     use log::*;
@@ -113,7 +113,7 @@ use super::super::super::log_util;
         let (_tcp, sess, _dev_env) = develope_data::connect_to_ubuntu();
         let mut channel: ssh2::Channel = sess.channel_session().unwrap();
         channel.exec("ls").unwrap();
-        write_to_file(&mut channel, "not_in_git/t.txt")?;
+        write_stream_to_file(&mut channel, "not_in_git/t.txt")?;
         Ok(())
     }
 

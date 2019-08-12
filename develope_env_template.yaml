@@ -4,6 +4,7 @@
 # E:\Program Files\Oracle\VirtualBox>
 # .\VBoxManage.exe modifyvm "ubuntubionic" --natdnshostresolver1 on
 # sudo apt install pkg-config, sudo apt install libssl-dev
+# https://mirrors.sjtug.sjtu.edu.cn/git/crates.io-index/
 
 ssh_client:
     id_rsa: C:\Users\Administrator\.ssh\id_rsa
@@ -14,3 +15,4 @@ servers:
     username: osboxes
     test_dirs:
       aatxt: /home/osboxes/aa.txt
+      linux_remote_item_dir: /home/osboxes//ws/ssh-client-demo/fixtures/linux_remote_item_dir.json

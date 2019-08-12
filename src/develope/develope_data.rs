@@ -19,6 +19,7 @@ pub struct SshClientParams {
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct TestDirs {
     pub aatxt: String,
+    pub linux_remote_item_dir: String,
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]

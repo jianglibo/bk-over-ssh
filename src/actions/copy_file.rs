@@ -8,7 +8,7 @@ use std::path::Path;
 use std::time::Instant;
 use sha1::{Sha1, Digest};
 
-pub fn write_to_file<T: AsRef<OsStr>>(
+pub fn write_stream_to_file<T: AsRef<OsStr>>(
     from: &mut impl std::io::Read,
     to_file: T,
 ) -> Result<(u64, String), failure::Error> {
@@ -30,6 +30,15 @@ pub fn write_to_file<T: AsRef<OsStr>>(
         }
     }
     Ok((length, format!("{:X}", hasher.result())))
+}
+
+pub fn write_str_to_file(content: impl AsRef<str>, to_file: impl AsRef<OsStr>) -> Result<(), failure::Error> {
+    let mut wf = fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .open(to_file.as_ref())?;
+        wf.write_all(content.as_ref().as_bytes());
+        Ok(())
 }
 
 pub fn hash_file_sha1(file_name: impl AsRef<Path>) -> Option<String> {
@@ -85,7 +94,7 @@ pub fn copy_a_file(
     match sftp.open(Path::new(file_item.remote_item.path.as_str())) {
         Ok(mut file) => {
             if let Some(lp) = file_item.get_local_path() {
-                match write_to_file(&mut file, lp) {
+                match write_stream_to_file(&mut file, lp) {
                     Ok((length, sha1)) => {
                         file_item.len = length;
                         file_item.sha1.replace(sha1);

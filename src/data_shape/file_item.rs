@@ -157,6 +157,7 @@ impl FileItem {
 mod tests {
     use super::*;
     use crate::log_util;
+    use crate::actions::write_str_to_file;
 
     #[test]
     fn deserialize_file_item() {
@@ -191,7 +192,9 @@ mod tests {
     #[test]
     fn t_from_path() {
         log_util::setup_logger(vec![""], vec![]).expect("log should init.");
-        let rd = RemoteFileItemDir::load_dir("fixtures");
-        assert_eq!(rd.items.len(), 4_usize);
+        let rd = RemoteFileItemDir::load_dir("fixtures/adir");
+        let json_str = serde_json::to_string_pretty(&rd).expect("deserialize should success");
+        write_str_to_file(json_str, "fixtures/linux_remote_item_dir.json").expect("should success.");
+        assert_eq!(rd.items.len(), 5_usize);
     }
 }
