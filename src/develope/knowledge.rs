@@ -75,8 +75,8 @@ use super::super::super::log_util;
             sftp.open(Path::new(&dev_env.servers.ubuntu18.test_dirs.aatxt))?;
         let mut buf = String::new();
         file.read_to_string(&mut buf)?;
-        assert_eq!(buf, "hello\nworld\n");
-        assert_eq!(buf.len(), 12);
+        assert_eq!(buf, "hello\nworld");
+        assert_eq!(buf.len(), 11);
         info!("{:?}", buf);
         Ok(())
     }
