@@ -86,31 +86,30 @@ pub fn visit_dirs(dir: &Path, cb: &Fn(&fs::DirEntry)) -> io::Result<()> {
     Ok(())
 }
 
-pub fn copy_a_file(
+pub fn copy_a_file<'a>(
     session: &mut ssh2::Session,
-    mut file_item: FileItem,
-) -> FileItem {
+    mut file_item: FileItem<'a>,
+) -> FileItem<'a> {
     let sftp = session.sftp().expect("should got sfpt instance.");
-    match sftp.open(Path::new(file_item.remote_item.path.as_str())) {
+    match sftp.open(Path::new(file_item.remote_item.get_path())) {
         Ok(mut file) => {
-            if let Some(lp) = file_item.get_local_path() {
+            if let Some(lp) = file_item.get_path() {
                 match write_stream_to_file(&mut file, lp) {
                     Ok((length, sha1)) => {
-                        file_item.len = length;
-                        file_item.sha1.replace(sha1);
+                        file_item.set_len(length);
+                        file_item.set_sha1(sha1);
                     }
                     Err(err) => {
-                        file_item.fail_reason.replace(format!("{:?}", err));
+                        file_item.set_fail_reason(format!("{:?}", err));
                     }
                 }
             } else {
                 file_item
-                    .fail_reason
-                    .replace("get_local_path failed.".to_string());
+                    .set_fail_reason("missing local path.");
             }
         }
         Err(err) => {
-            file_item.fail_reason.replace(format!("{:?}", err));
+            file_item.set_fail_reason(format!("{:?}", err));
         }
     }
     file_item

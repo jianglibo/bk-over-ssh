@@ -4,7 +4,7 @@ mod tests {
 use super::super::super::log_util;
     use super::super::develope_data;
     use crate::actions::{copy_a_file, write_stream_to_file};
-    use crate::data_shape::{FileItem, RemoteFileItem};
+    use crate::data_shape::{FileItem, RemoteFileItem, RemoteFileItemDir};
     use failure;
     use log::*;
     use ssh2::{self, Session};
@@ -85,9 +85,12 @@ use super::super::super::log_util;
     fn t_sftp_resume_file() -> Result<(), failure::Error> {
         log_util::setup_logger(vec![""], vec![]).expect("log should init.");
         let (_tcp, mut sess, dev_env) = develope_data::connect_to_ubuntu();
-        let file_item = FileItem::new(RemoteFileItem::new(
-            dev_env.servers.ubuntu18.test_dirs.aatxt.as_str(),
-        ));
+        let values = RemoteFileItemDir::load_dir_to_tuple("fixtures/adir");
+        let rd = RemoteFileItemDir::load_from_tuple_vec("fixtures/adir", &values);
+        let remote_item = rd.get_items().iter()
+            .find(|ri|ri.get_path().ends_with("鮮やか")).expect("must have at least one.");
+        // let remote_item = RemoteFileItemDir::load_dir("fixtures/adir").take_items().next().expect("must have at least one.");
+        let file_item = FileItem::new("not_in_git", &remote_item);
         // FileItemBuilder::default()
         // .sha1("58853E8A5E8272B1012F9A52A80758B27BD0D3CB")
         // .remote_path(dev_env.servers.ubuntu18.test_dirs.aatxt.as_str())
@@ -96,13 +99,13 @@ use super::super::super::log_util;
         // .expect("should create file item.");
         let file_item = copy_a_file(&mut sess, file_item);
         info!("{:?}", file_item);
-        assert_eq!(file_item.len, 12);
-        assert_eq!(file_item.len, file_item.remote_item.len);
+        assert_eq!(file_item.get_len(), 11);
+        assert_eq!(file_item.get_len(), file_item.remote_item.get_len());
         assert_eq!(
-            file_item.remote_item.sha1,
-            file_item.sha1
+            file_item.remote_item.get_sha1(),
+            file_item.get_sha1()
         );
-        assert_eq!(file_item.get_local_path(), Some(OsStr::new("aa.txt")));
+        assert_eq!(file_item.get_path(), Some("aa.txt"));
         Ok(())
     }
 
@@ -132,7 +135,7 @@ use super::super::super::log_util;
     fn t_walkdir() {
         let base_path = Path::new("f:/迅雷下载")
             .canonicalize()
-            .expect("success");
+            .expect("should open dir to walk.");
         WalkDir::new(&base_path)
             .follow_links(false)
             .into_iter()
