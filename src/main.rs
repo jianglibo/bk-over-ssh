@@ -1,5 +1,6 @@
 #[macro_use]
 extern crate derive_builder;
+#[macro_use] extern crate failure;
 mod actions;
 mod data_shape;
 mod develope;

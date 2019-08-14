@@ -1,10 +1,9 @@
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-use super::super::super::log_util;
+    use super::super::super::log_util;
     use super::super::develope_data;
-    use crate::actions::{copy_a_file, write_stream_to_file};
-    use crate::data_shape::{FileItem, RemoteFileItem, RemoteFileItemDir};
+    use crate::actions::{copy_a_file, copy_a_file_item, write_stream_to_file};
+    use crate::data_shape::{FileItem, RemoteFileItem, RemoteFileItemDir, RemoteFileItemDirOwned};
     use failure;
     use log::*;
     use ssh2::{self, Session};
@@ -12,6 +11,7 @@ use super::super::super::log_util;
     use std::io::prelude::*;
     use std::net::TcpStream;
     use std::path::Path;
+    use std::path::PathBuf;
     use walkdir::WalkDir;
 
     #[test]
@@ -85,10 +85,13 @@ use super::super::super::log_util;
     fn t_sftp_resume_file() -> Result<(), failure::Error> {
         log_util::setup_logger(vec![""], vec![]).expect("log should init.");
         let (_tcp, mut sess, dev_env) = develope_data::connect_to_ubuntu();
-        let values = RemoteFileItemDir::load_dir_to_tuple("fixtures/adir");
-        let rd = RemoteFileItemDir::load_from_tuple_vec("fixtures/adir", &values);
-        let remote_item = rd.get_items().iter()
-            .find(|ri|ri.get_path().ends_with("鮮やか")).expect("must have at least one.");
+        let rdo = RemoteFileItemDirOwned::load_path("fixtures/adir");
+        let rd: RemoteFileItemDir = (&rdo).into();
+        let remote_item = rd
+            .get_items()
+            .iter()
+            .find(|ri| ri.get_path().ends_with("鮮やか"))
+            .expect("must have at least one.");
         // let remote_item = RemoteFileItemDir::load_dir("fixtures/adir").take_items().next().expect("must have at least one.");
         let file_item = FileItem::new("not_in_git", &remote_item);
         // FileItemBuilder::default()
@@ -97,15 +100,12 @@ use super::super::super::log_util;
         // .len(12_u64)
         // .build()
         // .expect("should create file item.");
-        let file_item = copy_a_file(&mut sess, file_item);
+        let file_item = copy_a_file_item(&mut sess, file_item);
         info!("{:?}", file_item);
         assert_eq!(file_item.get_len(), 11);
         assert_eq!(file_item.get_len(), file_item.remote_item.get_len());
-        assert_eq!(
-            file_item.remote_item.get_sha1(),
-            file_item.get_sha1()
-        );
-        assert_eq!(file_item.get_path(), Some("aa.txt"));
+        assert_eq!(file_item.remote_item.get_sha1(), file_item.get_sha1());
+        assert_eq!(file_item.get_path(), "aa.txt");
         Ok(())
     }
 
@@ -143,9 +143,8 @@ use super::super::super::log_util;
             .filter(|d| d.file_type().is_file())
             .filter_map(|d| d.path().canonicalize().ok())
             .filter_map(|d| {
-                d.strip_prefix(&base_path)
-                    .ok().map(|d|d.to_path_buf())
-                    // .map(|dd| dd.to_str().map(|s| s.to_string()))
+                d.strip_prefix(&base_path).ok().map(|d| d.to_path_buf())
+                // .map(|dd| dd.to_str().map(|s| s.to_string()))
             })
             .for_each(|d| println!("{:?}", d.to_str()));
         // assert_eq!(WalkDir::new("f:/").into_iter().filter_map(|e| e.ok()).count(), 33);

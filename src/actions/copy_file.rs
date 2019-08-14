@@ -1,4 +1,4 @@
-use super::super::data_shape::FileItem;
+use super::super::data_shape::{FileItem, RemoteFileItem};
 use log::*;
 use ssh2;
 use std::ffi::OsStr;
@@ -86,14 +86,29 @@ pub fn visit_dirs(dir: &Path, cb: &Fn(&fs::DirEntry)) -> io::Result<()> {
     Ok(())
 }
 
-pub fn copy_a_file<'a>(
+// https://stackoverflow.com/questions/32300132/why-cant-i-store-a-value-and-a-reference-to-that-value-in-the-same-struct
+
+pub fn copy_a_file<'a>(session: &mut ssh2::Session, remote_path: &'a str, local_path: &'a str) -> Result<(), failure::Error> {
+    let ri = RemoteFileItem::new(remote_path);
+    let fi = FileItem::standalone(local_path, &ri);
+    let r = copy_a_file_item(session, fi);
+
+    if let Some(err) = r.get_fail_reason() {
+        bail!(err.clone())
+    } else {
+        Ok(())
+    }
+}
+
+pub fn copy_a_file_item<'a>(
     session: &mut ssh2::Session,
     mut file_item: FileItem<'a>,
 ) -> FileItem<'a> {
     let sftp = session.sftp().expect("should got sfpt instance.");
     match sftp.open(Path::new(file_item.remote_item.get_path())) {
         Ok(mut file) => {
-            if let Some(lp) = file_item.get_path() {
+            // if let Some(lp) = file_item.get_path() {
+                let lp = file_item.get_path();
                 match write_stream_to_file(&mut file, lp) {
                     Ok((length, sha1)) => {
                         file_item.set_len(length);
@@ -103,10 +118,10 @@ pub fn copy_a_file<'a>(
                         file_item.set_fail_reason(format!("{:?}", err));
                     }
                 }
-            } else {
-                file_item
-                    .set_fail_reason("missing local path.");
-            }
+            // } else {
+            //     file_item
+            //         .set_fail_reason("missing local path.");
+            // }
         }
         Err(err) => {
             file_item.set_fail_reason(format!("{:?}", err));
