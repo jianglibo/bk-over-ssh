@@ -15,7 +15,8 @@ pub struct FileItemDir<'a> {
 }
 
 impl<'a> FileItemDir<'a> {
-    pub fn new(base_dir: &'a Path, remote_dir: RemoteFileItemDir<'a>) -> Self {
+    pub fn new(base_dir: &'a Path, mut remote_dir: RemoteFileItemDir<'a>) -> Self {
+        remote_dir.fill_base_dir();
         Self {
             base_dir,
             remote_dir,
@@ -44,7 +45,6 @@ impl<'a> FileItemDir<'a> {
 pub struct FileItem<'a> {
     pub remote_item: &'a RemoteFileItem<'a>,
     base_dir: &'a Path,
-    // path: String,
     sha1: Option<String>,
     len: u64,
     fail_reason: Option<String>,
@@ -137,7 +137,7 @@ mod tests {
 
     #[test]
     fn t_from_path() {
-        log_util::setup_logger(vec![""], vec![]).expect("log should init.");
+        log_util::setup_logger(vec![""], vec![]);
         let rdo = RemoteFileItemDirOwned::load_path("fixtures/adir");
         let rd: RemoteFileItemDir = (&rdo).into();
         let json_str = serde_json::to_string_pretty(&rd).expect("deserialize should success");
@@ -149,7 +149,7 @@ mod tests {
 
     #[test]
     fn t_download_remote_dir() {
-        log_util::setup_logger(vec![""], vec![]).expect("log should init.");
+        log_util::setup_logger(vec![""], vec![]);
         let mut buffer = String::new();
         fs::File::open("fixtures/linux_remote_item_dir.json")
             .expect("success.")

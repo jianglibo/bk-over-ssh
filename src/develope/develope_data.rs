@@ -54,11 +54,11 @@ pub fn create_connected_session(
     ssh_client: &SshClientParams,
 ) -> (TcpStream, Session) {
     info!("{:?}", server);
-    let tcp = TcpStream::connect(&server.host).unwrap();
-    let mut sess = Session::new().unwrap();
-    sess.handshake(&tcp).unwrap();
+    let tcp = TcpStream::connect(&server.host).expect("tpc connect should success.");
+    let mut sess = Session::new().expect("new session should created.");
+    sess.handshake(&tcp).expect("handshake should success.");
 
-    info!("{:?}", sess.auth_methods(&server.username).unwrap());
+    info!("{:?}", sess.auth_methods(&server.username).expect("should print auth_methods."));
     sess.userauth_pubkey_file(
         &server.username,
         ssh_client.id_rsa_pub.as_ref().map(|p| Path::new(p)),

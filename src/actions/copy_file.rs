@@ -46,7 +46,7 @@ pub fn write_str_to_file(
         .create(true)
         .write(true)
         .open(to_file.as_ref())?;
-    wf.write_all(content.as_ref().as_bytes());
+    wf.write_all(content.as_ref().as_bytes())?;
     Ok(())
 }
 
@@ -125,7 +125,7 @@ pub fn copy_a_file_item<'a>(
         return file_item;
     }
     let sftp = session.sftp().expect("should got sfpt instance.");
-    match sftp.open(Path::new(file_item.remote_item.get_path())) {
+    match sftp.open(Path::new(&file_item.remote_item.get_path())) {
         Ok(mut file) => {
             let lpo = file_item.get_path();
             if let Some(lp) = lpo.as_ref().map(|ss|ss.as_str()) {
@@ -169,7 +169,7 @@ mod tests {
 
     #[test]
     fn t_copy_a_file() -> Result<(), failure::Error> {
-        log_util::setup_logger(vec![""], vec![]).expect("log should init.");
+        log_util::setup_logger(vec![""], vec![]);
         let (_tcp, mut sess, dev_env) = develope_data::connect_to_ubuntu();
         let lpn = "not_in_git/xx.txt";
         let lp = Path::new(lpn);

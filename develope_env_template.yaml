@@ -6,6 +6,7 @@
 # sudo apt install pkg-config libssl-dev
 # https://mirrors.sjtug.sjtu.edu.cn/git/crates.io-index/
 # https://docs.microsoft.com/en-us/windows/wsl/user-support
+# https://docs.microsoft.com/en-us/windows/wsl/wsl2-install
 
 # New-NetFirewallRule -DisplayName 'wsl sshd 2222' -Profile @('Domain', 'Private') -Direction Inbound -Action Allow -Protocol TCP -LocalPort @('2222')
 

@@ -28,7 +28,7 @@ mod tests {
 
     #[test]
     fn t_main_pubkey() {
-        log_util::setup_logger(vec![""], vec![]).expect("log should init.");
+        log_util::setup_logger(vec![""], vec![]);
         let (tcp, sess, dev_env) = develope_data::connect_to_ubuntu();
         assert!(sess.authenticated());
     }
@@ -52,7 +52,7 @@ mod tests {
     }
     #[test]
     fn t_scp_file() {
-        log_util::setup_logger(vec![""], vec![]).expect("log should init.");
+        log_util::setup_logger(vec![""], vec![]);
         let (tcp, sess, dev_env) = develope_data::connect_to_ubuntu();
         info!("{:?}", tcp);
         let (mut remote_file, stat) = sess
@@ -66,7 +66,7 @@ mod tests {
 
     #[test]
     fn t_sftp_file() -> Result<(), failure::Error> {
-        log_util::setup_logger(vec![""], vec![]).expect("log should init.");
+        log_util::setup_logger(vec![""], vec![]);
         let (tcp, sess, dev_env) = develope_data::connect_to_ubuntu();
         info!("{:?}", tcp);
         let sftp = sess.sftp().expect("should got sfpt instance.");
@@ -83,7 +83,7 @@ mod tests {
 
     #[test]
     fn t_sftp_resume_file() -> Result<(), failure::Error> {
-        log_util::setup_logger(vec![""], vec![]).expect("log should init.");
+        log_util::setup_logger(vec![""], vec![]);
         let (_tcp, mut sess, dev_env) = develope_data::connect_to_ubuntu();
         let rdo = RemoteFileItemDirOwned::load_path("fixtures/adir");
         let rd: RemoteFileItemDir = (&rdo).into();
@@ -111,7 +111,7 @@ mod tests {
 
     #[test]
     fn t_channel_1() -> Result<(), failure::Error> {
-        log_util::setup_logger(vec![""], vec![]).expect("log should init.");
+        log_util::setup_logger(vec![""], vec![]);
 
         let (_tcp, sess, _dev_env) = develope_data::connect_to_ubuntu();
         let mut channel: ssh2::Channel = sess.channel_session().unwrap();
