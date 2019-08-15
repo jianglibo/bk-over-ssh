@@ -9,7 +9,7 @@ use walkdir::WalkDir;
 pub struct RemoteFileItemDir<'a> {
     pub base_path: Option<&'a str>,
     #[serde(borrow)]
-    _items: Vec<RemoteFileItem<'a>>,
+    items: Vec<RemoteFileItem<'a>>,
 }
 
 impl<'a> RemoteFileItemDir<'a> {
@@ -17,29 +17,20 @@ impl<'a> RemoteFileItemDir<'a> {
     pub fn new() -> Self {
         Self {
             base_path: None,
-            _items: Vec::new(),
+            items: Vec::<RemoteFileItem<'a>>::new(),
         }
     }
 
     pub fn get_items(&self) -> &Vec<RemoteFileItem<'a>> {
-        &self._items
+        &self.items
     }
-
-    // pub fn load_from_owned_items(dir_path: impl AsRef<Path>, tuple_vec: &'a Vec<RemoteFileItemOwned>) -> Self {
-    //     let bp = Path::new(dir_path.as_ref()).canonicalize().expect("canonicalize should success.");
-    //     let its = tuple_vec.iter().map(Into::into).collect::<Vec<RemoteFileItem<'a>>>();
-    //     Self {
-    //         base_path: Some(bp.to_string_lossy().to_string()),
-    //         _items: its,
-    //     }
-    // }
 }
 
 impl<'a> std::convert::From<&'a RemoteFileItemDirOwned> for RemoteFileItemDir<'a> {
     fn from(rfio: &'a RemoteFileItemDirOwned) -> Self {
         Self {
             base_path: rfio.base_path.as_ref().map(|ss|ss.as_str()),
-            _items: rfio.items.iter().map(Into::into).collect::<>(),
+            items: rfio.items.iter().map(Into::into).collect::<>(),
         }
     }
 }
@@ -153,10 +144,10 @@ impl<'a> RemoteFileItem<'a> {
         self.sha1
     }
 
-    pub fn calculate_local_path(&self, local_dir: impl AsRef<str>) -> Option<String> {
-        let path = Path::new(local_dir.as_ref());
-        path.join(&self.path).to_str().map(|s| s.to_string())
-    }
+    // pub fn calculate_local_path(&self, local_dir: impl AsRef<str>) -> Option<String> {
+    //     let path = Path::new(local_dir.as_ref());
+    //     path.join(&self.path).to_str().map(|s| s.to_string())
+    // }
 }
 
 

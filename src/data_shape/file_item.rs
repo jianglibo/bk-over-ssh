@@ -1,83 +1,89 @@
-use crate::actions::hash_file_sha1;
+use super::{RemoteFileItem, RemoteFileItemDir, RemoteFileItemDirOwned};
+use crate::actions::{copy_a_file_item, hash_file_sha1};
 use log::*;
 use serde::{Deserialize, Serialize};
+use ssh2;
 use std::ffi::OsStr;
 use std::iter::Iterator;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
-use super::{RemoteFileItem, RemoteFileItemDir, RemoteFileItemDirOwned};
-// use std::marker::PhantomData;
 
 #[derive(Debug)]
 pub struct FileItemDir<'a> {
-    pub base_path: &'a str,
+    pub base_dir: &'a Path,
     remote_dir: RemoteFileItemDir<'a>,
-    // items: Vec<FileItem<'a>>,
 }
 
 impl<'a> FileItemDir<'a> {
-    pub fn new(base_path: &'static str, remote_dir: RemoteFileItemDir<'a>) -> Self {
+    pub fn new(base_dir: &'a Path, remote_dir: RemoteFileItemDir<'a>) -> Self {
         Self {
-            base_path: base_path,
+            base_dir,
             remote_dir,
-            // items: remote_dir
-            //     ._items
-            //     .iter()
-            //     .map(|ri| FileItem::new(base_path.as_ref(), ri))
-            //     .collect(),
         }
     }
 
-    pub fn download_remote(&mut self) {
-
+    pub fn download_files(&self, session: &mut ssh2::Session) -> (u64, u64) {
+        self.remote_dir
+            .get_items()
+            .iter()
+            .map(|ri| FileItem::new(self.base_dir, ri))
+            .map(|fi| copy_a_file_item(session, fi))
+            .fold((0_u64, 0_u64), |(mut successed, mut failed), fi| {
+                if fi.fail_reason.is_some() {
+                    error!("copy_a_file_item failed: {:?}", fi);
+                    failed += 1;
+                } else {
+                    successed += 1;
+                }
+                (successed, failed)
+            })
     }
 }
-
 
 #[derive(Debug)]
 pub struct FileItem<'a> {
     pub remote_item: &'a RemoteFileItem<'a>,
-    path: String,
+    base_dir: &'a Path,
+    // path: String,
     sha1: Option<String>,
     len: u64,
     fail_reason: Option<String>,
 }
 
 impl<'a> FileItem<'a> {
-
-    pub fn standalone(file_path: impl AsRef<str> + 'a, remote_item: &'a RemoteFileItem) -> Self {
+    pub fn standalone(file_path: &'a Path, remote_item: &'a RemoteFileItem) -> Self {
         Self {
             remote_item,
-            path: file_path.as_ref().to_string(),
+            base_dir: file_path,
             sha1: None,
             len: 0_u64,
             fail_reason: None,
         }
     }
-    pub fn new(local_dir: impl AsRef<str>, remote_item: &'a RemoteFileItem) -> Self {
-        if let Some(path) = remote_item.calculate_local_path(local_dir) {
-            Self {
-                remote_item,
-                path,
-                sha1: None,
-                len: 0_u64,
-                fail_reason: None,
-            }
-        } else {
-            Self {
-                remote_item,
-                path: String::from(""),
-                sha1: None,
-                len: 0_u64,
-                fail_reason: Some("calculate_local_path failed.".to_string()),
-            }
+    pub fn new(base_dir: &'a Path, remote_item: &'a RemoteFileItem) -> Self {
+        Self {
+            remote_item,
+            base_dir,
+            sha1: None,
+            len: 0_u64,
+            fail_reason: None,
         }
     }
 }
 
 impl<'a> FileItem<'a> {
-    pub fn get_path(&self) -> &str {
-        self.path.as_str()
+    pub fn get_path(&self) -> Option<String> {
+        match self
+            .base_dir
+            .join(self.remote_item.get_path())
+            .canonicalize()
+        {
+            Ok(path) => path.to_str().map(|s| s.to_string()),
+            Err(err) => {
+                error!("join path failed: {:?}", err);
+                None
+            }
+        }
     }
 
     pub fn get_len(&self) -> u64 {
@@ -89,7 +95,7 @@ impl<'a> FileItem<'a> {
     }
 
     pub fn get_sha1(&self) -> Option<&str> {
-        self.sha1.as_ref().map(|s|s.as_str())
+        self.sha1.as_ref().map(|s| s.as_str())
     }
 
     pub fn set_sha1(&mut self, sha1: impl AsRef<str>) {
@@ -103,27 +109,30 @@ impl<'a> FileItem<'a> {
     pub fn get_fail_reason(&self) -> Option<&String> {
         self.fail_reason.as_ref()
     }
-
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::log_util;
-    use crate::actions::write_str_to_file;
-    use std::io::prelude::{Read};
-    use log::*;
     use super::super::{RemoteFileItem, RemoteFileItemDir};
-
+    use super::*;
+    use crate::actions::write_str_to_file;
+    use crate::develope::develope_data;
+    use crate::log_util;
+    use log::*;
+    use std::fs;
+    use std::io::prelude::Read;
 
     #[test]
     fn new_file_item() {
         let rdo = RemoteFileItemDirOwned::load_path("fixtures/adir");
         let rd: RemoteFileItemDir = (&rdo).into();
-        let remote_item = rd.get_items().iter()
-            .find(|ri|ri.get_path().ends_with("鮮やか")).expect("must have at least one.");
-        let fi = FileItem::new("not_in_git", remote_item);
-        assert_eq!(fi.get_path(), "not_in_git/鮮やか");
+        let remote_item = rd
+            .get_items()
+            .iter()
+            .find(|ri| ri.get_path().ends_with("鮮やか"))
+            .expect("must have at least one.");
+        let fi = FileItem::new(Path::new("not_in_git"), remote_item);
+        assert_eq!(fi.get_path(), Some("not_in_git/鮮やか".to_string()));
     }
 
     #[test]
@@ -133,18 +142,32 @@ mod tests {
         let rd: RemoteFileItemDir = (&rdo).into();
         let json_str = serde_json::to_string_pretty(&rd).expect("deserialize should success");
         info!("{:?}", json_str);
-        write_str_to_file(json_str, "fixtures/linux_remote_item_dir.json").expect("should success.");
-        assert_eq!(rd.get_items().len(), 5_usize); 
+        write_str_to_file(json_str, "fixtures/linux_remote_item_dir.json")
+            .expect("should success.");
+        assert_eq!(rd.get_items().len(), 5_usize);
     }
 
     #[test]
     fn t_download_remote_dir() {
         log_util::setup_logger(vec![""], vec![]).expect("log should init.");
         let mut buffer = String::new();
-        std::fs::File::open("fixtures/linux_remote_item_dir.json").expect("success.").read_to_string(&mut buffer).expect("success.");
-        let remote_dir = serde_json::from_str::<RemoteFileItemDir>(&buffer).expect("deserialize should success");
+        fs::File::open("fixtures/linux_remote_item_dir.json")
+            .expect("success.")
+            .read_to_string(&mut buffer)
+            .expect("success.");
+        let remote_dir =
+            serde_json::from_str::<RemoteFileItemDir>(&buffer).expect("deserialize should success");
         info!("{:?}", remote_dir);
-        let local_dir = FileItemDir::new("not_in_git/local_dir", remote_dir);
+        let ldpn = "not_in_git/local_dir";
+        let ldp = Path::new(ldpn);
+        if ldp.exists() {
+            fs::remove_dir_all(ldpn).expect("remove all files under this directory.");
+        }
+        let local_dir = FileItemDir::new(ldp, remote_dir);
+        let (_tcp, mut sess, _dev_env) = develope_data::connect_to_ubuntu();
+        let (successed, failed) = local_dir.download_files(&mut sess);
+        assert_eq!(failed, 0_u64);
+        assert_eq!(successed, 10_u64);
     }
 
     #[test]

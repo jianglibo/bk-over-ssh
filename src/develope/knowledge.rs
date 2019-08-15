@@ -93,7 +93,7 @@ mod tests {
             .find(|ri| ri.get_path().ends_with("鮮やか"))
             .expect("must have at least one.");
         // let remote_item = RemoteFileItemDir::load_dir("fixtures/adir").take_items().next().expect("must have at least one.");
-        let file_item = FileItem::new("not_in_git", &remote_item);
+        let file_item = FileItem::new(Path::new("not_in_git"), &remote_item);
         // FileItemBuilder::default()
         // .sha1("58853E8A5E8272B1012F9A52A80758B27BD0D3CB")
         // .remote_path(dev_env.servers.ubuntu18.test_dirs.aatxt.as_str())
@@ -105,7 +105,7 @@ mod tests {
         assert_eq!(file_item.get_len(), 11);
         assert_eq!(file_item.get_len(), file_item.remote_item.get_len());
         assert_eq!(file_item.remote_item.get_sha1(), file_item.get_sha1());
-        assert_eq!(file_item.get_path(), "aa.txt");
+        assert_eq!(file_item.get_path(), Some("aa.txt".to_string()));
         Ok(())
     }
 

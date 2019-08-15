@@ -25,5 +25,5 @@ servers:
     host: 192.168.56.101:22
     username: osboxes
     test_dirs:
-      aatxt: /home/osboxes/aa.txt
-      linux_remote_item_dir: /home/osboxes//ws/ssh-client-demo/fixtures/linux_remote_item_dir.json
+      aatxt: /home/osboxes/ws/ssh-client-demo/fixtures/aa.txt
+      linux_remote_item_dir: /home/osboxes/ws/ssh-client-demo/fixtures/linux_remote_item_dir.json
