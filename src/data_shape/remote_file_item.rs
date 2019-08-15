@@ -68,9 +68,10 @@ impl RemoteFileItemDirOwned {
     }
 
     pub fn load_path(base_path: impl AsRef<Path>) -> Self {
-        let items = RemoteFileItemDirOwned::load_remote_item_owned(base_path.as_ref());
+        let ab = base_path.as_ref().canonicalize().expect("canonicalize remote_item_dir base_path should success.");
+        let items = RemoteFileItemDirOwned::load_remote_item_owned(&ab);
         Self {
-            base_path: base_path.as_ref().to_str().map(|s| s.to_string()),
+            base_path: ab.to_str().map(str::to_string),
             items,
         }
     }
@@ -138,13 +139,16 @@ impl<'a> RemoteFileItem<'a> {
         }
     }
 
-    pub fn get_path(&self) -> String {
+    pub fn get_path(&self) -> &'a str {
+        self.path
+    }
+
+    pub fn get_full_path(&self) -> String {
         if let Some(bp) = self.base_dir {
-            format!("{}/{}", bp, self.path)
+            format!("{}{}{}", bp, std::path::MAIN_SEPARATOR, self.path)
         } else {
             self.path.to_string()
         }
-        
     }
 
     pub fn get_len(&self) -> u64 {
@@ -154,11 +158,6 @@ impl<'a> RemoteFileItem<'a> {
     pub fn get_sha1(&self) -> Option<&str> {
         self.sha1
     }
-
-    // pub fn calculate_local_path(&self, local_dir: impl AsRef<str>) -> Option<String> {
-    //     let path = Path::new(local_dir.as_ref());
-    //     path.join(&self.path).to_str().map(|s| s.to_string())
-    // }
 }
 
 #[cfg(test)]

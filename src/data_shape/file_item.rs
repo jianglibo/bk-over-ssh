@@ -62,8 +62,8 @@ impl<'a> FileItem<'a> {
     }
     pub fn new(base_dir: &'a Path, remote_item: &'a RemoteFileItem) -> Self {
         Self {
-            remote_item,
             base_dir,
+            remote_item,
             sha1: None,
             len: 0_u64,
             fail_reason: None,
@@ -73,17 +73,11 @@ impl<'a> FileItem<'a> {
 
 impl<'a> FileItem<'a> {
     pub fn get_path(&self) -> Option<String> {
-        match self
+        let rp = self.remote_item.get_path();
+        self
             .base_dir
-            .join(self.remote_item.get_path())
-            .canonicalize()
-        {
-            Ok(path) => path.to_str().map(|s| s.to_string()),
-            Err(err) => {
-                error!("join path failed: {:?}", err);
-                None
-            }
-        }
+            .join(&rp)
+            .to_str().map(|s|s.to_string())
     }
 
     pub fn get_len(&self) -> u64 {
@@ -124,6 +118,7 @@ mod tests {
 
     #[test]
     fn new_file_item() {
+        log_util::setup_logger(vec![""], vec![]);
         let rdo = RemoteFileItemDirOwned::load_path("fixtures/adir");
         let rd: RemoteFileItemDir = (&rdo).into();
         let remote_item = rd
@@ -166,8 +161,16 @@ mod tests {
         let local_dir = FileItemDir::new(ldp, remote_dir);
         let (_tcp, mut sess, _dev_env) = develope_data::connect_to_ubuntu();
         let (successed, failed) = local_dir.download_files(&mut sess);
+        info!("{:?}", local_dir);
         assert_eq!(failed, 0_u64);
-        assert_eq!(successed, 10_u64);
+        assert_eq!(successed, 5_u64);
+    }
+
+    #[test]
+    fn t_join_path() {
+        let p1 = Path::new("not_in_git");
+        let p2 = p1.join("鮮やか");
+        assert_eq!(p2, Path::new("not_in_git/鮮やか"));
     }
 
     #[test]

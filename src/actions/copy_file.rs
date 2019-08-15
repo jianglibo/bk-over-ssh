@@ -12,6 +12,7 @@ pub fn write_stream_to_file<T: AsRef<Path>>(
     from: &mut impl std::io::Read,
     to_file: T,
 ) -> Result<(u64, String), failure::Error> {
+    info!("trying to write to file: {:?}", to_file.as_ref());
     let mut u8_buf = [0; 1024];
     let mut length = 0_u64;
     let mut hasher = Sha1::new();
@@ -21,10 +22,7 @@ pub fn write_stream_to_file<T: AsRef<Path>>(
             fs::create_dir_all(pp);
         }
     }
-    let mut wf = fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .open(path)?;
+    let mut wf = fs::OpenOptions::new().create(true).write(true).open(path)?;
     loop {
         match from.read(&mut u8_buf[..]) {
             Ok(n) if n > 0 => {
@@ -35,6 +33,7 @@ pub fn write_stream_to_file<T: AsRef<Path>>(
             _ => break,
         }
     }
+    ensure!(path.exists(), "write_stream_to_file should be done.");
     Ok((length, format!("{:X}", hasher.result())))
 }
 
@@ -125,23 +124,23 @@ pub fn copy_a_file_item<'a>(
         return file_item;
     }
     let sftp = session.sftp().expect("should got sfpt instance.");
-    match sftp.open(Path::new(&file_item.remote_item.get_path())) {
+    match sftp.open(Path::new(&file_item.remote_item.get_full_path())) {
         Ok(mut file) => {
             let lpo = file_item.get_path();
-            if let Some(lp) = lpo.as_ref().map(|ss|ss.as_str()) {
-            match write_stream_to_file(&mut file, lp) {
-                Ok((length, sha1)) => {
-                    file_item.set_len(length);
-                    file_item.set_sha1(sha1);
+            if let Some(lp) = lpo.as_ref().map(String::as_str) {
+                match write_stream_to_file(&mut file, lp) {
+                    Ok((length, sha1)) => {
+                        file_item.set_len(length);
+                        file_item.set_sha1(sha1);
+                    }
+                    Err(err) => {
+                        file_item
+                            .set_fail_reason(format!("write_stream_to_file failed: {:?}", err));
+                    }
                 }
-                Err(err) => {
-                    file_item.set_fail_reason(format!("write_stream_to_file failed: {:?}", err));
-                }
-            }
             } else {
                 file_item.set_fail_reason("file_item get_path failed.");
-            } 
-
+            }
         }
         Err(err) => {
             file_item.set_fail_reason(format!("sftp open failed: {:?}", err));

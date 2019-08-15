@@ -1,5 +1,5 @@
 {
-  "base_path": "fixtures/adir",
+  "base_path": "/home/jianglibo/ws/ssh-client-demo/fixtures/adir",
   "items": [
     {
       "path": "a.txt",
