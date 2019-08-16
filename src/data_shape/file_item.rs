@@ -1,17 +1,30 @@
 use super::{RemoteFileItem, RemoteFileItemDir, RemoteFileItemDirOwned};
-use crate::actions::{copy_a_file_item, hash_file_sha1};
+use crate::actions::{copy_a_file_item};
 use log::*;
-use serde::{Deserialize, Serialize};
 use ssh2;
-use std::ffi::OsStr;
 use std::iter::Iterator;
-use std::path::{Path, PathBuf};
-use walkdir::WalkDir;
+use std::path::{Path};
+use std::io::prelude::Read;
+use std::{io, fs};
 
 #[derive(Debug)]
 pub struct FileItemDir<'a> {
     pub base_dir: &'a Path,
     remote_dir: RemoteFileItemDir<'a>,
+}
+
+pub fn download_dirs<'a>(session: &mut ssh2::Session, json_file: impl AsRef<str> + 'a, out: impl AsRef<str> + 'a) -> Result<(), failure::Error> {
+    let rf = fs::OpenOptions::new()
+        .open(json_file.as_ref())?;
+    let mut reader = io::BufReader::new(rf);
+    let mut content = String::new();
+    reader.read_to_string(&mut content)?;
+    let rds: Vec<RemoteFileItemDir<'_>> = serde_json::from_str(content.as_str())?;
+    for rd in rds {
+        let fid = FileItemDir::new(Path::new(out.as_ref()), rd);
+        fid.download_files(session);
+    }
+    Ok(())
 }
 
 impl<'a> FileItemDir<'a> {
@@ -51,6 +64,7 @@ pub struct FileItem<'a> {
 }
 
 impl<'a> FileItem<'a> {
+    #[allow(dead_code)]
     pub fn standalone(file_path: &'a Path, remote_item: &'a RemoteFileItem) -> Self {
         Self {
             remote_item,
@@ -119,7 +133,7 @@ mod tests {
     #[test]
     fn new_file_item() {
         log_util::setup_logger(vec![""], vec![]);
-        let rdo = RemoteFileItemDirOwned::load_path("fixtures/adir");
+        let rdo = RemoteFileItemDirOwned::load_dir("fixtures/adir");
         let rd: RemoteFileItemDir = (&rdo).into();
         let remote_item = rd
             .get_items()
@@ -133,7 +147,7 @@ mod tests {
     #[test]
     fn t_from_path() {
         log_util::setup_logger(vec![""], vec![]);
-        let rdo = RemoteFileItemDirOwned::load_path("fixtures/adir");
+        let rdo = RemoteFileItemDirOwned::load_dir("fixtures/adir");
         let rd: RemoteFileItemDir = (&rdo).into();
         let json_str = serde_json::to_string_pretty(&rd).expect("deserialize should success");
         info!("{:?}", json_str);
@@ -181,8 +195,8 @@ mod tests {
         assert_eq!(c, String::from("ab"));
         assert_eq!(a, "a");
 
-        let aa = String::from("a");
-        let bb = String::from("b");
+        let _aa = String::from("a");
+        let _bb = String::from("b");
 
         // let cc = [&aa, bb].concat();
         // assert_eq!(cc, String::from("ab"));

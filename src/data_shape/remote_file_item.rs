@@ -1,9 +1,10 @@
-use crate::actions::hash_file_sha1;
+use crate::actions::{hash_file_sha1, write_str_to_file};
 use log::*;
 use serde::{Deserialize, Serialize};
 use std::iter::Iterator;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
+use std::{fs};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct RemoteFileItemDir<'a> {
@@ -13,6 +14,7 @@ pub struct RemoteFileItemDir<'a> {
 }
 
 impl<'a> RemoteFileItemDir<'a> {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self {
             base_path: None,
@@ -67,7 +69,7 @@ impl RemoteFileItemDirOwned {
         }
     }
 
-    pub fn load_path(base_path: impl AsRef<Path>) -> Self {
+    pub fn load_dir(base_path: impl AsRef<Path>) -> Self {
         let ab = base_path.as_ref().canonicalize().expect("canonicalize remote_item_dir base_path should success.");
         let items = RemoteFileItemDirOwned::load_remote_item_owned(&ab);
         Self {
@@ -130,6 +132,7 @@ pub struct RemoteFileItem<'a> {
 }
 
 impl<'a> RemoteFileItem<'a> {
+    #[allow(dead_code)]
     pub fn new(path: &'a str) -> Self {
         Self {
             base_dir: None,
@@ -160,13 +163,22 @@ impl<'a> RemoteFileItem<'a> {
     }
 }
 
+pub fn load_dirs<'a>(dirs: impl Iterator<Item=&'a str>, out: &'a str) -> Result<(), failure::Error> {
+    let rdso = dirs.map(|dir|RemoteFileItemDirOwned::load_dir(dir)).collect::<Vec<RemoteFileItemDirOwned>>();
+    let rds = rdso.iter().map(Into::into).collect::<Vec<RemoteFileItemDir<'_>>>();
+    let wf = fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .open(out)?;
+    serde_json::to_writer(wf, &rds)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::actions::write_str_to_file;
     use crate::log_util;
-    use log::*;
-    use std::io::prelude::Read;
 
     #[test]
     fn deserialize_file_item() {
@@ -195,7 +207,7 @@ mod tests {
     #[test]
     fn t_from_path() {
         log_util::setup_logger(vec![""], vec![]);
-        let rdo = RemoteFileItemDirOwned::load_path("fixtures/adir");
+        let rdo = RemoteFileItemDirOwned::load_dir("fixtures/adir");
         let rd: RemoteFileItemDir = (&rdo).into();
         let json_str = serde_json::to_string_pretty(&rd).expect("deserialize should success");
         info!("{:?}", json_str);

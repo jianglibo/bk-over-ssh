@@ -21,6 +21,11 @@ sha-1 = "0.8.1"
 derive_builder =  "0.7.2"
 walkdir = "2"
 
+[dependencies.clap]
+version = "~2.33"
+default-features = false
+features = ["suggestions", "color", "yaml"]
+
 # [[bin]]
 # name = "mybin"
 # path = "src/main.rs"

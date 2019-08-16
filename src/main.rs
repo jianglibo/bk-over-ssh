@@ -1,6 +1,10 @@
 #[macro_use]
 extern crate derive_builder;
 #[macro_use] extern crate failure;
+
+#[macro_use]
+extern crate clap;
+
 mod actions;
 mod data_shape;
 mod develope;
@@ -14,6 +18,9 @@ use rustyline::error::ReadlineError;
 use rustyline::highlight::{Highlighter, MatchingBracketHighlighter};
 use rustyline::hint::{Hinter, HistoryHinter};
 use rustyline::{Cmd, CompletionType, Config, Context, EditMode, Editor, Helper, KeyPress};
+
+use data_shape::{load_dirs, download_dirs};
+use actions::{ssh_util};
 
 struct MyHelper {
     completer: FilenameCompleter,
@@ -124,5 +131,65 @@ fn main_client() {
 }
 
 fn main() {
-    main_client();
+    use clap::App;
+    use clap::ArgMatches;
+    use clap::Shell;
+    use std::io;
+
+    log_util::setup_logger(vec![""], vec![]);
+
+    let yml = load_yaml!("17_yaml.yml");
+    let app = App::from_yaml(yml);
+    let m: ArgMatches = app.get_matches();
+
+    let mut app1 = App::from_yaml(yml);
+
+    match m.subcommand() {
+        ("completions", Some(sub_matches)) => {
+            let shell = sub_matches.value_of("shell_name").unwrap();
+            app1.gen_completions_to(
+                "ssh-client-demo", 
+                shell.parse::<Shell>().unwrap(), 
+                &mut io::stdout()
+            );
+        },
+        ("download_dirs", Some(sub_matches)) => {
+            let out = sub_matches.value_of("out").unwrap();
+            let json_file = sub_matches.value_of("json-file").unwrap();
+            let host_url = sub_matches.value_of("host-url").unwrap();
+            let username = sub_matches.value_of("username").unwrap();
+            let id_rsa = sub_matches.value_of("id-rsa").unwrap();
+            let id_rsa_pub = sub_matches.value_of("id-rsa-pub");
+            let (_tcp, mut session) = ssh_util::create_connected_session(host_url, username, id_rsa, id_rsa_pub);
+            if let Err(err) = download_dirs(&mut session, json_file, out) {
+                println!("error: {:?}", err);
+            } else {
+                println!("success.")
+            }
+        }
+        ("load_dirs", Some(sub_matches)) => {
+            let out = sub_matches.value_of("out").unwrap();
+            let dirs = sub_matches.values_of("dirs").unwrap();
+            if let Err(err) = load_dirs(dirs, out) {
+                println!("error: {:?}", err);
+            } else {
+                println!("wrote to {:?}.", out);
+            }
+        }
+        ("repl", Some(_)) => {
+            main_client();
+        }
+        (_, _) => unimplemented!(), // for brevity
+    }
+
+    // if let Some(mode) = m.value_of("mode") {
+    //     match mode {
+    //         "vi" => println!("You are using vi"),
+    //         "emacs" => println!("You are using emacs..."),
+    //         _      => unreachable!()
+    //     }
+    // } else {
+    //     println!("--mode <MODE> wasn't used...");
+    // }
+    // main_client();
 }

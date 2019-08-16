@@ -2,16 +2,14 @@
 mod tests {
     use super::super::super::log_util;
     use super::super::develope_data;
-    use crate::actions::{copy_a_file, copy_a_file_item, write_stream_to_file};
-    use crate::data_shape::{FileItem, RemoteFileItem, RemoteFileItemDir, RemoteFileItemDirOwned};
+    use crate::actions::{copy_a_file_item, write_stream_to_file};
+    use crate::data_shape::{FileItem, RemoteFileItemDir, RemoteFileItemDirOwned};
     use failure;
     use log::*;
     use ssh2::{self, Session};
-    use std::ffi::OsStr;
     use std::io::prelude::*;
     use std::net::TcpStream;
     use std::path::Path;
-    use std::path::PathBuf;
     use walkdir::WalkDir;
 
     #[test]
@@ -29,7 +27,7 @@ mod tests {
     #[test]
     fn t_main_pubkey() {
         log_util::setup_logger(vec![""], vec![]);
-        let (tcp, sess, dev_env) = develope_data::connect_to_ubuntu();
+        let (_tcp, sess, _dev_env) = develope_data::connect_to_ubuntu();
         assert!(sess.authenticated());
     }
 
@@ -84,8 +82,8 @@ mod tests {
     #[test]
     fn t_sftp_resume_file() -> Result<(), failure::Error> {
         log_util::setup_logger(vec![""], vec![]);
-        let (_tcp, mut sess, dev_env) = develope_data::connect_to_ubuntu();
-        let rdo = RemoteFileItemDirOwned::load_path("fixtures/adir");
+        let (_tcp, mut sess, _dev_env) = develope_data::connect_to_ubuntu();
+        let rdo = RemoteFileItemDirOwned::load_dir("fixtures/adir");
         let rd: RemoteFileItemDir = (&rdo).into();
         let remote_item = rd
             .get_items()

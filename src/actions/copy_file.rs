@@ -3,9 +3,8 @@ use log::*;
 use sha1::{Digest, Sha1};
 use ssh2;
 use std::ffi::OsStr;
-use std::io::prelude::{Read, Write};
+use std::io::prelude::{Write};
 use std::path::Path;
-use std::time::Instant;
 use std::{fs, io};
 
 pub fn write_stream_to_file<T: AsRef<Path>>(
@@ -19,7 +18,7 @@ pub fn write_stream_to_file<T: AsRef<Path>>(
     let path = to_file.as_ref();
     if let Some(pp) = path.parent() {
         if !pp.exists() {
-            fs::create_dir_all(pp);
+            fs::create_dir_all(pp)?;
         }
     }
     let mut wf = fs::OpenOptions::new().create(true).write(true).open(path)?;
@@ -37,6 +36,7 @@ pub fn write_stream_to_file<T: AsRef<Path>>(
     Ok((length, format!("{:X}", hasher.result())))
 }
 
+#[allow(dead_code)]
 pub fn write_str_to_file(
     content: impl AsRef<str>,
     to_file: impl AsRef<OsStr>,
@@ -57,7 +57,7 @@ pub fn hash_file_sha1(file_name: impl AsRef<Path>) -> Option<String> {
             let mut hasher = Sha1::new();
             let n_r = io::copy(&mut file, &mut hasher);
             match n_r {
-                Ok(n) => {
+                Ok(_n) => {
                     let hash = hasher.result();
                     // println!("Bytes processed: {}", n);
                     let r = format!("{:x}", hash);
@@ -83,7 +83,8 @@ pub fn hash_file_sha1(file_name: impl AsRef<Path>) -> Option<String> {
 
 // one possible implementation of walking a directory only visiting files
 // https://doc.rust-lang.org/std/fs/fn.read_dir.html
-pub fn visit_dirs(dir: &Path, cb: &Fn(&fs::DirEntry)) -> io::Result<()> {
+#[allow(dead_code)]
+pub fn visit_dirs(dir: &Path, cb: &dyn Fn(&fs::DirEntry)) -> io::Result<()> {
     if dir.is_dir() {
         for entry in fs::read_dir(dir)? {
             let entry = entry?;
@@ -100,6 +101,7 @@ pub fn visit_dirs(dir: &Path, cb: &Fn(&fs::DirEntry)) -> io::Result<()> {
 
 // https://stackoverflow.com/questions/32300132/why-cant-i-store-a-value-and-a-reference-to-that-value-in-the-same-struct
 
+#[allow(dead_code)]
 pub fn copy_a_file<'a>(
     session: &mut ssh2::Session,
     remote_file_path: &'a str,
@@ -158,7 +160,7 @@ mod tests {
 
     #[test]
     fn t_visit() {
-        let mut count = 0_u64;
+        let mut _count = 0_u64;
         visit_dirs(Path::new("e:\\"), &|entry| {
             // count += 1;
             println!("{:?}", entry);

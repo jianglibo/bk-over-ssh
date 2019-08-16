@@ -1,11 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use failure;
 use log::*;
 use ssh2::{self, Session};
 use std::fs::File;
-use std::fs::OpenOptions;
-use std::io::prelude::*;
 use std::io::BufReader;
 use std::net::TcpStream;
 use std::path::Path;
