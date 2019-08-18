@@ -7,7 +7,15 @@ use std::io::prelude::{Write};
 use std::path::Path;
 use std::{fs, io};
 
-pub fn write_stream_to_file<T: AsRef<Path>>(
+
+pub fn copy_file_to_stream(mut to: &mut impl std::io::Write, from_file: impl AsRef<Path>) -> Result<(), failure::Error> {
+    let path = from_file.as_ref();
+    let mut rf = fs::OpenOptions::new().open(path)?;
+    io::copy(&mut rf, &mut to)?;
+    Ok(())
+}
+
+pub fn copy_stream_to_file_return_sha1<T: AsRef<Path>>(
     from: &mut impl std::io::Read,
     to_file: T,
 ) -> Result<(u64, String), failure::Error> {
@@ -130,7 +138,7 @@ pub fn copy_a_file_item<'a>(
         Ok(mut file) => {
             let lpo = file_item.get_path();
             if let Some(lp) = lpo.as_ref().map(String::as_str) {
-                match write_stream_to_file(&mut file, lp) {
+                match copy_stream_to_file_return_sha1(&mut file, lp) {
                     Ok((length, sha1)) => {
                         file_item.set_len(length);
                         file_item.set_sha1(sha1);
@@ -156,7 +164,8 @@ mod tests {
     use super::{copy_a_file, visit_dirs, Path};
     use crate::develope::develope_data;
     use crate::log_util;
-    use std::fs;
+    use std::{fs, io};
+    use std::io::prelude::*;
 
     #[test]
     fn t_visit() {
@@ -184,6 +193,20 @@ mod tests {
             lpn,
         )?;
         assert!(Path::new(lp).exists());
+        Ok(())
+    }
+
+
+
+    #[test]
+    fn t_copy_to_stdout() -> Result<(), failure::Error> {
+        let mut f = fs::OpenOptions::new().open("fixtures/qrcode.png")?;
+        // let mut buf = io::BufReader::new(f);
+        let mut u8_buf = [0; 1024];
+        let len = f.read(&mut u8_buf)?;
+        // let copied_length = io::copy(&mut buf, &mut io::sink())?;
+        io::sink().write_all(&u8_buf[..len])?;
+        // assert_eq!(copied_length, 55);
         Ok(())
     }
 }

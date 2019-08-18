@@ -5,6 +5,9 @@ extern crate derive_builder;
 #[macro_use]
 extern crate clap;
 
+extern crate rand;
+extern crate rustsync;
+
 mod actions;
 mod data_shape;
 mod develope;

@@ -2,7 +2,7 @@
 mod tests {
     use super::super::super::log_util;
     use super::super::develope_data;
-    use crate::actions::{copy_a_file_item, write_stream_to_file};
+    use crate::actions::{copy_a_file_item, copy_stream_to_file_return_sha1};
     use crate::data_shape::{FileItem, RemoteFileItemDir, RemoteFileItemDirOwned};
     use failure;
     use log::*;
@@ -114,7 +114,7 @@ mod tests {
         let (_tcp, sess, _dev_env) = develope_data::connect_to_ubuntu();
         let mut channel: ssh2::Channel = sess.channel_session().unwrap();
         channel.exec("ls").unwrap();
-        write_stream_to_file(&mut channel, "not_in_git/t.txt")?;
+        copy_stream_to_file_return_sha1(&mut channel, "not_in_git/t.txt")?;
         Ok(())
     }
 
