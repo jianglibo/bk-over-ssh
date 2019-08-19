@@ -196,7 +196,7 @@ mod tests {
     fn t_from_path() -> Result<(), failure::Error> {
         log_util::setup_logger(vec![""], vec![]);
         let dirs = vec!["fixtures/adir"].into_iter();
-        load_dirs(dirs, "fixtures/windows_remote_item_dir.txt")?;
+        load_dirs(dirs, "fixtures/linux_remote_item_dir.txt")?;
         Ok(())
     }
 }
