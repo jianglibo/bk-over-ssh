@@ -3,7 +3,7 @@ name = "ssh-client-demo"
 version = "0.1.0"
 authors = ["libo <jianglibo@gmail.com>"]
 edition = "2018"
-default-run = "io_main"
+default-run = "rsync_main"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -23,6 +23,8 @@ derive_builder =  "0.7.2"
 walkdir = "2"
 rustsync = "0.2"
 rand = "0.7"
+librsync = "0.2"
+
 # https://docs.rs/crate/rustsync/0.2.3
 [dependencies.clap]
 version = "~2.33"
@@ -38,3 +40,7 @@ name = "ssh_client_demo"
 path = "src/lib.rs"
 
 # http://ticki.github.io/blog/making-terminal-applications-in-rust-with-termion/
+
+# add the lines below to ~/.bashrc
+# export RUSTUP_DIST_SERVER=https://mirrors.sjtug.sjtu.edu.cn/rust-static
+# export RUSTUP_UPDATE_ROOT=https://mirrors.sjtug.sjtu.edu.cn/rust-static/rustup

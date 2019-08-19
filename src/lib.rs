@@ -5,6 +5,8 @@ extern crate derive_builder;
 #[macro_use]
 extern crate clap;
 
+extern crate librsync;
+
 extern crate rand;
 extern crate rustsync;
 
