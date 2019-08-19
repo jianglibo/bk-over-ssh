@@ -3,3 +3,12 @@ id_rsa_pub: /home/jianglibo/.ssh/id_rsa.pub
 host: 127.0.0.1
 port: 2222
 username: jianglibo
+directories:
+  - remote_dir: /home/jianglibo/ws/ssh-client-demo/fixtures/adir
+    local_dir: target/adir
+    includes:
+      - "*.txt"
+      - "*.png"
+    excludes:
+      - "*.log"
+      - "*.bak"
