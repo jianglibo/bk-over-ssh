@@ -1,6 +1,7 @@
 #[macro_use]
 extern crate derive_builder;
-#[macro_use] extern crate failure;
+#[macro_use]
+extern crate failure;
 
 #[macro_use]
 extern crate clap;
@@ -22,8 +23,8 @@ use rustyline::highlight::{Highlighter, MatchingBracketHighlighter};
 use rustyline::hint::{Hinter, HistoryHinter};
 use rustyline::{Cmd, CompletionType, Config, Context, EditMode, Editor, Helper, KeyPress};
 
-use data_shape::{load_dirs, download_dirs};
-use actions::{ssh_util};
+use actions::ssh_util;
+use data_shape::load_dirs;
 
 struct MyHelper {
     completer: FilenameCompleter,
@@ -151,11 +152,11 @@ fn main() {
         ("completions", Some(sub_matches)) => {
             let shell = sub_matches.value_of("shell_name").unwrap();
             app1.gen_completions_to(
-                "ssh-client-demo", 
-                shell.parse::<Shell>().unwrap(), 
-                &mut io::stdout()
+                "ssh-client-demo",
+                shell.parse::<Shell>().unwrap(),
+                &mut io::stdout(),
             );
-        },
+        }
         ("download_dirs", Some(sub_matches)) => {
             let out = sub_matches.value_of("out").unwrap();
             let json_file = sub_matches.value_of("json-file").unwrap();
@@ -163,12 +164,13 @@ fn main() {
             let username = sub_matches.value_of("username").unwrap();
             let id_rsa = sub_matches.value_of("id-rsa").unwrap();
             let id_rsa_pub = sub_matches.value_of("id-rsa-pub");
-            let (_tcp, mut session) = ssh_util::create_connected_session(host_url, username, id_rsa, id_rsa_pub);
-            if let Err(err) = download_dirs(&mut session, json_file, out) {
-                println!("error: {:?}", err);
-            } else {
-                println!("success.")
-            }
+            let (_tcp, mut session) =
+                ssh_util::create_connected_session(host_url, username, id_rsa, id_rsa_pub);
+            // if let Err(err) = download_dirs(&mut session, json_file, out) {
+            //     println!("error: {:?}", err);
+            // } else {
+            //     println!("success.")
+            // }
         }
         ("load_dirs", Some(sub_matches)) => {
             let out = sub_matches.value_of("out").unwrap();

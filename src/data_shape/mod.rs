@@ -1,5 +1,5 @@
-pub mod file_item;
-pub mod remote_file_item;
+pub mod file_item_line;
+pub mod remote_file_item_line;
 
-pub use file_item::{FileItem, download_dirs};
-pub use remote_file_item::{RemoteFileItem, RemoteFileItemDir, RemoteFileItemDirOwned, load_dirs};
+pub use file_item_line::FileItemLine;
+pub use remote_file_item_line::{load_dirs, RemoteFileItemLine};

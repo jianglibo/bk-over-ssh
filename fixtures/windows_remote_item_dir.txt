@@ -1,0 +1,6 @@
+\\?\D:\Documents\GitHub\ssh-client-demo\fixtures\adir
+{"path":"a.txt","sha1":"86f7e437faa5a7fce15d1ddcb9eaeaea377667b8","len":1,"created":1565601046,"modified":1565601046}
+{"path":"b\\b.txt","sha1":"e9d71f5ee7c92d6dc9e92ffdad17b8bd49418f98","len":1,"created":1565601046,"modified":1565601046}
+{"path":"b\\c c\\c c .txt","sha1":"900aa83f6bc4fc0ce0673a3b51c36f35a08de9dd","len":3,"created":1565601046,"modified":1565601046}
+{"path":"b b\\b b.txt","sha1":"5b20c47dd252d55ef0814f96d2a804f085cbdf06","len":5,"created":1565601046,"modified":1565601046}
+{"path":"鮮やか","sha1":"81d2f56011798dcc2f9dd9935995e06a4f30f4f3","len":6,"created":1565601046,"modified":1565601046}

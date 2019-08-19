@@ -1,4 +1,4 @@
-use super::super::data_shape::{FileItem, RemoteFileItem};
+use super::super::data_shape::{FileItemLine, RemoteFileItemLine};
 use log::*;
 use sha1::{Digest, Sha1};
 use ssh2;
@@ -115,8 +115,8 @@ pub fn copy_a_file<'a>(
     remote_file_path: &'a str,
     local_file_path: &'a str,
 ) -> Result<(), failure::Error> {
-    let ri = RemoteFileItem::new(remote_file_path);
-    let fi = FileItem::standalone(Path::new(local_file_path), &ri);
+    let ri = RemoteFileItemLine::new(remote_file_path);
+    let fi = FileItemLine::standalone(Path::new(local_file_path), &ri);
     let r = copy_a_file_item(session, fi);
 
     if let Some(err) = r.get_fail_reason() {
@@ -128,8 +128,8 @@ pub fn copy_a_file<'a>(
 
 pub fn copy_a_file_item<'a>(
     session: &mut ssh2::Session,
-    mut file_item: FileItem<'a>,
-) -> FileItem<'a> {
+    mut file_item: FileItemLine<'a>,
+) -> FileItemLine<'a> {
     if file_item.get_fail_reason().is_some() {
         return file_item;
     }
