@@ -116,7 +116,7 @@ pub fn copy_a_file<'a>(
     local_file_path: &'a str,
 ) -> Result<(), failure::Error> {
     let ri = RemoteFileItemLine::new(remote_file_path);
-    let fi = FileItemLine::standalone(Path::new(local_file_path), &ri);
+    let fi = FileItemLine::standalone(Path::new(local_file_path), None, &ri);
     let r = copy_a_file_item(session, fi);
 
     if let Some(err) = r.get_fail_reason() {
@@ -134,9 +134,9 @@ pub fn copy_a_file_item<'a>(
         return file_item;
     }
     let sftp = session.sftp().expect("should got sfpt instance.");
-    match sftp.open(Path::new(&file_item.remote_item.get_full_path())) {
+    match sftp.open(Path::new(&file_item.get_remote_path())) {
         Ok(mut file) => {
-            let lpo = file_item.get_path();
+            let lpo = file_item.get_local_path();
             if let Some(lp) = lpo.as_ref().map(String::as_str) {
                 match copy_stream_to_file_return_sha1(&mut file, lp) {
                     Ok((length, sha1)) => {

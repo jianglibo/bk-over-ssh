@@ -1,9 +1,9 @@
-use crate::actions::{hash_file_sha1};
+use crate::actions::hash_file_sha1;
 use log::*;
 use serde::{Deserialize, Serialize};
 use std::iter::Iterator;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime};
+use std::time::SystemTime;
 use std::{fs, io};
 use walkdir::WalkDir;
 
@@ -54,7 +54,6 @@ impl RemoteFileItemLineOwned {
 impl<'a> std::convert::From<&'a RemoteFileItemLineOwned> for RemoteFileItemLine<'a> {
     fn from(rfio: &'a RemoteFileItemLineOwned) -> Self {
         Self {
-            base_dir: None,
             path: rfio.path.as_str(),
             sha1: rfio.sha1.as_ref().map(|ss| ss.as_str()),
             len: rfio.len,
@@ -66,8 +65,6 @@ impl<'a> std::convert::From<&'a RemoteFileItemLineOwned> for RemoteFileItemLine<
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct RemoteFileItemLine<'a> {
-    #[serde(skip)]
-    base_dir: Option<&'a str>,
     path: &'a str,
     sha1: Option<&'a str>,
     len: u64,
@@ -79,7 +76,6 @@ impl<'a> RemoteFileItemLine<'a> {
     #[allow(dead_code)]
     pub fn new(path: &'a str) -> Self {
         Self {
-            base_dir: None,
             path,
             sha1: None,
             len: 0_u64,
@@ -90,14 +86,6 @@ impl<'a> RemoteFileItemLine<'a> {
 
     pub fn get_path(&self) -> &'a str {
         self.path
-    }
-
-    pub fn get_full_path(&self) -> String {
-        if let Some(bp) = self.base_dir {
-            format!("{}{}{}", bp, std::path::MAIN_SEPARATOR, self.path)
-        } else {
-            self.path.to_string()
-        }
     }
 
     pub fn get_len(&self) -> u64 {
@@ -164,33 +152,8 @@ pub fn load_dirs<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::actions::write_str_to_file;
     use crate::log_util;
     use failure;
-
-    // #[test]
-    //     fn deserialize_file_item() {
-    //         let s = r#"
-    // {
-    //     "base_path": "/abc",
-    //     "items":[
-    //     {
-    //             "path": "a",
-    //             "sha1": "cc",
-    //             "len": 55
-    //     }]
-    // }
-    // "#;
-    //         let rd: RemoteFileItemDir =
-    //             serde_json::from_str(&s).expect("load develope_data should success.");
-    //         assert_eq!(
-    //             rd.get_items()
-    //                 .iter()
-    //                 .next()
-    //                 .and_then(|ri| Some(ri.get_path().to_string())),
-    //             Some("a".to_string())
-    //         );
-    //     }
 
     #[test]
     fn t_from_path() -> Result<(), failure::Error> {

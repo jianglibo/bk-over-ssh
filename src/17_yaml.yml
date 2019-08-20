@@ -84,41 +84,10 @@ subcommands:
     #             index: 1
     - repl:
         about: enter repl mode.
-    - download-dirs:
+    - sync-dirs:
         args:
-            - json-file:
-                long: json-file
-                required: true
-                takes_value: true
-            - out:
-                long: out
-                required: true
-                takes_value: true            
-            - host-url:
-                long: host-url
-                required: true
-                takes_value: true
-            - username:
-                long: username
-                required: true
-                takes_value: true
-            - id-rsa:
-                long: id-rsa
-                required: true
-                takes_value: true
-            - id-rsa-pub:
-                long: id-rsa-pub
-                required: false
-                takes_value: true
-    - load_dirs:
-        args:
-            - dirs:
-                long: dirs
-                required: true
-                multiple: true
-                takes_value: true
-            - out:
-                long: out
+            - server-yml:
+                long: server-yml
                 required: true
                 takes_value: true
     - completions:

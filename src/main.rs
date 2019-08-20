@@ -23,8 +23,7 @@ use rustyline::highlight::{Highlighter, MatchingBracketHighlighter};
 use rustyline::hint::{Hinter, HistoryHinter};
 use rustyline::{Cmd, CompletionType, Config, Context, EditMode, Editor, Helper, KeyPress};
 
-use actions::ssh_util;
-use data_shape::load_dirs;
+use data_shape::server;
 
 struct MyHelper {
     completer: FilenameCompleter,
@@ -157,29 +156,9 @@ fn main() {
                 &mut io::stdout(),
             );
         }
-        ("download_dirs", Some(sub_matches)) => {
-            let out = sub_matches.value_of("out").unwrap();
-            let json_file = sub_matches.value_of("json-file").unwrap();
-            let host_url = sub_matches.value_of("host-url").unwrap();
-            let username = sub_matches.value_of("username").unwrap();
-            let id_rsa = sub_matches.value_of("id-rsa").unwrap();
-            let id_rsa_pub = sub_matches.value_of("id-rsa-pub");
-            let (_tcp, mut session) =
-                ssh_util::create_connected_session(host_url, username, id_rsa, id_rsa_pub);
-            // if let Err(err) = download_dirs(&mut session, json_file, out) {
-            //     println!("error: {:?}", err);
-            // } else {
-            //     println!("success.")
-            // }
-        }
-        ("load_dirs", Some(sub_matches)) => {
-            let out = sub_matches.value_of("out").unwrap();
-            let dirs = sub_matches.values_of("dirs").unwrap();
-            if let Err(err) = load_dirs(dirs, out) {
-                println!("error: {:?}", err);
-            } else {
-                println!("wrote to {:?}.", out);
-            }
+        ("sync-dirs", Some(sub_matches)) => {
+            let server_config = sub_matches.value_of("server-yml").unwrap();
+
         }
         ("repl", Some(_)) => {
             main_client();

@@ -1,30 +1,12 @@
 use super::RemoteFileItemLine;
-use crate::actions::copy_a_file_item;
-use log::*;
-use ssh2;
-use std::io::prelude::Read;
-use std::iter::Iterator;
 use std::path::Path;
-use std::{fs, io};
-
-// pub fn download_dirs<'a>(session: &mut ssh2::Session, json_file: impl AsRef<str> + 'a, out: impl AsRef<str> + 'a) -> Result<(), failure::Error> {
-//     let rf = fs::OpenOptions::new()
-//         .open(json_file.as_ref())?;
-//     let mut reader = io::BufReader::new(rf);
-//     let mut content = String::new();
-//     reader.read_to_string(&mut content)?;
-//     let rds: Vec<RemoteFileItemDir<'_>> = serde_json::from_str(content.as_str())?;
-//     for rd in rds {
-//         let fid = FileItemDir::new(Path::new(out.as_ref()), rd);
-//         fid.download_files(session);
-//     }
-//     Ok(())
-// }
+use super::string_path;
 
 #[derive(Debug)]
 pub struct FileItemLine<'a> {
     pub remote_item: &'a RemoteFileItemLine<'a>,
     base_dir: &'a Path,
+    remote_base_dir: Option<&'a str>,
     sha1: Option<String>,
     len: u64,
     fail_reason: Option<String>,
@@ -32,19 +14,22 @@ pub struct FileItemLine<'a> {
 
 impl<'a> FileItemLine<'a> {
     #[allow(dead_code)]
-    pub fn standalone(file_path: &'a Path, remote_item: &'a RemoteFileItemLine) -> Self {
+    pub fn standalone(file_path: &'a Path, remote_base_dir: Option<&'a str>, remote_item: &'a RemoteFileItemLine) -> Self {
         Self {
             remote_item,
             base_dir: file_path,
+            remote_base_dir,
             sha1: None,
             len: 0_u64,
             fail_reason: None,
         }
     }
-    pub fn new(base_dir: &'a Path, remote_item: &'a RemoteFileItemLine) -> Self {
+
+    pub fn new(base_dir: &'a Path, remote_base_dir: &'a str, remote_item: &'a RemoteFileItemLine) -> Self {
         Self {
             base_dir,
             remote_item,
+            remote_base_dir: Some(remote_base_dir),
             sha1: None,
             len: 0_u64,
             fail_reason: None,
@@ -53,9 +38,17 @@ impl<'a> FileItemLine<'a> {
 }
 
 impl<'a> FileItemLine<'a> {
-    pub fn get_path(&self) -> Option<String> {
+    pub fn get_local_path(&self) -> Option<String> {
         let rp = self.remote_item.get_path();
         self.base_dir.join(&rp).to_str().map(|s| s.to_string())
+    }
+
+    pub fn get_remote_path(&self) -> String {
+        if let Some(rbd) = self.remote_base_dir {
+            string_path::join_path(rbd, self.remote_item.get_path())
+        } else {
+            self.remote_item.get_path().to_string()
+        }
     }
 
     pub fn get_len(&self) -> u64 {
@@ -85,64 +78,7 @@ impl<'a> FileItemLine<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::RemoteFileItemLine;
     use super::*;
-    use crate::actions::write_str_to_file;
-    use crate::develope::develope_data;
-    use crate::log_util;
-    use log::*;
-    use std::fs;
-    use std::io::prelude::Read;
-
-    #[test]
-    fn new_file_item() {
-        // log_util::setup_logger(vec![""], vec![]);
-        // let rdo = RemoteFileItemDirOwned::load_dir("fixtures/adir");
-        // let rd: RemoteFileItemDir = (&rdo).into();
-        // let remote_item = rd
-        //     .get_items()
-        //     .iter()
-        //     .find(|ri| ri.get_path().ends_with("鮮やか"))
-        //     .expect("must have at least one.");
-        // let fi = FileItem::new(Path::new("not_in_git"), remote_item);
-        // assert_eq!(fi.get_path(), Some("not_in_git/鮮やか".to_string()));
-    }
-
-    #[test]
-    fn t_from_path() {
-        // log_util::setup_logger(vec![""], vec![]);
-        // let rdo = RemoteFileItemDirOwned::load_dir("fixtures/adir");
-        // let rd: RemoteFileItemDir = (&rdo).into();
-        // let json_str = serde_json::to_string_pretty(&rd).expect("deserialize should success");
-        // info!("{:?}", json_str);
-        // write_str_to_file(json_str, "fixtures/linux_remote_item_dir.json")
-        //     .expect("should success.");
-        // assert_eq!(rd.get_items().len(), 5_usize);
-    }
-
-    #[test]
-    fn t_download_remote_dir() {
-        // log_util::setup_logger(vec![""], vec![]);
-        // let mut buffer = String::new();
-        // fs::File::open("fixtures/linux_remote_item_dir.json")
-        //     .expect("success.")
-        //     .read_to_string(&mut buffer)
-        //     .expect("success.");
-        // let remote_dir =
-        //     serde_json::from_str::<RemoteFileItemDir>(&buffer).expect("deserialize should success");
-        // info!("{:?}", remote_dir);
-        // let ldpn = "not_in_git/local_dir";
-        // let ldp = Path::new(ldpn);
-        // if ldp.exists() {
-        //     fs::remove_dir_all(ldpn).expect("remove all files under this directory.");
-        // }
-        // let local_dir = FileItemDir::new(ldp, remote_dir);
-        // let (_tcp, mut sess, _dev_env) = develope_data::connect_to_ubuntu();
-        // let (successed, failed) = local_dir.download_files(&mut sess);
-        // info!("{:?}", local_dir);
-        // assert_eq!(failed, 0_u64);
-        // assert_eq!(successed, 5_u64);
-    }
 
     #[test]
     fn t_join_path() {
