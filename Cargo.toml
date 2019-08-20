@@ -24,6 +24,7 @@ walkdir = "2"
 rustsync = "0.2"
 rand = "0.7"
 librsync = "0.2"
+tempfile = "3"
 
 # https://docs.rs/crate/rustsync/0.2.3
 [dependencies.clap]

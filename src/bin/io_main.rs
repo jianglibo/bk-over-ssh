@@ -1,6 +1,6 @@
 extern crate ssh_client_demo;
 use std::{fs, io};
-use std::io::prelude::{Read, Write};
+// use std::io::prelude::{Read, Write};
 
 // https://www.reddit.com/r/rust/comments/6hoayo/how_do_i_write_to_stdout_without_line_buffering/?st=jzh2qp1x&sh=7c002b76
 

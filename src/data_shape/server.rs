@@ -5,8 +5,9 @@ use serde::Deserialize;
 use ssh2;
 use std::io::prelude::{BufRead, Read};
 use std::net::TcpStream;
-use std::path::Path;
+use std::path::{Path};
 use std::{fs, io};
+use tempfile;
 
 #[derive(Deserialize)]
 pub struct Directory {
@@ -54,17 +55,25 @@ impl Server {
         Ok(())
     }
 
-    pub fn start_sync<R: Read>(&mut self, file_item_lines: Option<R>) -> Result<(), failure::Error> {
+    fn get_file_list_file(&mut self, url: impl AsRef<str>) -> Result<fs::File, failure::Error> {
+        let sftp = self.session.as_mut().unwrap().sftp()?;
+        // need write to a tmp file.
+        let mut sftp_file: ssh2::File = sftp.open(Path::new(url.as_ref()))?;
+        let mut tmp = tempfile::tempfile()?;
+        io::copy(&mut sftp_file, &mut tmp)?;
+        Ok(tmp)
+    }
+
+    pub fn start_sync<R: Read>(
+        &mut self,
+        file_item_lines: Option<R>,
+    ) -> Result<(), failure::Error> {
+        ensure!(self.is_connected(), "please connect the server first.");
         if let Some(r) = file_item_lines {
             self._start_sync(r)
         } else if let Some(url) = self.file_list_file.as_ref().cloned() {
-            if self.session.is_none() {
-                bail!("please connect the server first.");
-            }
-        let sftp = self.session.as_mut().unwrap().sftp()?;
-        // need write to a tmp file.
-        let file: ssh2::File =  sftp.open(Path::new(&url))?;
-            self._start_sync(file)
+            let tmp = self.get_file_list_file(url)?;
+            self._start_sync(tmp)
         } else {
             bail!("no file_list_file.");
         }
@@ -119,21 +128,29 @@ pub fn sync_dirs<P: AsRef<str>, R: Read>(name: P, from: Option<R>) -> Result<(),
 }
 
 pub fn load_server(name: impl AsRef<str>) -> Result<Server, failure::Error> {
-    let _name = name.as_ref();
+    let mut _name = name.as_ref();
 
-    let full_name = if _name.ends_with(".yml") {
-        _name.to_string()
+    let server_path = if _name.contains('\\') || _name.contains('/') {
+        Path::new(_name).to_path_buf()
     } else {
-        format!("{}.yml", _name)
+        let name_only = if !_name.ends_with(".yml") {
+            format!("{}.yml", _name)
+        } else {
+            _name.to_string()
+        };
+        let sp = std::env::current_exe()?
+            .parent()
+            .expect("executable's parent should exists.")
+            .join("servers")
+            .join(&name_only);
+
+        if sp.exists() {
+            sp
+        } else {
+            std::env::current_dir()?.join("servers").join(&name_only)
+        }
     };
-    let mut server_path = std::env::current_exe()?
-        .parent()
-        .expect("executable's parent should exists.")
-        .join("servers")
-        .join(&full_name);
-    if !server_path.exists() {
-        server_path = std::env::current_dir()?.join("servers").join(&full_name);
-    }
+
     info!("loading server configuration: {:?}", server_path);
     let mut f = fs::OpenOptions::new().read(true).open(server_path)?;
     let mut buf = String::new();
@@ -176,9 +193,24 @@ mod tests {
         assert!(!d.exists());
         let mut server = load_server("localhost")?;
         server.connect()?;
-        let f = fs::OpenOptions::new().read(true).open("fixtures/linux_remote_item_dir.txt")?;
-        server.start_sync(f)?;
+        let f = fs::OpenOptions::new()
+            .read(true)
+            .open("fixtures/linux_remote_item_dir.txt")?;
+        server.start_sync(Some(f))?;
 
+        assert!(d.exists());
+        Ok(())
+    }
+
+    #[test]
+    fn t_sync_dirs() -> Result<(), failure::Error> {
+        log_util::setup_logger(vec![""], vec![]);
+        let d = Path::new("target/adir");
+        if d.exists() {
+            fs::remove_dir_all(d)?;
+        }
+        assert!(!d.exists());
+        sync_dirs("localhost", Option::<fs::File>::None)?;
         assert!(d.exists());
         Ok(())
     }

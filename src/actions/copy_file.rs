@@ -8,6 +8,7 @@ use std::path::Path;
 use std::{fs, io};
 
 
+#[allow(dead_code)]
 pub fn copy_file_to_stream(mut to: &mut impl std::io::Write, from_file: impl AsRef<Path>) -> Result<(), failure::Error> {
     let path = from_file.as_ref();
     let mut rf = fs::OpenOptions::new().open(path)?;

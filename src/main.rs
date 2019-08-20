@@ -137,7 +137,8 @@ fn main() {
     use clap::App;
     use clap::ArgMatches;
     use clap::Shell;
-    use std::io;
+    use std::{fs, io};
+    use log::*;
 
     log_util::setup_logger(vec![""], vec![]);
 
@@ -157,7 +158,10 @@ fn main() {
             );
         }
         ("sync-dirs", Some(sub_matches)) => {
-            let server_config = sub_matches.value_of("server-yml").unwrap();
+            let server_config_path = sub_matches.value_of("server-yml").unwrap();
+            if let Err(err) = server::sync_dirs(server_config_path, Option::<fs::File>::None) {
+                error!("sync-dirs failed: {:?}", err);
+            }
 
         }
         ("repl", Some(_)) => {
