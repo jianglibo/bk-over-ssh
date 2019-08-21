@@ -36,7 +36,8 @@ impl Server {
     pub fn is_connected(&self) -> bool {
         self._tcp_stream.is_some() && self.session.is_some()
     }
-    pub fn connect(&mut self) -> Result<(), failure::Error> {
+
+    pub fn get_ssh_session(&self) -> Result<(TcpStream, ssh2::Session), failure::Error> {
         let url = format!("{}:{}", self.host, self.port);
         let tcp = TcpStream::connect(&url)?;
         if let Some(mut sess) = ssh2::Session::new() {
@@ -47,39 +48,46 @@ impl Server {
                 Path::new(&self.id_rsa),
                 None,
             )?;
-            self._tcp_stream.replace(tcp);
-            self.session.replace(sess);
+            Ok((tcp, sess))
         } else {
             bail!("Session::new failed.");
         }
+    }
+
+    pub fn connect(&mut self) -> Result<(), failure::Error> {
+        let (tcp, sess) = self.get_ssh_session()?;
+        self._tcp_stream.replace(tcp);
+        self.session.replace(sess);
         Ok(())
     }
 
-    fn get_file_list_file(&mut self, url: impl AsRef<str>) -> Result<fs::File, failure::Error> {
-        let sftp = self.session.as_mut().unwrap().sftp()?;
-        // need write to a tmp file.
-        let mut sftp_file: ssh2::File = sftp.open(Path::new(url.as_ref()))?;
-        let mut tmp = tempfile::tempfile()?;
-        io::copy(&mut sftp_file, &mut tmp)?;
-        Ok(tmp)
-    }
+    // fn get_file_list_file(&self, url: impl AsRef<str>) -> Result<impl io::Read, failure::Error> {
+    //     let sftp = self.session.as_ref().unwrap().sftp()?;
+    //     // need write to a tmp file.
+    //     let mut sftp_file: ssh2::File = sftp.open(Path::new(url.as_ref()))?;
+    //     // let mut tmp = tempfile::tempfile()?;
+    //     // io::copy(&mut sftp_file, &mut tmp)?;
+    //     Ok(sftp_file)
+    // }
 
     pub fn start_sync<R: Read>(
-        &mut self,
+        &self,
         file_item_lines: Option<R>,
     ) -> Result<(), failure::Error> {
         ensure!(self.is_connected(), "please connect the server first.");
         if let Some(r) = file_item_lines {
             self._start_sync(r)
         } else if let Some(url) = self.file_list_file.as_ref().cloned() {
-            let tmp = self.get_file_list_file(url)?;
-            self._start_sync(tmp)
+            // let tmp = self.get_file_list_file(url)?;
+            let sftp = self.session.as_ref().unwrap().sftp()?;
+            let sftp_file: ssh2::File = sftp.open(Path::new(&url))?;
+            self._start_sync(sftp_file)
         } else {
             bail!("no file_list_file.");
         }
     }
 
-    fn _start_sync<R: Read>(&mut self, file_item_lines: R) -> Result<(), failure::Error> {
+    fn _start_sync<R: Read>(&self, file_item_lines: R) -> Result<(), failure::Error> {
         if self.session.is_none() {
             bail!("please connect the server first.");
         }
@@ -88,14 +96,14 @@ impl Server {
         for line_r in io::BufReader::new(file_item_lines).lines() {
             match line_r {
                 Ok(line) => {
+                    info!("got line: {:?}", line);
                     if current_local_dir.is_none() {
                         if let Some(rd) = self.directories.iter().find(|d| d.remote_dir == line) {
                             current_remote_dir = Some(line);
                             current_local_dir = Some(Path::new(rd.local_dir.as_str()));
                         }
                     } else {
-                        // let current_remote_file = current_remote_dir + line;
-                        // let current_local_file = current_local_dir + line;
+                        let sftp = self.session.as_ref().unwrap().sftp()?;
                         match serde_json::from_str::<RemoteFileItemLine>(&line) {
                             Ok(remote_item) => {
                                 let local_item = FileItemLine::new(
@@ -103,7 +111,7 @@ impl Server {
                                     current_remote_dir.as_ref().unwrap().as_str(),
                                     &remote_item,
                                 );
-                                copy_a_file_item(self.session.as_mut().unwrap(), local_item);
+                                copy_a_file_item(&sftp, local_item);
                             }
                             Err(err) => {
                                 error!("deserialize line failed: {:?}, {:?}", line, err);

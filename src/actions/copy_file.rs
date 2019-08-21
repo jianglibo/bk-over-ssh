@@ -118,7 +118,8 @@ pub fn copy_a_file<'a>(
 ) -> Result<(), failure::Error> {
     let ri = RemoteFileItemLine::new(remote_file_path);
     let fi = FileItemLine::standalone(Path::new(local_file_path), None, &ri);
-    let r = copy_a_file_item(session, fi);
+    let sftp = session.sftp()?;
+    let r = copy_a_file_item(&sftp, fi);
 
     if let Some(err) = r.get_fail_reason() {
         bail!(err.clone())
@@ -128,13 +129,12 @@ pub fn copy_a_file<'a>(
 }
 
 pub fn copy_a_file_item<'a>(
-    session: &mut ssh2::Session,
+    sftp: &ssh2::Sftp,
     mut file_item: FileItemLine<'a>,
 ) -> FileItemLine<'a> {
     if file_item.get_fail_reason().is_some() {
         return file_item;
     }
-    let sftp = session.sftp().expect("should got sfpt instance.");
     match sftp.open(Path::new(&file_item.get_remote_path())) {
         Ok(mut file) => {
             let lpo = file_item.get_local_path();
@@ -159,6 +159,39 @@ pub fn copy_a_file_item<'a>(
     }
     file_item
 }
+
+// pub fn copy_a_file_item<'a>(
+//     session: &ssh2::Session,
+//     mut file_item: FileItemLine<'a>,
+// ) -> FileItemLine<'a> {
+//     if file_item.get_fail_reason().is_some() {
+//         return file_item;
+//     }
+//     let sftp = session.sftp().expect("should got sfpt instance.");
+//     match sftp.open(Path::new(&file_item.get_remote_path())) {
+//         Ok(mut file) => {
+//             let lpo = file_item.get_local_path();
+//             if let Some(lp) = lpo.as_ref().map(String::as_str) {
+//                 match copy_stream_to_file_return_sha1(&mut file, lp) {
+//                     Ok((length, sha1)) => {
+//                         file_item.set_len(length);
+//                         file_item.set_sha1(sha1);
+//                     }
+//                     Err(err) => {
+//                         file_item
+//                             .set_fail_reason(format!("write_stream_to_file failed: {:?}", err));
+//                     }
+//                 }
+//             } else {
+//                 file_item.set_fail_reason("file_item get_path failed.");
+//             }
+//         }
+//         Err(err) => {
+//             file_item.set_fail_reason(format!("sftp open failed: {:?}", err));
+//         }
+//     }
+//     file_item
+// }
 
 #[cfg(test)]
 mod tests {

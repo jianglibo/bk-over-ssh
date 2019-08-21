@@ -20,10 +20,17 @@ pub struct TestDirs {
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct TestFiles {
+    pub big_binary_file: String,
+    pub midum_binary_file: String,
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Server {
     pub host: String,
     pub username: String,
     pub test_dirs: TestDirs,
+    pub test_files: TestFiles,
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]

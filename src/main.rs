@@ -7,7 +7,7 @@ extern crate failure;
 extern crate clap;
 
 extern crate rand;
-extern crate rustsync;
+// extern crate rustsync;
 
 mod actions;
 mod data_shape;
