@@ -61,9 +61,9 @@
 //! }
 //! ```
 
-
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom, Write};
+use log::*;
 // use tokio_io::{AsyncRead, AsyncWrite};
 // use tokio_io::io::{write_all, WriteAll};
 // use futures::{Async, Future, Poll};
@@ -89,44 +89,510 @@ pub struct Signature {
     chunks: HashMap<u32, HashMap<Blake2b, usize>>
 }
 
+
 /// Create the "signature" of a file, essentially a content-indexed
 /// map of blocks. The first step of the protocol is to run this
 /// function on the "source" (the remote file when downloading, the
 /// local file while uploading).
-pub fn signature<R: Read, B: AsRef<[u8]>+AsMut<[u8]>>(mut r: R, mut block: B) -> Result<Signature, std::io::Error> {
+pub fn signature<R: Read, B: AsRef<[u8]>+AsMut<[u8]>>(mut r: R, mut buff: B) -> Result<Signature, std::io::Error> {
     let mut chunks = HashMap::new();
 
     let mut i = 0;
-    let block = block.as_mut();
+    let buff = buff.as_mut();
     let mut eof = false;
     while !eof {
         let mut j = 0;
-        while j < block.len() {
-            let r = r.read(&mut block[j..])?;
+        while j < buff.len() { // full fill the block. for the last block, maybe not full.
+            let r = r.read(&mut buff[j..])?;
             if r == 0 {
                 eof = true;
                 break;
             }
             j += r
         }
-        let block = &block[..j];
-        let hash = adler32::RollingAdler32::from_buffer(block);
+        let readed_block = &buff[..j];
+        let hash = adler32::RollingAdler32::from_buffer(readed_block);
         let mut blake2 = [0; BLAKE2_SIZE];
-        blake2.clone_from_slice(blake2_rfc::blake2b::blake2b(BLAKE2_SIZE, &[], &block).as_bytes());
-        println!("{:?} {:?}", block, blake2);
+        blake2.clone_from_slice(blake2_rfc::blake2b::blake2b(BLAKE2_SIZE, &[], &readed_block).as_bytes());
+        // println!("block: {:?}, blake2: {:?}", block, blake2);
         chunks
             .entry(hash.hash())
             .or_insert(HashMap::new())
             .insert(Blake2b(blake2), i);
 
-        i += block.len()
+        i += readed_block.len()
     }
 
     Ok(Signature {
-        window: block.len(),
+        window: buff.len(),
         chunks
     })
 }
+
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+pub enum Block {
+    FromSource(u64),
+    Literal(Vec<u8>),
+}
+
+struct State {
+    result: Vec<Block>,
+    block_oldest: usize,
+    block_len: usize,
+    pending: Vec<u8>,
+}
+
+impl State {
+    fn new() -> Self {
+        State {
+            result: Vec::new(),
+            block_oldest: 0,
+            block_len: 1,
+            pending: Vec::new(),
+        }
+    }
+}
+
+#[derive(Default, Debug, PartialEq)]
+/// The result of comparing two files
+pub struct Delta {
+    /// Description of the new file in terms of blocks.
+    pub blocks: Vec<Block>,
+    /// Size of the window.
+    pub window: usize,
+}
+
+/// Compare a signature with an existing file. This is the second step
+/// of the protocol, `r` is the local file when downloading, and the
+/// remote file when uploading.
+///
+/// `block` must be a buffer the same size as `sig.window`.
+pub fn compare<R: Read, B:AsRef<[u8]>+AsMut<[u8]>>(sig: &Signature, mut r: R, mut buff: B) -> Result<Delta, std::io::Error> {
+    let mut st = State::new();
+    let buff = buff.as_mut();
+    assert_eq!(buff.len(), sig.window);
+    while st.block_len > 0 {
+        let mut hash = {
+            let mut j = 0;
+            let readed_block = {
+                while j < sig.window {
+                    let r = r.read(&mut buff[..])?;
+                    if r == 0 {
+                        break;
+                    }
+                    j += r
+                }
+                st.block_oldest = 0;
+                st.block_len = j;
+                &buff[..j]
+            };
+            adler32::RollingAdler32::from_buffer(readed_block)
+        };
+
+        // Starting from the current block (with hash `hash`), find
+        // the next block with a hash that appears in the signature.
+        loop {
+            if matches(&mut st, sig, &buff, &hash) {
+                break;
+            }
+            info!("block_oldest: {:?}", st.block_oldest);
+            info!("block_len: {:?}", st.block_len);
+            // The blocks are not equal. Move the hash by one byte
+            // until finding an equal block.
+            let oldest = buff[st.block_oldest];
+            hash.remove(st.block_len, oldest);
+            let r = r.read(&mut buff[st.block_oldest..st.block_oldest + 1])?;
+            if r > 0 {
+                // If there are still bytes to read, update the hash.
+                hash.update(buff[st.block_oldest]);
+            } else if st.block_len > 0 {
+                // Else, just shrink the window, so that the current
+                // block's blake2 hash can be compared with the
+                // signature.
+                st.block_len -= 1;
+            } else {
+                // We're done reading the file.
+                break;
+            }
+            st.pending.push(oldest);
+            info!("pending: {:?}", st.pending.len());
+            st.block_oldest = (st.block_oldest + 1) % sig.window;
+        }
+        if !st.pending.is_empty() {
+            // We've reached the end of the file, and have never found
+            // a matching block again.
+            st.result.push(Block::Literal(std::mem::replace(
+                &mut st.pending,
+                Vec::new(),
+            )))
+        }
+    }
+    Ok(Delta {
+        blocks: st.result,
+        window: sig.window,
+    })
+}
+
+/// Compare a signature with an existing file. This is the second step
+/// of the protocol, `r` is the local file when downloading, and the
+/// remote file when uploading.
+///
+/// `block` must be a buffer the same size as `sig.window`.
+pub fn compare_1<R: Read, B:AsRef<[u8]>+AsMut<[u8]>>(sig: &Signature, mut r: R, mut buff: B) -> Result<Delta, std::io::Error> {
+    let mut st = State::new();
+    let buff = buff.as_mut();
+    assert_eq!(buff.len(), sig.window);
+    while st.block_len > 0 {
+        let mut hash = {
+            let mut j = 0;
+            let readed_block = {
+                while j < sig.window {
+                    let r = r.read(&mut buff[..])?;
+                    if r == 0 {
+                        info!("read breaked.");
+                        break;
+                    }
+                    j += r
+                }
+                st.block_oldest = 0;
+                st.block_len = j;
+                &buff[..j]
+            };
+            adler32::RollingAdler32::from_buffer(readed_block)
+        };
+
+        // Starting from the current block (with hash `hash`), find
+        // the next block with a hash that appears in the signature.
+        loop {
+            if matches(&mut st, sig, &buff, &hash) {
+                break;
+            }
+            info!("block_oldest: {:?}", st.block_oldest);
+            info!("block_len: {:?}", st.block_len);
+            // The blocks are not equal. Move the hash by one byte
+            // until finding an equal block.
+            let oldest = buff[st.block_oldest];
+            hash.remove(st.block_len, oldest);
+            let r = r.read(&mut buff[st.block_oldest..st.block_oldest + 1])?;
+            if r > 0 {
+                // If there are still bytes to read, update the hash.
+                hash.update(buff[st.block_oldest]);
+            } else if st.block_len > 0 {
+                // Else, just shrink the window, so that the current
+                // block's blake2 hash can be compared with the
+                // signature.
+                st.block_len -= 1;
+            } else {
+                // We're done reading the file.
+                break;
+            }
+            st.pending.push(oldest);
+            info!("pending: {:?}", st.pending.len());
+            st.block_oldest = (st.block_oldest + 1) % sig.window;
+        }
+        if !st.pending.is_empty() {
+            // We've reached the end of the file, and have never found
+            // a matching block again.
+            st.result.push(Block::Literal(std::mem::replace(
+                &mut st.pending,
+                Vec::new(),
+            )))
+        }
+    }
+    info!("result len: {:?}", st.result.len());
+    Ok(Delta {
+        blocks: st.result,
+        window: sig.window,
+    })
+}
+
+
+
+fn matches(st: &mut State, sig: &Signature, block: &[u8], hash: &adler32::RollingAdler32) -> bool {
+    if let Some(h) = sig.chunks.get(&hash.hash()) {
+        let blake2 = {
+            let mut b = blake2_rfc::blake2b::Blake2b::new(BLAKE2_SIZE);
+            if st.block_oldest + st.block_len > sig.window {
+                b.update(&block[st.block_oldest..]);
+                b.update(&block[..(st.block_oldest + st.block_len) % sig.window]);
+            } else {
+                b.update(&block[st.block_oldest..st.block_oldest + st.block_len])
+            }
+            b.finalize()
+        };
+
+        if let Some(&index) = h.get(blake2.as_bytes()) {
+            // Matching hash found! If we have non-matching
+            // material before the match, add it.
+            if !st.pending.is_empty() {
+                st.result.push(Block::Literal(std::mem::replace(
+                    &mut st.pending,
+                    Vec::new(),
+                )));
+            }
+            st.result.push(Block::FromSource(index as u64));
+            return true;
+        }
+    }
+    false
+}
+
+/// Restore a file, using a "delta" (resulting from
+/// [`compare`](fn.compare.html))
+pub fn restore<W: Write>(mut w: W, s: &[u8], delta: &Delta) -> Result<(), std::io::Error> {
+    for d in delta.blocks.iter() {
+        match *d {
+            Block::FromSource(i) => {
+                let i = i as usize;
+                if i + delta.window <= s.len() {
+                    w.write(&s[i..i + delta.window])?
+                } else {
+                    w.write(&s[i..])?
+                }
+            }
+            Block::Literal(ref l) => w.write(l)?,
+        };
+    }
+    Ok(())
+}
+
+/// Same as [`restore`](fn.restore.html), except that this function
+/// uses a seekable, readable stream instead of the entire file in a
+/// slice.
+///
+/// `buf` must be a buffer the same size as `sig.window`.
+pub fn restore_seek<W: Write, R: Read + Seek, B: AsRef<[u8]>+AsMut<[u8]>>(
+    mut w: W,
+    mut s: R,
+    mut buf: B,
+    delta: &Delta,
+) -> Result<(), std::io::Error> {
+    let buf = buf.as_mut();
+
+    for d in delta.blocks.iter() {
+        match *d {
+            Block::FromSource(i) => {
+                s.seek(SeekFrom::Start(i as u64))?;
+                // fill the buffer from r.
+                let mut n = 0;
+                loop {
+                    let r = s.read(&mut buf[n..delta.window])?;
+                    if r == 0 {
+                        break;
+                    }
+                    n += r
+                }
+                // write the buffer to w.
+                let mut m = 0;
+                while m < n {
+                    m += w.write(&buf[m..n])?;
+                }
+            }
+            Block::Literal(ref l) => {
+                w.write(l)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+
+
+#[cfg(test)]
+mod tests {
+    use rand;
+    use super::*;
+    use rand::Rng;
+    use rand::distributions::Alphanumeric;
+    use crate::log_util;
+    // use tokio_core::reactor::Core;
+    const WINDOW: usize = 32;
+    #[test]
+    fn basic() {
+        log_util::setup_logger(vec![""], vec![]);
+        for index in 0..10 {
+            let source = rand::thread_rng()
+                .sample_iter(&Alphanumeric)
+                .take(WINDOW * 10 + 8)
+                .collect::<String>();
+            let modified = rand::thread_rng()
+                .sample_iter(&Alphanumeric)
+                .take(WINDOW * 100 + 8)
+                .collect::<String>();
+            // let mut modified = source.clone();
+            // let index = WINDOW * index + 3;
+            // unsafe {
+            //     modified.as_bytes_mut()[index] =
+            //         ((source.as_bytes()[index] as usize + 1) & 255) as u8
+            // }
+            let block = [0; WINDOW];
+            let source_sig = signature(source.as_bytes(), block).unwrap();
+            // println!("source_sig: {:?}", source_sig);
+            let comp = compare_1(&source_sig, modified.as_bytes(), block).unwrap();
+
+            let mut restored = Vec::new();
+            let source = std::io::Cursor::new(source.as_bytes());
+            restore_seek(&mut restored, source, [0; WINDOW], &comp).unwrap();
+            if &restored[..] != modified.as_bytes() {
+                for i in 0..10 {
+                    let a = &restored[i * WINDOW..(i + 1) * WINDOW];
+                    let b = &modified.as_bytes()[i * WINDOW..(i + 1) * WINDOW];
+                    println!("{:?}\n{:?}\n", a, b);
+                    if a != b {
+                        println!(">>>>>>>>");
+                    }
+                }
+                panic!("different");
+            }
+        }
+    }
+    // #[test]
+    // fn futures() {
+    //     let source = rand::thread_rng()
+    //         .sample_iter(&Alphanumeric)
+    //         .take(WINDOW * 10 + 8)
+    //         .collect::<String>();
+    //     let mut modified = source.clone();
+    //     let index = WINDOW + 3;
+    //     unsafe {
+    //         modified.as_bytes_mut()[index] = ((source.as_bytes()[index] as usize + 1) & 255) as u8
+    //     }
+
+    //     let mut l = Core::new().unwrap();
+    //     let block = [0; WINDOW];
+    //     let source_sig = signature(source.as_bytes(), block).unwrap();
+    //     println!("==================\n");
+    //     let (_, source_sig_) = l.run(signature_fut(source.as_bytes(), block)).unwrap();
+    //     assert_eq!(source_sig, source_sig_);
+    //     println!("{:?} {:?}", source_sig, source_sig_);
+
+    //     let comp = compare(&source_sig, modified.as_bytes(), block).unwrap();
+    //     let (_, _, comp_) = l.run(compare_fut(source_sig, modified.as_bytes(), block)).unwrap();
+    //     assert_eq!(comp, comp_);
+    //     println!("{:?}", comp);
+
+    //     let v = Vec::new();
+    //     let (rest_, _, _) = l.run(restore_seek_fut(
+    //         std::io::Cursor::new(v),
+    //         std::io::Cursor::new(source.as_bytes()),
+    //         [0; WINDOW],
+    //         comp,
+    //     )).unwrap();
+    //     assert_eq!(rest_.into_inner().as_slice(), modified.as_bytes());
+    // }
+}
+
+// pub struct FutureRestore<W: AsyncWrite, R: Read + Seek, B: AsMut<[u8]> + AsRef<[u8]>> {
+//     state: Option<RestoreState<W, R, B>>,
+//     delta: Delta,
+//     delta_pos: usize,
+// }
+
+// enum RestoreState<W: AsyncWrite, R: Read + Seek, B: AsMut<[u8]> + AsRef<[u8]>> {
+//     Delta {
+//         w: W,
+//         r: R,
+//         buf: B,
+//     },
+//     WriteBuf {
+//         write: WriteBlock<W, B>,
+//         r: R,
+//     },
+//     WriteVec {
+//         write: WriteAll<W, Vec<u8>>,
+//         r: R,
+//         buf: B,
+//     },
+// }
+
+// Same as [`restore_seek`](fn.restore_seek.html), except that this
+// function writes its output asynchronously.
+// pub fn restore_seek_fut<W: AsyncWrite, R: Read + Seek, B: AsMut<[u8]> + AsRef<[u8]>>(
+//     w: W,
+//     r: R,
+//     buf: B,
+//     delta: Delta,
+// ) -> FutureRestore<W, R, B> {
+//     FutureRestore {
+//         state: Some(RestoreState::Delta { w, r, buf }),
+//         delta,
+//         delta_pos: 0,
+//     }
+// }
+
+// impl<W: AsyncWrite, R: Read + Seek, B: AsMut<[u8]> + AsRef<[u8]>> Future
+//     for FutureRestore<W, R, B> {
+//     type Item = (W, R, Delta);
+//     type Error = std::io::Error;
+//     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+//         loop {
+//             match self.state.take() {
+//                 Some(RestoreState::Delta { w, mut r, mut buf }) => {
+//                     if self.delta_pos >= self.delta.blocks.len() {
+//                         return Ok(Async::Ready((
+//                             w,
+//                             r,
+//                             std::mem::replace(&mut self.delta, Delta::default()),
+//                         )));
+//                     }
+//                     match self.delta.blocks[self.delta_pos] {
+//                         Block::FromSource(i) => {
+//                             r.seek(SeekFrom::Start(i as u64))?;
+//                             // fill the buffer from r.
+//                             let mut n = 0;
+//                             {
+//                                 let buf_ = buf.as_mut();
+//                                 loop {
+//                                     let k = r.read(&mut buf_[n..self.delta.window])?;
+//                                     if k == 0 {
+//                                         break;
+//                                     }
+//                                     n += k
+//                                 }
+//                             }
+//                             // write the buffer to w.
+//                             self.state = Some(RestoreState::WriteBuf {
+//                                 write: WriteBlock::new(w, buf, 0, n),
+//                                 r,
+//                             })
+//                         }
+//                         Block::Literal(ref mut l) => {
+//                             let vec = std::mem::replace(l, Vec::new());
+//                             self.state = Some(RestoreState::WriteVec {
+//                                 write: write_all(w, vec),
+//                                 r,
+//                                 buf,
+//                             })
+//                         }
+//                     }
+//                 }
+//                 Some(RestoreState::WriteBuf { mut write, r }) => match write.poll()? {
+//                     Async::Ready((w, buf)) => {
+//                         self.delta_pos = self.delta_pos + 1;
+//                         self.state = Some(RestoreState::Delta { w, r, buf })
+//                     }
+//                     Async::NotReady => {
+//                         self.state = Some(RestoreState::WriteBuf { write, r });
+//                         return Ok(Async::NotReady);
+//                     }
+//                 },
+//                 Some(RestoreState::WriteVec { mut write, r, buf }) => match write.poll()? {
+//                     Async::Ready((w, vec)) => {
+//                         self.delta.blocks[self.delta_pos] = Block::Literal(vec);
+//                         self.delta_pos += 1;
+//                         self.state = Some(RestoreState::Delta { w, r, buf })
+//                     }
+//                     Async::NotReady => {
+//                         self.state = Some(RestoreState::WriteVec { write, r, buf });
+//                         return Ok(Async::NotReady);
+//                     }
+//                 },
+//                 None => panic!(""),
+//             }
+//         }
+//     }
+// }
 
 // pub struct ReadBlock<R: AsyncRead, B: AsRef<[u8]>+AsMut<[u8]>> {
 //     block: Option<(R, B)>,
@@ -267,8 +733,8 @@ pub fn signature<R: Read, B: AsRef<[u8]>+AsMut<[u8]>>(mut r: R, mut block: B) ->
 //     }
 // }
 
-/// This is the same as [`signature`](fn.signature.html), except that
-/// this function reads the input source asynchronously.
+// This is the same as [`signature`](fn.signature.html), except that
+// this function reads the input source asynchronously.
 // pub fn signature_fut<R: AsyncRead, B:AsRef<[u8]>+AsMut<[u8]>>(r: R, b: B) -> FutureSignature<R, B> {
 //     FutureSignature {
 //         state: Some(ReadBlock::new(r, b)),
@@ -277,107 +743,6 @@ pub fn signature<R: Read, B: AsRef<[u8]>+AsMut<[u8]>>(mut r: R, mut block: B) ->
 //         chunks: HashMap::new(),
 //     }
 // }
-
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub enum Block {
-    FromSource(u64),
-    Literal(Vec<u8>),
-}
-
-struct State {
-    result: Vec<Block>,
-    block_oldest: usize,
-    block_len: usize,
-    pending: Vec<u8>,
-}
-
-impl State {
-    fn new() -> Self {
-        State {
-            result: Vec::new(),
-            block_oldest: 0,
-            block_len: 1,
-            pending: Vec::new(),
-        }
-    }
-}
-
-#[derive(Default, Debug, PartialEq)]
-/// The result of comparing two files
-pub struct Delta {
-    /// Description of the new file in terms of blocks.
-    pub blocks: Vec<Block>,
-    /// Size of the window.
-    pub window: usize,
-}
-
-/// Compare a signature with an existing file. This is the second step
-/// of the protocol, `r` is the local file when downloading, and the
-/// remote file when uploading.
-///
-/// `block` must be a buffer the same size as `sig.window`.
-pub fn compare<R: Read, B:AsRef<[u8]>+AsMut<[u8]>>(sig: &Signature, mut r: R, mut block: B) -> Result<Delta, std::io::Error> {
-    let mut st = State::new();
-    let block = block.as_mut();
-    assert_eq!(block.len(), sig.window);
-    while st.block_len > 0 {
-        let mut hash = {
-            let mut j = 0;
-            let block = {
-                while j < sig.window {
-                    let r = r.read(&mut block[..])?;
-                    if r == 0 {
-                        break;
-                    }
-                    j += r
-                }
-                st.block_oldest = 0;
-                st.block_len = j;
-                &block[..j]
-            };
-            adler32::RollingAdler32::from_buffer(block)
-        };
-
-        // Starting from the current block (with hash `hash`), find
-        // the next block with a hash that appears in the signature.
-        loop {
-            if matches(&mut st, sig, &block, &hash) {
-                break;
-            }
-            // The blocks are not equal. Move the hash by one byte
-            // until finding an equal block.
-            let oldest = block[st.block_oldest];
-            hash.remove(st.block_len, oldest);
-            let r = r.read(&mut block[st.block_oldest..st.block_oldest + 1])?;
-            if r > 0 {
-                // If there are still bytes to read, update the hash.
-                hash.update(block[st.block_oldest]);
-            } else if st.block_len > 0 {
-                // Else, just shrink the window, so that the current
-                // block's blake2 hash can be compared with the
-                // signature.
-                st.block_len -= 1;
-            } else {
-                // We're done reading the file.
-                break;
-            }
-            st.pending.push(oldest);
-            st.block_oldest = (st.block_oldest + 1) % sig.window;
-        }
-        if !st.pending.is_empty() {
-            // We've reached the end of the file, and have never found
-            // a matching block again.
-            st.result.push(Block::Literal(std::mem::replace(
-                &mut st.pending,
-                Vec::new(),
-            )))
-        }
-    }
-    Ok(Delta {
-        blocks: st.result,
-        window: sig.window,
-    })
-}
 
 // pub struct FutureCompare<R: AsyncRead, B: AsRef<[u8]>+AsMut<[u8]>> {
 //     state: Option<CompareState<R, B>>,
@@ -517,8 +882,9 @@ pub fn compare<R: Read, B:AsRef<[u8]>+AsMut<[u8]>>(sig: &Signature, mut r: R, mu
 //     }
 // }
 
-/// Same as [`compare`](fn.compare.html), except that this function
-/// reads the file asynchronously.
+// Same as [`compare`](fn.compare.html), except that this function
+// reads the file asynchronously.
+// 
 // pub fn compare_fut<R: AsyncRead, B: AsRef<[u8]>+AsMut<[u8]>>(sig: Signature, r: R, block: B) -> FutureCompare<R, B> {
 //     assert_eq!(block.as_ref().len(), sig.window);
 //     FutureCompare {
@@ -530,277 +896,3 @@ pub fn compare<R: Read, B:AsRef<[u8]>+AsMut<[u8]>>(sig: &Signature, mut r: R, mu
 //     }
 // }
 
-fn matches(st: &mut State, sig: &Signature, block: &[u8], hash: &adler32::RollingAdler32) -> bool {
-    if let Some(h) = sig.chunks.get(&hash.hash()) {
-        let blake2 = {
-            let mut b = blake2_rfc::blake2b::Blake2b::new(BLAKE2_SIZE);
-            if st.block_oldest + st.block_len > sig.window {
-                b.update(&block[st.block_oldest..]);
-                b.update(&block[..(st.block_oldest + st.block_len) % sig.window]);
-            } else {
-                b.update(&block[st.block_oldest..st.block_oldest + st.block_len])
-            }
-            b.finalize()
-        };
-
-        if let Some(&index) = h.get(blake2.as_bytes()) {
-            // Matching hash found! If we have non-matching
-            // material before the match, add it.
-            if !st.pending.is_empty() {
-                st.result.push(Block::Literal(std::mem::replace(
-                    &mut st.pending,
-                    Vec::new(),
-                )));
-            }
-            st.result.push(Block::FromSource(index as u64));
-            return true;
-        }
-    }
-    false
-}
-
-/// Restore a file, using a "delta" (resulting from
-/// [`compare`](fn.compare.html))
-pub fn restore<W: Write>(mut w: W, s: &[u8], delta: &Delta) -> Result<(), std::io::Error> {
-    for d in delta.blocks.iter() {
-        match *d {
-            Block::FromSource(i) => {
-                let i = i as usize;
-                if i + delta.window <= s.len() {
-                    w.write(&s[i..i + delta.window])?
-                } else {
-                    w.write(&s[i..])?
-                }
-            }
-            Block::Literal(ref l) => w.write(l)?,
-        };
-    }
-    Ok(())
-}
-
-/// Same as [`restore`](fn.restore.html), except that this function
-/// uses a seekable, readable stream instead of the entire file in a
-/// slice.
-///
-/// `buf` must be a buffer the same size as `sig.window`.
-pub fn restore_seek<W: Write, R: Read + Seek, B: AsRef<[u8]>+AsMut<[u8]>>(
-    mut w: W,
-    mut s: R,
-    mut buf: B,
-    delta: &Delta,
-) -> Result<(), std::io::Error> {
-    let buf = buf.as_mut();
-
-    for d in delta.blocks.iter() {
-        match *d {
-            Block::FromSource(i) => {
-                s.seek(SeekFrom::Start(i as u64))?;
-                // fill the buffer from r.
-                let mut n = 0;
-                loop {
-                    let r = s.read(&mut buf[n..delta.window])?;
-                    if r == 0 {
-                        break;
-                    }
-                    n += r
-                }
-                // write the buffer to w.
-                let mut m = 0;
-                while m < n {
-                    m += w.write(&buf[m..n])?;
-                }
-            }
-            Block::Literal(ref l) => {
-                w.write(l)?;
-            }
-        }
-    }
-    Ok(())
-}
-
-// pub struct FutureRestore<W: AsyncWrite, R: Read + Seek, B: AsMut<[u8]> + AsRef<[u8]>> {
-//     state: Option<RestoreState<W, R, B>>,
-//     delta: Delta,
-//     delta_pos: usize,
-// }
-
-// enum RestoreState<W: AsyncWrite, R: Read + Seek, B: AsMut<[u8]> + AsRef<[u8]>> {
-//     Delta {
-//         w: W,
-//         r: R,
-//         buf: B,
-//     },
-//     WriteBuf {
-//         write: WriteBlock<W, B>,
-//         r: R,
-//     },
-//     WriteVec {
-//         write: WriteAll<W, Vec<u8>>,
-//         r: R,
-//         buf: B,
-//     },
-// }
-
-/// Same as [`restore_seek`](fn.restore_seek.html), except that this
-/// function writes its output asynchronously.
-// pub fn restore_seek_fut<W: AsyncWrite, R: Read + Seek, B: AsMut<[u8]> + AsRef<[u8]>>(
-//     w: W,
-//     r: R,
-//     buf: B,
-//     delta: Delta,
-// ) -> FutureRestore<W, R, B> {
-//     FutureRestore {
-//         state: Some(RestoreState::Delta { w, r, buf }),
-//         delta,
-//         delta_pos: 0,
-//     }
-// }
-
-// impl<W: AsyncWrite, R: Read + Seek, B: AsMut<[u8]> + AsRef<[u8]>> Future
-//     for FutureRestore<W, R, B> {
-//     type Item = (W, R, Delta);
-//     type Error = std::io::Error;
-//     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-//         loop {
-//             match self.state.take() {
-//                 Some(RestoreState::Delta { w, mut r, mut buf }) => {
-//                     if self.delta_pos >= self.delta.blocks.len() {
-//                         return Ok(Async::Ready((
-//                             w,
-//                             r,
-//                             std::mem::replace(&mut self.delta, Delta::default()),
-//                         )));
-//                     }
-//                     match self.delta.blocks[self.delta_pos] {
-//                         Block::FromSource(i) => {
-//                             r.seek(SeekFrom::Start(i as u64))?;
-//                             // fill the buffer from r.
-//                             let mut n = 0;
-//                             {
-//                                 let buf_ = buf.as_mut();
-//                                 loop {
-//                                     let k = r.read(&mut buf_[n..self.delta.window])?;
-//                                     if k == 0 {
-//                                         break;
-//                                     }
-//                                     n += k
-//                                 }
-//                             }
-//                             // write the buffer to w.
-//                             self.state = Some(RestoreState::WriteBuf {
-//                                 write: WriteBlock::new(w, buf, 0, n),
-//                                 r,
-//                             })
-//                         }
-//                         Block::Literal(ref mut l) => {
-//                             let vec = std::mem::replace(l, Vec::new());
-//                             self.state = Some(RestoreState::WriteVec {
-//                                 write: write_all(w, vec),
-//                                 r,
-//                                 buf,
-//                             })
-//                         }
-//                     }
-//                 }
-//                 Some(RestoreState::WriteBuf { mut write, r }) => match write.poll()? {
-//                     Async::Ready((w, buf)) => {
-//                         self.delta_pos = self.delta_pos + 1;
-//                         self.state = Some(RestoreState::Delta { w, r, buf })
-//                     }
-//                     Async::NotReady => {
-//                         self.state = Some(RestoreState::WriteBuf { write, r });
-//                         return Ok(Async::NotReady);
-//                     }
-//                 },
-//                 Some(RestoreState::WriteVec { mut write, r, buf }) => match write.poll()? {
-//                     Async::Ready((w, vec)) => {
-//                         self.delta.blocks[self.delta_pos] = Block::Literal(vec);
-//                         self.delta_pos += 1;
-//                         self.state = Some(RestoreState::Delta { w, r, buf })
-//                     }
-//                     Async::NotReady => {
-//                         self.state = Some(RestoreState::WriteVec { write, r, buf });
-//                         return Ok(Async::NotReady);
-//                     }
-//                 },
-//                 None => panic!(""),
-//             }
-//         }
-//     }
-// }
-
-#[cfg(test)]
-mod tests {
-    use rand;
-    use super::*;
-    use rand::Rng;
-    // use tokio_core::reactor::Core;
-    const WINDOW: usize = 32;
-    // #[test]
-    // fn basic() {
-    //     for index in 0..10 {
-    //         let source = rand::thread_rng()
-    //             .gen_ascii_chars()
-    //             .take(WINDOW * 10 + 8)
-    //             .collect::<String>();
-    //         let mut modified = source.clone();
-    //         let index = WINDOW * index + 3;
-    //         unsafe {
-    //             modified.as_bytes_mut()[index] =
-    //                 ((source.as_bytes()[index] as usize + 1) & 255) as u8
-    //         }
-    //         let block = [0; WINDOW];
-    //         let source_sig = signature(source.as_bytes(), block).unwrap();
-    //         let comp = compare(&source_sig, modified.as_bytes(), block).unwrap();
-
-    //         let mut restored = Vec::new();
-    //         let source = std::io::Cursor::new(source.as_bytes());
-    //         restore_seek(&mut restored, source, [0; WINDOW], &comp).unwrap();
-    //         if &restored[..] != modified.as_bytes() {
-    //             for i in 0..10 {
-    //                 let a = &restored[i * WINDOW..(i + 1) * WINDOW];
-    //                 let b = &modified.as_bytes()[i * WINDOW..(i + 1) * WINDOW];
-    //                 println!("{:?}\n{:?}\n", a, b);
-    //                 if a != b {
-    //                     println!(">>>>>>>>");
-    //                 }
-    //             }
-    //             panic!("different");
-    //         }
-    //     }
-    // }
-    // #[test]
-    // fn futures() {
-    //     let source = rand::thread_rng()
-    //         .gen_ascii_chars()
-    //         .take(WINDOW * 10 + 8)
-    //         .collect::<String>();
-    //     let mut modified = source.clone();
-    //     let index = WINDOW + 3;
-    //     unsafe {
-    //         modified.as_bytes_mut()[index] = ((source.as_bytes()[index] as usize + 1) & 255) as u8
-    //     }
-
-    //     let mut l = Core::new().unwrap();
-    //     let block = [0; WINDOW];
-    //     let source_sig = signature(source.as_bytes(), block).unwrap();
-    //     println!("==================\n");
-    //     let (_, source_sig_) = l.run(signature_fut(source.as_bytes(), block)).unwrap();
-    //     assert_eq!(source_sig, source_sig_);
-    //     println!("{:?} {:?}", source_sig, source_sig_);
-
-    //     let comp = compare(&source_sig, modified.as_bytes(), block).unwrap();
-    //     let (_, _, comp_) = l.run(compare_fut(source_sig, modified.as_bytes(), block)).unwrap();
-    //     assert_eq!(comp, comp_);
-    //     println!("{:?}", comp);
-
-    //     let v = Vec::new();
-    //     let (rest_, _, _) = l.run(restore_seek_fut(
-    //         std::io::Cursor::new(v),
-    //         std::io::Cursor::new(source.as_bytes()),
-    //         [0; WINDOW],
-    //         comp,
-    //     )).unwrap();
-    //     assert_eq!(rest_.into_inner().as_slice(), modified.as_bytes());
-    // }
-}
