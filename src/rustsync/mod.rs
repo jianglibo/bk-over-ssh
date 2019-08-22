@@ -1,6 +1,6 @@
-use std::collections::HashMap;
-use std::io::{Read, Seek, SeekFrom, Write};
 use log::*;
+use std::collections::HashMap;
+use std::io;
 // use tokio_io::{AsyncRead, AsyncWrite};
 // use tokio_io::io::{write_all, WriteAll};
 // use futures::{Async, Future, Poll};
@@ -23,15 +23,17 @@ impl std::borrow::Borrow<[u8]> for Blake2b {
 /// content-indexed description of the blocks in the file.
 pub struct Signature {
     pub window: usize,
-    chunks: HashMap<u32, HashMap<Blake2b, usize>>
+    chunks: HashMap<u32, HashMap<Blake2b, usize>>,
 }
-
 
 /// Create the "signature" of a file, essentially a content-indexed
 /// map of blocks. The first step of the protocol is to run this
 /// function on the "source" (the remote file when downloading, the
 /// local file while uploading).
-pub fn signature<R: Read, B: AsRef<[u8]>+AsMut<[u8]>>(mut r: R, mut buff: B) -> Result<Signature, std::io::Error> {
+pub fn signature<R: io::Read, B: AsRef<[u8]> + AsMut<[u8]>>(
+    mut r: R,
+    mut buff: B,
+) -> Result<Signature, std::io::Error> {
     let mut chunks = HashMap::new();
 
     let mut i = 0;
@@ -39,7 +41,8 @@ pub fn signature<R: Read, B: AsRef<[u8]>+AsMut<[u8]>>(mut r: R, mut buff: B) -> 
     let mut eof = false;
     while !eof {
         let mut j = 0;
-        while j < buff.len() { // full fill the block. for the last block, maybe not full.
+        while j < buff.len() {
+            // full fill the block. for the last block, maybe not full.
             let r = r.read(&mut buff[j..])?;
             if r == 0 {
                 eof = true;
@@ -50,11 +53,13 @@ pub fn signature<R: Read, B: AsRef<[u8]>+AsMut<[u8]>>(mut r: R, mut buff: B) -> 
         let readed_block = &buff[..j];
         let hash = adler32::RollingAdler32::from_buffer(readed_block);
         let mut blake2 = [0; BLAKE2_SIZE];
-        blake2.clone_from_slice(blake2_rfc::blake2b::blake2b(BLAKE2_SIZE, &[], &readed_block).as_bytes());
+        blake2.clone_from_slice(
+            blake2_rfc::blake2b::blake2b(BLAKE2_SIZE, &[], &readed_block).as_bytes(),
+        );
         // println!("block: {:?}, blake2: {:?}", block, blake2);
         chunks
             .entry(hash.hash())
-            .or_insert(HashMap::new())
+            .or_insert_with(HashMap::new)
             .insert(Blake2b(blake2), i);
 
         i += readed_block.len()
@@ -62,10 +67,9 @@ pub fn signature<R: Read, B: AsRef<[u8]>+AsMut<[u8]>>(mut r: R, mut buff: B) -> 
 
     Ok(Signature {
         window: buff.len(),
-        chunks
+        chunks,
     })
 }
-
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub enum Block {
@@ -105,7 +109,11 @@ pub struct Delta {
 /// remote file when uploading.
 ///
 /// `block` must be a buffer the same size as `sig.window`.
-pub fn compare<R: Read, B:AsRef<[u8]>+AsMut<[u8]>>(sig: &Signature, mut r: R, mut buff: B) -> Result<Delta, std::io::Error> {
+pub fn compare<R: io::Read, B: AsRef<[u8]> + AsMut<[u8]>>(
+    sig: &Signature,
+    mut r: R,
+    mut buff: B,
+) -> Result<Delta, std::io::Error> {
     let mut st = State::new();
     let buff = buff.as_mut();
     assert_eq!(buff.len(), sig.window);
@@ -139,7 +147,7 @@ pub fn compare<R: Read, B:AsRef<[u8]>+AsMut<[u8]>>(sig: &Signature, mut r: R, mu
             // until finding an equal block.
             let oldest = buff[st.block_oldest];
             hash.remove(st.block_len, oldest);
-            let r = r.read(&mut buff[st.block_oldest..st.block_oldest + 1])?;
+            let r = r.read(&mut buff[st.block_oldest..=st.block_oldest])?;
             if r > 0 {
                 // If there are still bytes to read, update the hash.
                 hash.update(buff[st.block_oldest]);
@@ -171,12 +179,21 @@ pub fn compare<R: Read, B:AsRef<[u8]>+AsMut<[u8]>>(sig: &Signature, mut r: R, mu
     })
 }
 
+pub trait PendingStore {
+    fn push_byte(&mut self, byte: u8);
+    fn get_reader<R: io::Read>(&self) -> io::BufReader<R>;
+}
+
 /// Compare a signature with an existing file. This is the second step
 /// of the protocol, `r` is the local file when downloading, and the
 /// remote file when uploading.
 ///
 /// `block` must be a buffer the same size as `sig.window`.
-pub fn compare_1<R: Read, B:AsRef<[u8]>+AsMut<[u8]>>(sig: &Signature, mut r: R, mut buff: B) -> Result<Delta, std::io::Error> {
+pub fn compare_1<R: io::Read, B: AsRef<[u8]> + AsMut<[u8]>>(
+    sig: &Signature,
+    mut r: R,
+    mut buff: B,
+) -> Result<Delta, std::io::Error> {
     let mut st = State::new();
     let buff = buff.as_mut();
     assert_eq!(buff.len(), sig.window);
@@ -211,7 +228,7 @@ pub fn compare_1<R: Read, B:AsRef<[u8]>+AsMut<[u8]>>(sig: &Signature, mut r: R, 
             // until finding an equal block.
             let oldest = buff[st.block_oldest];
             hash.remove(st.block_len, oldest);
-            let r = r.read(&mut buff[st.block_oldest..st.block_oldest + 1])?;
+            let r = r.read(&mut buff[st.block_oldest..=st.block_oldest])?;
             if r > 0 {
                 // If there are still bytes to read, update the hash.
                 hash.update(buff[st.block_oldest]);
@@ -244,8 +261,6 @@ pub fn compare_1<R: Read, B:AsRef<[u8]>+AsMut<[u8]>>(sig: &Signature, mut r: R, 
     })
 }
 
-
-
 fn matches(st: &mut State, sig: &Signature, block: &[u8], hash: &adler32::RollingAdler32) -> bool {
     if let Some(h) = sig.chunks.get(&hash.hash()) {
         let blake2 = {
@@ -277,7 +292,7 @@ fn matches(st: &mut State, sig: &Signature, block: &[u8], hash: &adler32::Rollin
 
 /// Restore a file, using a "delta" (resulting from
 /// [`compare`](fn.compare.html))
-pub fn restore<W: Write>(mut w: W, s: &[u8], delta: &Delta) -> Result<(), std::io::Error> {
+pub fn restore<W: io::Write>(mut w: W, s: &[u8], delta: &Delta) -> Result<(), std::io::Error> {
     for d in delta.blocks.iter() {
         match *d {
             Block::FromSource(i) => {
@@ -299,7 +314,7 @@ pub fn restore<W: Write>(mut w: W, s: &[u8], delta: &Delta) -> Result<(), std::i
 /// slice.
 ///
 /// `buf` must be a buffer the same size as `sig.window`.
-pub fn restore_seek<W: Write, R: Read + Seek, B: AsRef<[u8]>+AsMut<[u8]>>(
+pub fn restore_seek<W: io::Write, R: io::Read + io::Seek, B: AsRef<[u8]> + AsMut<[u8]>>(
     mut w: W,
     mut s: R,
     mut buf: B,
@@ -310,7 +325,7 @@ pub fn restore_seek<W: Write, R: Read + Seek, B: AsRef<[u8]>+AsMut<[u8]>>(
     for d in delta.blocks.iter() {
         match *d {
             Block::FromSource(i) => {
-                s.seek(SeekFrom::Start(i as u64))?;
+                s.seek(io::SeekFrom::Start(i as u64))?;
                 // fill the buffer from r.
                 let mut n = 0;
                 loop {
@@ -327,23 +342,21 @@ pub fn restore_seek<W: Write, R: Read + Seek, B: AsRef<[u8]>+AsMut<[u8]>>(
                 }
             }
             Block::Literal(ref l) => {
-                w.write(l)?;
+                w.write_all(l)?;
             }
         }
     }
     Ok(())
 }
 
-
-
 #[cfg(test)]
 mod tests {
-    use rand;
     use super::*;
-    use rand::Rng;
-    use std::{io};
-    use rand::distributions::Alphanumeric;
     use crate::log_util;
+    use rand;
+    use rand::distributions::Alphanumeric;
+    use rand::Rng;
+    use std::io::{self, Read};
     use tempfile;
     // use tokio_core::reactor::Core;
     const WINDOW: usize = 32;
@@ -389,12 +402,23 @@ mod tests {
 
     #[test]
     fn t_write_object() -> Result<(), failure::Error> {
+        log_util::setup_logger(vec![""], vec![]);
         let tf = tempfile::tempfile()?;
         let mut br = io::BufReader::new(tf);
         let mut buf: [u8; 32] = [0; 32];
         let len = br.read(&mut buf)?;
         assert_eq!(len, 0);
         // to_be_bytes from_be_bytes.
+        let mut cursor = io::Cursor::new(vec![1,2 ,3]);
+        let mut buf = [0; 1024];
+        info!("{:?}", cursor);
+        let size = cursor.read(&mut buf)?;
+        info!("{:?}, position: {:?}", size, cursor.position());
+        // assert_eq!(size, 15);
+        // let mut v = Vec::<u8>::new();
+        // let ios = io::IoSliceMut::new(&mut v);
+        // let size = buff.read_vectored(&mut [ios])?;
+        // assert_eq!(size, 15);
         Ok(())
     }
 }
