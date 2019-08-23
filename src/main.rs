@@ -13,6 +13,7 @@ mod actions;
 mod data_shape;
 mod develope;
 mod log_util;
+mod rustsync;
 
 use std::borrow::Cow::{self, Borrowed, Owned};
 
@@ -22,6 +23,7 @@ use rustyline::error::ReadlineError;
 use rustyline::highlight::{Highlighter, MatchingBracketHighlighter};
 use rustyline::hint::{Hinter, HistoryHinter};
 use rustyline::{Cmd, CompletionType, Config, Context, EditMode, Editor, Helper, KeyPress};
+use std::time::Instant;
 
 use data_shape::server;
 
@@ -162,7 +164,21 @@ fn main() {
             if let Err(err) = server::sync_dirs(server_config_path, Option::<fs::File>::None) {
                 error!("sync-dirs failed: {:?}", err);
             }
-
+        }
+        ("rsync", Some(sub_matches)) => {
+            match sub_matches.subcommand() {
+                ("signature", Some(sub_sub_matches)) => {
+                    let file = sub_sub_matches.value_of("file").unwrap();
+                    let block_size: Option<usize> = sub_sub_matches.value_of("block-size").and_then(|s|s.parse().ok());
+                    let out: Option<&str> = sub_sub_matches.value_of("out");
+                    let start = Instant::now();
+                    if let Err(err) = rustsync::signature_a_file(file, block_size, out) {
+                        error!("rsync signature failed: {:?}", err);
+                    }
+                    println!("time costs: {:?}", start.elapsed().as_secs());
+                }
+                (_, _) => unimplemented!(), // for brevity
+            }
         }
         ("repl", Some(_)) => {
             main_client();

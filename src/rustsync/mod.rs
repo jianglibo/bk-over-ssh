@@ -1,6 +1,9 @@
+mod record;
+
 use log::*;
 use std::collections::HashMap;
-use std::io;
+use std::{io, fs};
+use std::path::Path;
 // use tokio_io::{AsyncRead, AsyncWrite};
 // use tokio_io::io::{write_all, WriteAll};
 // use futures::{Async, Future, Poll};
@@ -56,7 +59,7 @@ pub fn signature<R: io::Read, B: AsRef<[u8]> + AsMut<[u8]>>(
         blake2.clone_from_slice(
             blake2_rfc::blake2b::blake2b(BLAKE2_SIZE, &[], &readed_block).as_bytes(),
         );
-        // println!("block: {:?}, blake2: {:?}", block, blake2);
+        // println!("blake2: {:?}", blake2.len());
         chunks
             .entry(hash.hash())
             .or_insert_with(HashMap::new)
@@ -79,8 +82,8 @@ pub enum Block {
 
 struct State {
     result: Vec<Block>,
-    block_oldest: usize,
-    block_len: usize,
+    oldest_byte_position: usize,
+    block_content_len: usize,
     pending: Vec<u8>,
 }
 
@@ -88,8 +91,8 @@ impl State {
     fn new() -> Self {
         State {
             result: Vec::new(),
-            block_oldest: 0,
-            block_len: 1,
+            oldest_byte_position: 0,
+            block_content_len: 1,
             pending: Vec::new(),
         }
     }
@@ -117,7 +120,7 @@ pub fn compare<R: io::Read, B: AsRef<[u8]> + AsMut<[u8]>>(
     let mut st = State::new();
     let buff = buff.as_mut();
     assert_eq!(buff.len(), sig.window);
-    while st.block_len > 0 {
+    while st.block_content_len > 0 {
         let mut hash = {
             let mut j = 0;
             let readed_block = {
@@ -128,8 +131,8 @@ pub fn compare<R: io::Read, B: AsRef<[u8]> + AsMut<[u8]>>(
                     }
                     j += r
                 }
-                st.block_oldest = 0;
-                st.block_len = j;
+                st.oldest_byte_position = 0;
+                st.block_content_len = j;
                 &buff[..j]
             };
             adler32::RollingAdler32::from_buffer(readed_block)
@@ -141,28 +144,28 @@ pub fn compare<R: io::Read, B: AsRef<[u8]> + AsMut<[u8]>>(
             if matches(&mut st, sig, &buff, &hash) {
                 break;
             }
-            info!("block_oldest: {:?}", st.block_oldest);
-            info!("block_len: {:?}", st.block_len);
+            info!("block_oldest: {:?}", st.oldest_byte_position);
+            info!("block_len: {:?}", st.block_content_len);
             // The blocks are not equal. Move the hash by one byte
             // until finding an equal block.
-            let oldest = buff[st.block_oldest];
-            hash.remove(st.block_len, oldest);
-            let r = r.read(&mut buff[st.block_oldest..=st.block_oldest])?;
+            let oldest_u8 = buff[st.oldest_byte_position];
+            hash.remove(st.block_content_len, oldest_u8);
+            let r = r.read(&mut buff[st.oldest_byte_position..=st.oldest_byte_position])?;
             if r > 0 {
                 // If there are still bytes to read, update the hash.
-                hash.update(buff[st.block_oldest]);
-            } else if st.block_len > 0 {
+                hash.update(buff[st.oldest_byte_position]);
+            } else if st.block_content_len > 0 {
                 // Else, just shrink the window, so that the current
                 // block's blake2 hash can be compared with the
                 // signature.
-                st.block_len -= 1;
+                st.block_content_len -= 1;
             } else {
                 // We're done reading the file.
                 break;
             }
-            st.pending.push(oldest);
+            st.pending.push(oldest_u8);
             info!("pending: {:?}", st.pending.len());
-            st.block_oldest = (st.block_oldest + 1) % sig.window;
+            st.oldest_byte_position = (st.oldest_byte_position + 1) % sig.window;
         }
         if !st.pending.is_empty() {
             // We've reached the end of the file, and have never found
@@ -184,92 +187,15 @@ pub trait PendingStore {
     fn get_reader<R: io::Read>(&self) -> io::BufReader<R>;
 }
 
-/// Compare a signature with an existing file. This is the second step
-/// of the protocol, `r` is the local file when downloading, and the
-/// remote file when uploading.
-///
-/// `block` must be a buffer the same size as `sig.window`.
-pub fn compare_1<R: io::Read, B: AsRef<[u8]> + AsMut<[u8]>>(
-    sig: &Signature,
-    mut r: R,
-    mut buff: B,
-) -> Result<Delta, std::io::Error> {
-    let mut st = State::new();
-    let buff = buff.as_mut();
-    assert_eq!(buff.len(), sig.window);
-    while st.block_len > 0 {
-        let mut hash = {
-            let mut j = 0;
-            let readed_block = {
-                while j < sig.window {
-                    let r = r.read(&mut buff[..])?;
-                    if r == 0 {
-                        info!("read breaked.");
-                        break;
-                    }
-                    j += r
-                }
-                st.block_oldest = 0;
-                st.block_len = j;
-                &buff[..j]
-            };
-            adler32::RollingAdler32::from_buffer(readed_block)
-        };
-
-        // Starting from the current block (with hash `hash`), find
-        // the next block with a hash that appears in the signature.
-        loop {
-            if matches(&mut st, sig, &buff, &hash) {
-                break;
-            }
-            info!("block_oldest: {:?}", st.block_oldest);
-            info!("block_len: {:?}", st.block_len);
-            // The blocks are not equal. Move the hash by one byte
-            // until finding an equal block.
-            let oldest = buff[st.block_oldest];
-            hash.remove(st.block_len, oldest);
-            let r = r.read(&mut buff[st.block_oldest..=st.block_oldest])?;
-            if r > 0 {
-                // If there are still bytes to read, update the hash.
-                hash.update(buff[st.block_oldest]);
-            } else if st.block_len > 0 {
-                // Else, just shrink the window, so that the current
-                // block's blake2 hash can be compared with the
-                // signature.
-                st.block_len -= 1;
-            } else {
-                // We're done reading the file.
-                break;
-            }
-            st.pending.push(oldest);
-            info!("pending: {:?}", st.pending.len());
-            st.block_oldest = (st.block_oldest + 1) % sig.window;
-        }
-        if !st.pending.is_empty() {
-            // We've reached the end of the file, and have never found
-            // a matching block again.
-            st.result.push(Block::Literal(std::mem::replace(
-                &mut st.pending,
-                Vec::new(),
-            )))
-        }
-    }
-    info!("result len: {:?}", st.result.len());
-    Ok(Delta {
-        blocks: st.result,
-        window: sig.window,
-    })
-}
-
 fn matches(st: &mut State, sig: &Signature, block: &[u8], hash: &adler32::RollingAdler32) -> bool {
     if let Some(h) = sig.chunks.get(&hash.hash()) {
         let blake2 = {
             let mut b = blake2_rfc::blake2b::Blake2b::new(BLAKE2_SIZE);
-            if st.block_oldest + st.block_len > sig.window {
-                b.update(&block[st.block_oldest..]);
-                b.update(&block[..(st.block_oldest + st.block_len) % sig.window]);
+            if st.oldest_byte_position + st.block_content_len > sig.window {
+                b.update(&block[st.oldest_byte_position..]);
+                b.update(&block[..(st.oldest_byte_position + st.block_content_len) % sig.window]);
             } else {
-                b.update(&block[st.block_oldest..st.block_oldest + st.block_len])
+                b.update(&block[st.oldest_byte_position..st.oldest_byte_position + st.block_content_len])
             }
             b.finalize()
         };
@@ -349,6 +275,36 @@ pub fn restore_seek<W: io::Write, R: io::Read + io::Seek, B: AsRef<[u8]> + AsMut
     Ok(())
 }
 
+pub fn signature_a_file(file_name: impl AsRef<Path>, buf_size: Option<usize>, out_file: Option<&str>) -> Result<Option<Signature>, failure::Error> {
+    let f = fs::OpenOptions::new().read(true).open(file_name.as_ref())?;
+    let mut br = io::BufReader::new(f); 
+    let mut buf = vec![0_u8; buf_size.unwrap_or(2048)];
+    let sig = signature(&mut br, &mut buf[..])?;
+    if let Some(out) = out_file {
+        let f = fs::OpenOptions::new().create(true).write(true).truncate(true).open(out)?;
+        serde_json::to_writer_pretty(f, &sig)?;
+        Ok(None)
+    } else {
+        Ok(Some(sig))
+    }
+}
+
+pub fn write_signature_to_file(sig: &Signature, file_name: impl AsRef<Path>) -> Result<(), failure::Error> {
+    let mut wr = record::RecordWriter::<fs::File>::with_file_writer(file_name.as_ref())?;
+    wr.write_field_slice(0_u8, &sig.window.to_be_bytes())?;
+    for (k, v) in sig.chunks.iter() {
+        let u32_bytes = k.to_be_bytes();
+        let mut v_bytes = Vec::new();
+        v_bytes.extend_from_slice(&u32_bytes);
+        for (kk, vv) in v.iter() {
+            v_bytes.extend_from_slice(&kk.0);
+            v_bytes.extend_from_slice(&vv.to_be_bytes());
+        }
+        wr.write_field_slice(1_u8, v_bytes.as_slice())?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -356,8 +312,11 @@ mod tests {
     use rand;
     use rand::distributions::Alphanumeric;
     use rand::Rng;
-    use std::io::{self, Read};
+    use std::{io, fs};
+    use std::io::{Read, Write, Seek};
     use tempfile;
+    use std::time::Instant;
+    use crate::develope::develope_data;
     // use tokio_core::reactor::Core;
     const WINDOW: usize = 32;
     #[test]
@@ -368,20 +327,20 @@ mod tests {
                 .sample_iter(&Alphanumeric)
                 .take(WINDOW * 10 + 8)
                 .collect::<String>();
-            let modified = rand::thread_rng()
-                .sample_iter(&Alphanumeric)
-                .take(WINDOW * 100 + 8)
-                .collect::<String>();
-            // let mut modified = source.clone();
-            // let index = WINDOW * index + 3;
-            // unsafe {
-            //     modified.as_bytes_mut()[index] =
-            //         ((source.as_bytes()[index] as usize + 1) & 255) as u8
-            // }
+            // let modified = rand::thread_rng()
+            //     .sample_iter(&Alphanumeric)
+            //     .take(WINDOW * 100 + 8)
+            //     .collect::<String>();
+            let mut modified = source.clone();
+            let index = WINDOW * index + 3;
+            unsafe {
+                modified.as_bytes_mut()[index] =
+                    ((source.as_bytes()[index] as usize + 1) & 255) as u8
+            }
             let block = [0; WINDOW];
             let source_sig = signature(source.as_bytes(), block).unwrap();
             // println!("source_sig: {:?}", source_sig);
-            let comp = compare_1(&source_sig, modified.as_bytes(), block).unwrap();
+            let comp = compare(&source_sig, modified.as_bytes(), block).unwrap();
 
             let mut restored = Vec::new();
             let source = std::io::Cursor::new(source.as_bytes());
@@ -399,6 +358,22 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn t_u32() -> Result<(), failure::Error> {
+        let mut cursor = io::Cursor::<Vec<u8>>::new(Vec::new());
+        assert_eq!(cursor.position(), 0);
+        let a_u32 = 55_u32;
+        cursor.write_all(&a_u32.to_be_bytes())?;
+        assert_eq!(cursor.position(), 4);
+        cursor.seek(io::SeekFrom::Start(0))?;
+        let mut b = [0_u8; 4];
+        cursor.read_exact(&mut b)?;
+        let b_u32 = u32::from_be_bytes(b);
+        assert_eq!(b_u32, a_u32);
+        Ok(())
+    }
+
 
     #[test]
     fn t_write_object() -> Result<(), failure::Error> {
@@ -419,6 +394,19 @@ mod tests {
         // let ios = io::IoSliceMut::new(&mut v);
         // let size = buff.read_vectored(&mut [ios])?;
         // assert_eq!(size, 15);
+        Ok(())
+    }
+
+    #[test]
+    fn t_signature_large_file() -> Result<(), failure::Error> {
+        log_util::setup_logger(vec![""], vec![]);
+        let dev_env = develope_data::load_env();
+        let start = Instant::now();
+        signature_a_file(&dev_env.servers.ubuntu18.test_files.midum_binary_file, Some(2048), None)?;
+        info!("time elapsed: {:?}", start.elapsed().as_secs());
+        let start = Instant::now();
+        signature_a_file(&dev_env.servers.ubuntu18.test_files.midum_binary_file, Some(4096), None)?;
+        info!("time elapsed: {:?}", start.elapsed().as_secs());
         Ok(())
     }
 }

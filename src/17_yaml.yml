@@ -90,6 +90,22 @@ subcommands:
                 long: server-yml
                 required: true
                 takes_value: true
+    - rsync:
+        subcommands:
+            - signature:
+                args:
+                    - file:
+                        long: file
+                        required: true
+                        takes_value: true
+                    - block-size:
+                        long: block-size
+                        required: false
+                        takes_value: true
+                    - out:
+                        long: out
+                        required: false
+                        takes_value: true
     - completions:
         about: completions from yaml
         version: "0.1"

@@ -3,7 +3,8 @@ name = "ssh-client-demo"
 version = "0.1.0"
 authors = ["libo <jianglibo@gmail.com>"]
 edition = "2018"
-default-run = "rsync_main"
+# default-run = "rsync_main"
+default-run = "ssh-client-demo"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
