@@ -92,6 +92,21 @@ subcommands:
                 takes_value: true
     - rsync:
         subcommands:
+            - list-files:
+                args:
+                    - dirs:
+                        long: dirs
+                        multiple: true
+                        required: true
+                        takes_value: true
+                        min_values: 1
+                    - out:
+                        long: out
+                        required: true
+                        takes_value: true
+                    - skip-sha1:
+                        long: skip-sha1
+                        required: false
             - signature:
                 args:
                     - file:

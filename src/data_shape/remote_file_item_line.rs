@@ -16,16 +16,17 @@ pub struct RemoteFileItemLineOwned {
 }
 
 impl RemoteFileItemLineOwned {
-    pub fn from_path(base_path: impl AsRef<Path>, path: PathBuf) -> Option<Self> {
+    pub fn from_path(base_path: impl AsRef<Path>, path: PathBuf, skip_sha1: bool) -> Option<Self> {
         let metadata_r = path.metadata();
         match metadata_r {
             Ok(metadata) => {
-                if let Some(sha1) = hash_file_sha1(&path) {
+                let sha1 = if !skip_sha1 { hash_file_sha1(&path) } else { Option::<String>::None };
+                // if let Some(sha1) = hash_file_sha1(&path) {
                     let relative_o = path.strip_prefix(&base_path).ok().and_then(|p| p.to_str());
                     if let Some(relative) = relative_o {
                         return Some(Self {
                             path: relative.to_string(),
-                            sha1: Some(sha1),
+                            sha1,
                             len: metadata.len(),
                             modified: metadata
                                 .modified()
@@ -41,7 +42,7 @@ impl RemoteFileItemLineOwned {
                     } else {
                         error!("RemoteFileItem path name to_str() failed. {:?}", path);
                     }
-                }
+                // }
             }
             Err(err) => {
                 error!("RemoteFileItem from_path failed: {:?}, {:?}", path, err);
@@ -97,12 +98,12 @@ impl<'a> RemoteFileItemLine<'a> {
     }
 }
 
-fn load_remote_item_owned<O: io::Write>(dir_path: impl AsRef<Path>, out: &mut O) {
+fn load_remote_item_owned<O: io::Write>(dir_path: impl AsRef<Path>, out: &mut O, skip_sha1: bool) {
     let bp = Path::new(dir_path.as_ref()).canonicalize();
     match bp {
         Ok(base_path) => {
             if let Some(path_str) = base_path.to_str() {
-                if let Err(err) = write!(out, "{}\n", path_str) {
+                if let Err(err) = writeln!(out, "{}", path_str) {
                     error!("{}", err);
                     return;
                 }
@@ -116,12 +117,12 @@ fn load_remote_item_owned<O: io::Write>(dir_path: impl AsRef<Path>, out: &mut O)
                 .filter_map(|e| e.ok())
                 .filter(|d| d.file_type().is_file())
                 .filter_map(|d| d.path().canonicalize().ok())
-                .filter_map(|d| RemoteFileItemLineOwned::from_path(&base_path, d))
+                .filter_map(|d| RemoteFileItemLineOwned::from_path(&base_path, d, skip_sha1))
                 .for_each(|owned| {
                     let it = RemoteFileItemLine::from(&owned);
                     match serde_json::to_string(&it) {
                         Ok(line) => {
-                            if let Err(err) = write!(out, "{}\n", line) {
+                            if let Err(err) = writeln!(out, "{}", line) {
                                 error!("write item line failed: {:?}, {:?}", err, line);
                             }
                         }
@@ -140,11 +141,12 @@ fn load_remote_item_owned<O: io::Write>(dir_path: impl AsRef<Path>, out: &mut O)
 pub fn load_dirs<'a>(
     dirs: impl Iterator<Item = &'a str>,
     out: &'a str,
+    skip_sha1: bool,
 ) -> Result<(), failure::Error> {
     let mut wf = fs::OpenOptions::new().create(true).write(true).open(out)?;
 
     for one_dir in dirs {
-        load_remote_item_owned(one_dir, &mut wf);
+        load_remote_item_owned(one_dir, &mut wf, skip_sha1);
     }
     Ok(())
 }
@@ -159,7 +161,15 @@ mod tests {
     fn t_from_path() -> Result<(), failure::Error> {
         log_util::setup_logger(vec![""], vec![]);
         let dirs = vec!["fixtures/adir"].into_iter();
-        load_dirs(dirs, "fixtures/linux_remote_item_dir.txt")?;
+        load_dirs(dirs, "fixtures/linux_remote_item_dir.txt", true)?;
+        Ok(())
+    }
+
+    #[test]
+    fn t_from_path_to_path() -> Result<(), failure::Error> {
+        log_util::setup_logger(vec![""], vec![]);
+        let dirs = vec!["F:/"].into_iter();
+        load_dirs(dirs, "target/linux_remote_item_dir.txt", true)?;
         Ok(())
     }
 }

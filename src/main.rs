@@ -25,7 +25,7 @@ use rustyline::hint::{Hinter, HistoryHinter};
 use rustyline::{Cmd, CompletionType, Config, Context, EditMode, Editor, Helper, KeyPress};
 use std::time::Instant;
 
-use data_shape::server;
+use data_shape::{server, load_dirs};
 
 struct MyHelper {
     completer: FilenameCompleter,
@@ -173,6 +173,16 @@ fn main() {
                     let out: Option<&str> = sub_sub_matches.value_of("out");
                     let start = Instant::now();
                     if let Err(err) = rustsync::signature_a_file(file, block_size, out) {
+                        error!("rsync signature failed: {:?}", err);
+                    }
+                    println!("time costs: {:?}", start.elapsed().as_secs());
+                }
+                ("list-files", Some(sub_sub_matches)) => {
+                    let dirs = sub_sub_matches.values_of("dirs").unwrap();
+                    let out = sub_sub_matches.value_of("out").unwrap();
+                    let skip_sha1 = sub_sub_matches.is_present("skip-sha1");
+                    let start = Instant::now();
+                    if let Err(err) = load_dirs(dirs, out, skip_sha1) {
                         error!("rsync signature failed: {:?}", err);
                     }
                     println!("time costs: {:?}", start.elapsed().as_secs());
