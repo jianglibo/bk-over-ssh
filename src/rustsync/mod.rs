@@ -107,7 +107,7 @@ pub trait Delta<B: Block> {
     fn push_from_source(&mut self, position: u64) -> Result<(), failure::Error>;
     fn push_byte(&mut self, byte: u8) -> Result<(), failure::Error>;
     fn window(&self) -> usize;
-    fn next_segment(&mut self) -> Result<Option<&mut B>, failure::Error>;
+    fn next_segment(&mut self) -> Result<Option<B>, failure::Error>;
     fn finishup(&mut self) -> Result<(), failure::Error>;
 }
 

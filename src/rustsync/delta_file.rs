@@ -1,17 +1,29 @@
 use super::{record, Block, Delta};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use std::{fs, io, io::Write};
+use std::{fs, io, io::{Write, Read}};
+use std::marker::PhantomData;
 
 const TEN_MEGA_BYTES: usize = 10 * 1024 * 1024;
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub enum BlockFile {
-    FromSource(u64),
-    Literal(usize),
+const LITERAL_FIELD_BYTE: u8 = 1;
+const FROM_SOURCE_FIELD_BYTE: u8 = 2;
+
+
+#[derive(Debug)]
+pub struct LiteralReader<'lr, 'reader> {
+    len: u64,
+    reader: &'reader fs::File,
+    phantom: PhantomData<&'lr bool>,
 }
 
-impl Block for BlockFile {
+#[derive(Debug)]
+pub enum BlockFile<'bf, 'reader> {
+    FromSource(u64),
+    Literal(LiteralReader<'bf, 'reader>),
+}
+
+impl<'bf, 'reader> Block for BlockFile<'bf, 'reader> {
     fn from_source(&self) -> Option<u64> {
         if let BlockFile::FromSource(i) = self {
             Some(*i)
@@ -32,41 +44,44 @@ impl Block for BlockFile {
 
 #[derive(Debug)]
 /// The result of comparing two files
-pub struct DeltaFile {
+pub struct DeltaFile<'df> {
     /// Description of the new file in terms of blocks.
-    wr: Option<record::RecordWriter<fs::File>>,
-    rr: Option<record::RecordReader<fs::File>>,
+    wr: Option<&'df mut record::RecordWriter<fs::File>>,
+    rr: Option<&'df mut record::RecordReader<'df, fs::File>>,
     pending_file: Option<fs::File>,
     pending: Vec<u8>,
     window: usize,
     index: usize,
     pending_valve: usize,
+    phantom: PhantomData<&'df bool>,
 }
 
-impl<'a> DeltaFile {
+impl<'df> DeltaFile<'df> {
     pub fn create_delta_file(
-        file: impl AsRef<Path>,
+        record_writer: &'df mut record::RecordWriter::<fs::File>,
         window: usize,
         pending_valve: Option<usize>,
     ) -> Result<Self, failure::Error> {
-        let mut wr = record::RecordWriter::<fs::File>::with_file_writer(file.as_ref())?;
-        wr.write_field_slice(0_u8, &window.to_be_bytes())?;
+        // let mut wr = record::RecordWriter::<fs::File>::with_file_writer(file.as_ref())?;
+        record_writer.write_field_slice(0_u8, &window.to_be_bytes())?;
         Ok(Self {
-            wr: Some(wr),
+            wr: Some(record_writer),
             rr: None,
             pending_file: None,
             pending: Vec::new(),
             window,
             index: 0,
             pending_valve: pending_valve.unwrap_or(TEN_MEGA_BYTES),
+            phantom: PhantomData,
         })
     }
 
     pub fn read_delta_file(
-        file: impl AsRef<Path>,
+        record_reader: &'df mut record::RecordReader<'df, fs::File>,
     ) -> Result<Self, failure::Error> {
-        let mut rr = record::RecordReader::<fs::File>::with_file_reader(file.as_ref())?;
-        let header = rr.read_field_slice()?;
+        // let mut rr = record::RecordReader::<fs::File>::with_file_reader(file.as_ref())?;
+        // let record_reader = record::RecordReader::<fs::File>::with_file_reader(file)?;
+        let header = record_reader.read_field_slice()?;
         ensure!(header.is_some(), "delta_file should has header record.");
         let (_, u8_vec) = header.unwrap();
         let mut ary = [0_u8; 8];
@@ -74,12 +89,13 @@ impl<'a> DeltaFile {
         let window = usize::from_be_bytes(ary);
         Ok(Self {
             wr: None,
-            rr: Some(rr),
+            rr: Some(record_reader),
             pending_file: None,
             pending: Vec::new(),
             window,
             index: 0,
             pending_valve: TEN_MEGA_BYTES,
+            phantom: PhantomData,
         })
     }
 
@@ -99,7 +115,7 @@ impl<'a> DeltaFile {
     }
 }
 
-impl Delta<BlockFile> for DeltaFile {
+impl<'df, 'bf, 'reader> Delta<BlockFile<'bf, 'reader>> for DeltaFile<'df> {
     fn push_from_source(&mut self, position: u64) -> Result<(), failure::Error> {
         ensure!(self.wr.is_some(), "delta_file in wr mode, wr should'nt be None.");
         self.flush_pending()?;
@@ -126,15 +142,35 @@ impl Delta<BlockFile> for DeltaFile {
         self.window
     }
 
-    fn next_segment(&mut self) -> Result<Option<&mut BlockFile>, failure::Error> {
+    fn next_segment(&mut self) -> Result<Option<BlockFile<'bf, 'reader>>, failure::Error> {
         ensure!(self.rr.is_some(), "delta_file in rr mode, rr should'nt be None.");
 
-        if let Some(field) = self.rr.as_mut().unwrap().read_field_slice()? {
-            // TODO read_field_header()
+        if let Some((field_type, field_len)) = self.rr.as_mut().unwrap().read_field_header()? {
+           match field_type {
+               FROM_SOURCE_FIELD_BYTE => {
+                   if let Ok(Some(position)) = self.rr.as_mut().unwrap().read_u64() {
+                    let block = BlockFile::FromSource(position);
+                   Ok(Some(block))
+                   } else {
+                       bail!("read_u64 failed.")
+                   }
+               },
+               LITERAL_FIELD_BYTE => {
+                   let reader = self.rr.as_mut().unwrap().inner_reader();
+                   let l = LiteralReader {
+                       len: field_len,
+                       reader,
+                       phantom: PhantomData,
+                   };
+                   Ok(Some(BlockFile::Literal(l)))
+               },
+               _ => {
+                   bail!("got unexpected field_type");
+               }
+           } 
+        } else {
+            Ok(None)
         }
-        // let t = self.blocks.get(self.index);
-        // self.index += 1;
-        Ok(None)
     }
 
     fn finishup(&mut self) -> Result<(), failure::Error> {
@@ -142,3 +178,46 @@ impl Delta<BlockFile> for DeltaFile {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+struct FontLoader(String);
+struct Font<'a>(&'a str);
+
+impl FontLoader {
+    fn load(&self) -> Font {
+        Font(&self.0)
+    }
+}
+
+struct Window;
+
+// struct Phi<'window> {
+//     window: &'window Window,
+//     loader: FontLoader,
+//     font: Option<Font<'window>>,
+// }
+
+// impl<'window> Phi<'window> {
+//     fn do_the_thing(&mut self) {
+//         let font = self.loader.load();
+//         self.font = Some(font);
+//     }
+// }
+
+/// you cannot return a reference from owned object in the struct!!!!!!!!!!
+struct Phi<'a> {
+    window: &'a Window,
+    loader: &'a FontLoader,
+    font: Option<Font<'a>>,
+}
+
+impl<'a> Phi<'a> {
+    fn do_the_thing(&mut self) {
+        let font = self.loader.load();
+        self.font = Some(font);
+    }
+}
+
+}
+

@@ -83,10 +83,10 @@ impl Delta<BlockVec> for DeltaMem {
         self.window
     }
 
-    fn next_segment(&mut self) -> Result<Option<&mut BlockVec>, failure::Error> {
-        let t = self.blocks.get_mut(self.index);
-        self.index += 1;
-        Ok(t)
+    fn next_segment(&mut self) -> Result<Option<BlockVec>, failure::Error> {
+        // let t = self.blocks.get_mut(self.index);
+        // self.index += 1;
+        Ok(Some(self.blocks.remove(0)))
     }
 
     fn finishup(&mut self) -> Result<(), failure::Error> {

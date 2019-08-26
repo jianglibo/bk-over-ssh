@@ -11,17 +11,17 @@ pub struct RecordWriter<T> {
 }
 
 #[derive(Debug)]
-pub struct RecordReader<T> {
-    reader: T,
+pub struct RecordReader<'a, T: 'a> {
+    reader: &'a T,
     source_len: Option<u64>,
     readed_len: u64,
 }
 
-impl<T> RecordReader<T>
+impl<'a, T> RecordReader<'a, T>
 where
     T: io::Read,
 {
-    pub fn new(reader: T, source_len: Option<u64>) -> Self {
+    pub fn new(reader: &'a T, source_len: Option<u64>) -> Self {
         Self {
             reader,
             source_len,
@@ -29,13 +29,17 @@ where
         }
     }
 
+    pub fn inner_reader(&self) -> &T {
+        &self.reader
+    }
+
     pub fn with_file_reader(
-        file: impl AsRef<Path>,
+        file: &'a fs::File,
     ) -> Result<RecordReader<fs::File>, failure::Error> {
-        let p = file.as_ref();
-        let len = p.metadata()?.len();
-        let reader = fs::OpenOptions::new().read(true).open(p)?;
-        Ok(RecordReader::new(reader, Some(len)))
+        // let p = file.as_ref();
+        let len = file.metadata()?.len();
+        // let reader = fs::OpenOptions::new().read(true).open(p)?;
+        Ok(RecordReader::new(file, Some(len)))
     }
 
     pub fn read_field_slice(&mut self) -> Result<Option<(u8, Vec<u8>)>, failure::Error> {
@@ -52,6 +56,29 @@ where
         } else {
             Ok(None)
         }
+    }
+
+    /// read field length and field_type, return the field_type and (field length - 1(it's the field_type byte.))
+    /// even not be readed, inscreasing the readed_len too which indicate the end of the file.
+    pub fn read_field_header(&mut self) -> Result<Option<(u8, u64)>, failure::Error> {
+        if self.source_len > Some(self.readed_len) {
+            let mut buf = [0_u8; 4];
+            self.reader.read_exact(&mut buf)?;
+            let record_len = u32::from_be_bytes(buf);
+            self.reader.read_exact(&mut buf[0..=0])?;
+            let field_type = buf[0];
+            self.readed_len += 4 + u64::from(record_len);
+            Ok(Some((field_type, (record_len - 1).into())))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn read_u64(&mut self) -> Result<Option<u64>, failure::Error> {
+        let mut buf = [0_u8; 8];
+        self.reader.read_exact(&mut buf)?;
+        self.readed_len += 8;
+        Ok(Some(u64::from_be_bytes(buf)))
     }
 }
 
