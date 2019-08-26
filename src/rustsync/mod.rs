@@ -2,7 +2,7 @@
 // https://abronan.com/rust-trait-objects-box-and-rc/
 mod record;
 mod delta_mem;
-mod delta_file;
+// mod delta_file;
 
 use log::*;
 use std::collections::HashMap;
@@ -78,9 +78,15 @@ pub fn signature<R: io::Read, B: AsRef<[u8]> + AsMut<[u8]>>(
     })
 }
 
+pub enum SolvedBlock<T: io::Read> {
+    FromSource(u64),
+    FromReader(T),
+}
+
 pub trait Block {
-    fn from_source(&self) -> Option<u64>;
-    fn next_bytes(&mut self, len: usize) -> Result<Option<&[u8]>, failure::Error>;
+    fn is_from_source(&self) -> bool;
+    // fn from_source(&self) -> Option<u64>;
+    // fn next_bytes(&mut self, len: usize) -> Result<Option<&[u8]>, failure::Error>;
 }
 
 
@@ -106,9 +112,9 @@ impl State {
 pub trait Delta<B: Block> {
     fn push_from_source(&mut self, position: u64) -> Result<(), failure::Error>;
     fn push_byte(&mut self, byte: u8) -> Result<(), failure::Error>;
-    fn window(&self) -> usize;
-    fn next_segment(&mut self) -> Result<Option<B>, failure::Error>;
     fn finishup(&mut self) -> Result<(), failure::Error>;
+    fn restore_seekable(&mut self,  out: impl io::Write, old: impl io::Read + io::Seek) -> Result<(), failure::Error>;
+    fn restore(&mut self,  out: impl io::Write, old: &[u8]) -> Result<(), failure::Error>;
 }
 
 
@@ -225,68 +231,84 @@ fn matches<D: Delta<impl Block>>(st: &mut State, sig: &Signature, block: &[u8], 
     false
 }
 
-/// Restore a file, using a "delta" (resulting from
-/// [`compare`](fn.compare.html))
-pub fn restore<W: io::Write, D: Delta<impl Block>>(mut w: W, s: &[u8], delta: &mut D) -> Result<(), failure::Error> {
-    let window = delta.window();
-    while let Some(block) = delta.next_segment()? {
-        if let Some(i) = block.from_source() {
-                let i = i as usize;
-                if i + delta.window() <= s.len() {
-                    w.write_all(&s[i..i + delta.window()])?;
-                } else {
-                    w.write_all(&s[i..])?;
-                }
-        } else {
-            while let Some(b) = block.next_bytes(window)? {
-                w.write_all(b)?;
-            }
+// /// Restore a file, using a "delta" (resulting from
+// /// [`compare`](fn.compare.html))
+// pub fn restore<W: io::Write, D: Delta<impl Block>>(mut w: W, s: &[u8], delta: &mut D) -> Result<(), failure::Error> {
+//     let window = delta.window();
+//     while let Some(block) = delta.next_segment()? {
+//         if block.is_from_source() {
+//             let i: u64 = delta.get_source_position(block)?;
+//                             let i = i as usize;
+//                 if i + delta.window() <= s.len() {
+//                     w.write_all(&s[i..i + delta.window()])?;
+//                 } else {
+//                     w.write_all(&s[i..])?;
+//                 }
+//         // }
+//         // if let Some(i) = block.from_source() {
+//         //         let i = i as usize;
+//         //         if i + delta.window() <= s.len() {
+//         //             w.write_all(&s[i..i + delta.window()])?;
+//         //         } else {
+//         //             w.write_all(&s[i..])?;
+//         //         }
+//         } else {
+//             // let reader = delta.get_reader(block)?;
+//             // io::copy(reader, &mut w)?;
+//             // while let Some(b) = block.next_bytes(window)? {
+//             //     w.write_all(b)?;
+//             // }
             
-        }
-    }
-    Ok(())
-}
+//         }
+//     }
+//     Ok(())
+// }
 
-/// Same as [`restore`](fn.restore.html), except that this function
-/// uses a seekable, readable stream instead of the entire file in a
-/// slice.
-///
-/// `buf` must be a buffer the same size as `sig.window`.
-pub fn restore_seek<W: io::Write, R: io::Read + io::Seek, B: AsRef<[u8]> + AsMut<[u8]>, D: Delta<impl Block>>(
-    mut out: W,
-    mut old: R,
-    mut buf: B,
-    delta: &mut D,
-) -> Result<(), failure::Error> {
-    let buf = buf.as_mut();
+// /// Same as [`restore`](fn.restore.html), except that this function
+// /// uses a seekable, readable stream instead of the entire file in a
+// /// slice.
+// ///
+// /// `buf` must be a buffer the same size as `sig.window`.
+// pub fn restore_seek<W: io::Write, R: io::Read + io::Seek, B: AsRef<[u8]> + AsMut<[u8]>, D: Delta<impl Block>>(
+//     mut out: W,
+//     mut old: R,
+//     mut buf: B,
+//     delta: &mut D,
+// ) -> Result<(), failure::Error> {
+//     let buf = buf.as_mut();
 
-    let window = delta.window();
+//     let window = delta.window();
 
-    while let Some(block) = delta.next_segment()? {
-        if let Some(i) = block.from_source() {
-                old.seek(io::SeekFrom::Start(i as u64))?;
-                // fill the buffer from r.
-                let mut n = 0;
-                loop {
-                    let r = old.read(&mut buf[n..delta.window()])?;
-                    if r == 0 {
-                        break;
-                    }
-                    n += r
-                }
-                // write the buffer to w.
-                let mut m = 0;
-                while m < n {
-                    m += out.write(&buf[m..n])?;
-                }
-        } else {
-            while let Some(b) = block.next_bytes(window)? {
-                out.write_all(b)?;
-            }
-        }
-        }
-    Ok(())
-}
+//     while let Some(block) = delta.next_segment()? {
+//         // if let Some(i) = block.from_source() {
+                        
+//             if block.is_from_source() {
+//                 let i: u64 = delta.get_source_position(block)?;
+//                 old.seek(io::SeekFrom::Start(i as u64))?;
+//                 // fill the buffer from r.
+//                 let mut n = 0;
+//                 loop {
+//                     let r = old.read(&mut buf[n..delta.window()])?;
+//                     if r == 0 {
+//                         break;
+//                     }
+//                     n += r
+//                 }
+//                 // write the buffer to w.
+//                 let mut m = 0;
+//                 while m < n {
+//                     m += out.write(&buf[m..n])?;
+//                 }
+//         } else {
+//             // let reader = delta.get_reader(block)?;
+//             // io::copy(reader, &mut out)?;
+//             // while let Some(b) = block.next_bytes(window)? {
+//             //     out.write_all(b)?;
+//             // }
+//         }
+//         }
+//     Ok(())
+// }
 
 pub fn signature_a_file(
     file_name: impl AsRef<Path>,
@@ -382,7 +404,7 @@ mod tests {
     // use tokio_core::reactor::Core;
     const WINDOW: usize = 32;
     #[test]
-    fn basic() {
+    fn basic() -> Result<(), failure::Error>{
         log_util::setup_logger(vec![""], vec![]);
         for index in 0..10 {
             let source = rand::thread_rng()
@@ -408,7 +430,7 @@ mod tests {
 
             let mut restored = Vec::new();
             let source = std::io::Cursor::new(source.as_bytes());
-            restore_seek(&mut restored, source, [0; WINDOW], &mut delta).unwrap();
+            delta.restore_seekable(&mut restored, source)?;
             if &restored[..] != modified.as_bytes() {
                 for i in 0..10 {
                     let a = &restored[i * WINDOW..(i + 1) * WINDOW];
@@ -421,6 +443,7 @@ mod tests {
                 panic!("different");
             }
         }
+        Ok(())
     }
 
     #[test]

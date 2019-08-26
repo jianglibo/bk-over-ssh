@@ -10,78 +10,86 @@ const LITERAL_FIELD_BYTE: u8 = 1;
 const FROM_SOURCE_FIELD_BYTE: u8 = 2;
 
 
-#[derive(Debug)]
-pub struct LiteralReader<'lr, 'reader> {
-    len: u64,
-    reader: &'reader fs::File,
-    phantom: PhantomData<&'lr bool>,
-}
+// #[derive(Debug)]
+// pub struct LiteralReader<'a> {
+//     len: u64,
+//     reader: &'a fs::File,
+// }
 
 #[derive(Debug)]
-pub enum BlockFile<'bf, 'reader> {
+pub enum BlockFile<'a> {
     FromSource(u64),
-    Literal(LiteralReader<'bf, 'reader>),
+    Literal(u64, &'a fs::File),
 }
 
-impl<'bf, 'reader> Block for BlockFile<'bf, 'reader> {
-    fn from_source(&self) -> Option<u64> {
-        if let BlockFile::FromSource(i) = self {
-            Some(*i)
+impl Block for BlockFile<'_> {
+    fn is_from_source(&self) -> bool {
+         if let BlockFile::FromSource(i) = self {
+            true
         } else {
-            None
-        }
+            false
+        }       
     }
+    // fn from_source(&self) -> Option<u64> {
+    //     if let BlockFile::FromSource(i) = self {
+    //         Some(*i)
+    //     } else {
+    //         None
+    //     }
+    // }
 
-    fn next_bytes(&mut self, len: usize) -> Result<Option<&[u8]>, failure::Error> {
-        Ok(None)
-        // if let BlockFile::Literal(v8) = self {
-        //     Ok(&v8[..])
-        // } else {
-        //     bail!("call get_bytes on from source block.");
-        // }
-    }
+    // fn next_bytes(&mut self, len: usize) -> Result<Option<&[u8]>, failure::Error> {
+    //     Ok(None)
+    //     // if let BlockFile::Literal(v8) = self {
+    //     //     Ok(&v8[..])
+    //     // } else {
+    //     //     bail!("call get_bytes on from source block.");
+    //     // }
+    // }
 }
 
 #[derive(Debug)]
 /// The result of comparing two files
-pub struct DeltaFile<'df> {
+pub struct DeltaFile<'a> {
     /// Description of the new file in terms of blocks.
-    wr: Option<&'df mut record::RecordWriter<fs::File>>,
-    rr: Option<&'df mut record::RecordReader<'df, fs::File>>,
+    wr: Option<record::RecordWriter<fs::File>>,
+    rr: Option<record::RecordReader<fs::File>>,
     pending_file: Option<fs::File>,
     pending: Vec<u8>,
     window: usize,
     index: usize,
     pending_valve: usize,
-    phantom: PhantomData<&'df bool>,
+    current_block: Option<BlockFile<'a>>,
 }
 
-impl<'df> DeltaFile<'df> {
+impl<'a> DeltaFile<'a> {
     pub fn create_delta_file(
-        record_writer: &'df mut record::RecordWriter::<fs::File>,
+        // record_writer: &'df mut record::RecordWriter::<fs::File>,
+        file: impl AsRef<Path>,
         window: usize,
         pending_valve: Option<usize>,
     ) -> Result<Self, failure::Error> {
-        // let mut wr = record::RecordWriter::<fs::File>::with_file_writer(file.as_ref())?;
-        record_writer.write_field_slice(0_u8, &window.to_be_bytes())?;
+        let mut wr = record::RecordWriter::<fs::File>::with_file_writer(file.as_ref())?;
+        wr.write_field_slice(0_u8, &window.to_be_bytes())?;
         Ok(Self {
-            wr: Some(record_writer),
+            wr: Some(wr),
             rr: None,
             pending_file: None,
             pending: Vec::new(),
             window,
             index: 0,
             pending_valve: pending_valve.unwrap_or(TEN_MEGA_BYTES),
-            phantom: PhantomData,
+            current_block: None,
         })
     }
 
     pub fn read_delta_file(
-        record_reader: &'df mut record::RecordReader<'df, fs::File>,
+        // rr: &mut record::RecordReader<fs::File>,
+        file: impl AsRef<Path>,
     ) -> Result<Self, failure::Error> {
-        // let mut rr = record::RecordReader::<fs::File>::with_file_reader(file.as_ref())?;
+        let mut rr = record::RecordReader::<fs::File>::with_file_reader(file.as_ref())?;
         // let record_reader = record::RecordReader::<fs::File>::with_file_reader(file)?;
-        let header = record_reader.read_field_slice()?;
+        let header = rr.read_field_slice()?;
         ensure!(header.is_some(), "delta_file should has header record.");
         let (_, u8_vec) = header.unwrap();
         let mut ary = [0_u8; 8];
@@ -89,13 +97,13 @@ impl<'df> DeltaFile<'df> {
         let window = usize::from_be_bytes(ary);
         Ok(Self {
             wr: None,
-            rr: Some(record_reader),
+            rr: Some(rr),
             pending_file: None,
             pending: Vec::new(),
             window,
             index: 0,
             pending_valve: TEN_MEGA_BYTES,
-            phantom: PhantomData,
+            current_block: None,
         })
     }
 
@@ -115,7 +123,7 @@ impl<'df> DeltaFile<'df> {
     }
 }
 
-impl<'df, 'bf, 'reader> Delta<BlockFile<'bf, 'reader>> for DeltaFile<'df> {
+impl<'a> Delta<BlockFile<'a>> for DeltaFile<'a> {
     fn push_from_source(&mut self, position: u64) -> Result<(), failure::Error> {
         ensure!(self.wr.is_some(), "delta_file in wr mode, wr should'nt be None.");
         self.flush_pending()?;
@@ -142,7 +150,7 @@ impl<'df, 'bf, 'reader> Delta<BlockFile<'bf, 'reader>> for DeltaFile<'df> {
         self.window
     }
 
-    fn next_segment(&mut self) -> Result<Option<BlockFile<'bf, 'reader>>, failure::Error> {
+    fn next_segment(&mut self) -> Result<Option<&mut BlockFile<'a>>, failure::Error> {
         ensure!(self.rr.is_some(), "delta_file in rr mode, rr should'nt be None.");
 
         if let Some((field_type, field_len)) = self.rr.as_mut().unwrap().read_field_header()? {
@@ -150,19 +158,17 @@ impl<'df, 'bf, 'reader> Delta<BlockFile<'bf, 'reader>> for DeltaFile<'df> {
                FROM_SOURCE_FIELD_BYTE => {
                    if let Ok(Some(position)) = self.rr.as_mut().unwrap().read_u64() {
                     let block = BlockFile::FromSource(position);
-                   Ok(Some(block))
+                    self.current_block.replace(block);
+                   Ok(self.current_block.as_mut())
                    } else {
                        bail!("read_u64 failed.")
                    }
                },
                LITERAL_FIELD_BYTE => {
                    let reader = self.rr.as_mut().unwrap().inner_reader();
-                   let l = LiteralReader {
-                       len: field_len,
-                       reader,
-                       phantom: PhantomData,
-                   };
-                   Ok(Some(BlockFile::Literal(l)))
+                   let block = BlockFile::Literal(field_len, reader);
+                   self.current_block.replace(block);
+                   Ok(self.current_block.as_mut())
                },
                _ => {
                    bail!("got unexpected field_type");

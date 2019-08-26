@@ -11,17 +11,17 @@ pub struct RecordWriter<T> {
 }
 
 #[derive(Debug)]
-pub struct RecordReader<'a, T: 'a> {
-    reader: &'a T,
+pub struct RecordReader<T> {
+    reader: T,
     source_len: Option<u64>,
     readed_len: u64,
 }
 
-impl<'a, T> RecordReader<'a, T>
+impl<T> RecordReader<T>
 where
     T: io::Read,
 {
-    pub fn new(reader: &'a T, source_len: Option<u64>) -> Self {
+    pub fn new(reader: T, source_len: Option<u64>) -> Self {
         Self {
             reader,
             source_len,
@@ -34,12 +34,12 @@ where
     }
 
     pub fn with_file_reader(
-        file: &'a fs::File,
+        file: impl AsRef<Path>,
     ) -> Result<RecordReader<fs::File>, failure::Error> {
-        // let p = file.as_ref();
-        let len = file.metadata()?.len();
-        // let reader = fs::OpenOptions::new().read(true).open(p)?;
-        Ok(RecordReader::new(file, Some(len)))
+        let p = file.as_ref();
+        let len = p.metadata()?.len();
+        let reader = fs::OpenOptions::new().read(true).open(p)?;
+        Ok(RecordReader::new(reader, Some(len)))
     }
 
     pub fn read_field_slice(&mut self) -> Result<Option<(u8, Vec<u8>)>, failure::Error> {
