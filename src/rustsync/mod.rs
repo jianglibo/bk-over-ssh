@@ -1,8 +1,8 @@
 // https://stackoverflow.com/questions/27567849/what-makes-something-a-trait-object
 // https://abronan.com/rust-trait-objects-box-and-rc/
-mod record;
+mod delta_file;
 mod delta_mem;
-// mod delta_file;
+mod record;
 
 use log::*;
 use std::collections::HashMap;
@@ -78,19 +78,6 @@ pub fn signature<R: io::Read, B: AsRef<[u8]> + AsMut<[u8]>>(
     })
 }
 
-pub enum SolvedBlock<T: io::Read> {
-    FromSource(u64),
-    FromReader(T),
-}
-
-pub trait Block {
-    fn is_from_source(&self) -> bool;
-    // fn from_source(&self) -> Option<u64>;
-    // fn next_bytes(&mut self, len: usize) -> Result<Option<&[u8]>, failure::Error>;
-}
-
-
-
 struct State {
     // result: Vec<Block>,
     oldest_byte_position: usize,
@@ -109,23 +96,139 @@ impl State {
     }
 }
 
-pub trait Delta<B: Block> {
+pub trait Delta {
     fn push_from_source(&mut self, position: u64) -> Result<(), failure::Error>;
     fn push_byte(&mut self, byte: u8) -> Result<(), failure::Error>;
+    fn block_count(&mut self) -> Result<(usize, usize), failure::Error>;
     fn finishup(&mut self) -> Result<(), failure::Error>;
-    fn restore_seekable(&mut self,  out: impl io::Write, old: impl io::Read + io::Seek) -> Result<(), failure::Error>;
-    fn restore(&mut self,  out: impl io::Write, old: &[u8]) -> Result<(), failure::Error>;
+    fn restore_seekable(
+        &mut self,
+        out: impl io::Write,
+        old: impl io::Read + io::Seek,
+    ) -> Result<(), failure::Error>;
+    fn restore(&mut self, out: impl io::Write, old: &[u8]) -> Result<(), failure::Error>;
+
+    fn restore_from_source_seekable(
+        source_position: u64,
+        mut buf: impl AsRef<[u8]> + AsMut<[u8]>,
+        window: usize,
+        out: &mut impl io::Write,
+        old: &mut (impl io::Read + io::Seek),
+    ) -> Result<(), failure::Error> {
+        let buf = buf.as_mut();
+        old.seek(io::SeekFrom::Start(source_position))?;
+        // fill the buffer from r.
+        let mut n = 0;
+        loop {
+            let r = old.read(&mut buf[n..window])?;
+            if r == 0 {
+                break;
+            }
+            n += r
+        }
+        // write the buffer to w.
+        let mut m = 0;
+        while m < n {
+            m += out.write(&buf[m..n])?;
+        }
+        Ok(())
+    }
+
+    fn compare<R: io::Read, B: AsRef<[u8]> + AsMut<[u8]>>(
+        &mut self,
+        sig: &Signature,
+        mut r: R,
+        mut buff: B,
+    ) -> Result<(), failure::Error> {
+        let mut st = State::new();
+        let buff = buff.as_mut();
+        assert_eq!(buff.len(), sig.window);
+        while st.block_content_len > 0 {
+            let mut hash = {
+                let mut j = 0;
+                let readed_block = {
+                    while j < sig.window {
+                        let r = r.read(&mut buff[..])?;
+                        if r == 0 {
+                            break;
+                        }
+                        j += r
+                    }
+                    st.oldest_byte_position = 0;
+                    st.block_content_len = j;
+                    &buff[..j]
+                };
+                adler32::RollingAdler32::from_buffer(readed_block)
+            };
+            // Starting from the current block (with hash `hash`), find
+            // the next block with a hash that appears in the signature.
+            loop {
+                let matched: bool = if let Some(h) = sig.chunks.get(&hash.hash()) {
+                    let blake2 = {
+                        let mut b = blake2_rfc::blake2b::Blake2b::new(BLAKE2_SIZE);
+                        if st.oldest_byte_position + st.block_content_len > sig.window {
+                            b.update(&buff[st.oldest_byte_position..]);
+                            b.update(
+                                &buff[..(st.oldest_byte_position + st.block_content_len)
+                                    % sig.window],
+                            );
+                        } else {
+                            b.update(
+                                &buff[st.oldest_byte_position
+                                    ..st.oldest_byte_position + st.block_content_len],
+                            )
+                        }
+                        b.finalize()
+                    };
+                    if let Some(&index) = h.get(blake2.as_bytes()) {
+                        self.push_from_source(index as u64)?;
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+
+                if matched {
+                    break;
+                }
+                // info!("block_oldest: {:?}", st.oldest_byte_position);
+                // info!("block_len: {:?}", st.block_content_len);
+                // The blocks are not equal. Move the hash by one byte
+                // until finding an equal block.
+                let oldest_u8 = buff[st.oldest_byte_position];
+                hash.remove(st.block_content_len, oldest_u8);
+                let r = r.read(&mut buff[st.oldest_byte_position..=st.oldest_byte_position])?;
+                if r > 0 {
+                    // If there are still bytes to read, update the hash.
+                    hash.update(buff[st.oldest_byte_position]);
+                } else if st.block_content_len > 0 {
+                    // Else, just shrink the window, so that the current
+                    // block's blake2 hash can be compared with the
+                    // signature.
+                    st.block_content_len -= 1;
+                } else {
+                    // We're done reading the file.
+                    break;
+                }
+                self.push_byte(oldest_u8)?;
+                // info!("pending: {:?}", st.pending.len());
+                st.oldest_byte_position = (st.oldest_byte_position + 1) % sig.window;
+            }
+            self.finishup()?;
+        }
+        Ok(())
+    }
 }
-
-
-
 
 /// Compare a signature with an existing file. This is the second step
 /// of the protocol, `r` is the local file when downloading, and the
 /// remote file when uploading.
 ///
 /// `block` must be a buffer the same size as `sig.window`.
-pub fn compare<R: io::Read, B: AsRef<[u8]> + AsMut<[u8]>, D: Delta<impl Block>> (
+#[allow(dead_code)]
+pub fn compare<R: io::Read, B: AsRef<[u8]> + AsMut<[u8]>, D: Delta>(
     sig: &Signature,
     mut r: R,
     mut buff: B,
@@ -155,7 +258,7 @@ pub fn compare<R: io::Read, B: AsRef<[u8]> + AsMut<[u8]>, D: Delta<impl Block>> 
         // Starting from the current block (with hash `hash`), find
         // the next block with a hash that appears in the signature.
         loop {
-            if matches(&mut st, sig, &buff, &hash, &mut delta) {
+            if matches(&mut st, sig, &buff, &hash, &mut delta)? {
                 break;
             }
             info!("block_oldest: {:?}", st.oldest_byte_position);
@@ -177,7 +280,7 @@ pub fn compare<R: io::Read, B: AsRef<[u8]> + AsMut<[u8]>, D: Delta<impl Block>> 
                 // We're done reading the file.
                 break;
             }
-            delta.push_byte(oldest_u8);
+            delta.push_byte(oldest_u8)?;
             // info!("pending: {:?}", st.pending.len());
             st.oldest_byte_position = (st.oldest_byte_position + 1) % sig.window;
         }
@@ -199,7 +302,13 @@ pub trait PendingStore {
     fn get_reader<R: io::Read>(&self) -> io::BufReader<R>;
 }
 
-fn matches<D: Delta<impl Block>>(st: &mut State, sig: &Signature, block: &[u8], hash: &adler32::RollingAdler32, delta: &mut D) -> bool {
+fn matches<D: Delta>(
+    st: &mut State,
+    sig: &Signature,
+    block: &[u8],
+    hash: &adler32::RollingAdler32,
+    delta: &mut D,
+) -> Result<bool, failure::Error> {
     if let Some(h) = sig.chunks.get(&hash.hash()) {
         let blake2 = {
             let mut b = blake2_rfc::blake2b::Blake2b::new(BLAKE2_SIZE);
@@ -224,11 +333,11 @@ fn matches<D: Delta<impl Block>>(st: &mut State, sig: &Signature, block: &[u8], 
             //     // )));
             // }
             // result.push_block(Block::FromSource(index as u64));
-            delta.push_from_source(index as u64);
-            return true;
+            delta.push_from_source(index as u64)?;
+            return Ok(true);
         }
     }
-    false
+    Ok(false)
 }
 
 // /// Restore a file, using a "delta" (resulting from
@@ -258,7 +367,6 @@ fn matches<D: Delta<impl Block>>(st: &mut State, sig: &Signature, block: &[u8], 
 //             // while let Some(b) = block.next_bytes(window)? {
 //             //     w.write_all(b)?;
 //             // }
-            
 //         }
 //     }
 //     Ok(())
@@ -281,7 +389,6 @@ fn matches<D: Delta<impl Block>>(st: &mut State, sig: &Signature, block: &[u8], 
 
 //     while let Some(block) = delta.next_segment()? {
 //         // if let Some(i) = block.from_source() {
-                        
 //             if block.is_from_source() {
 //                 let i: u64 = delta.get_source_position(block)?;
 //                 old.seek(io::SeekFrom::Start(i as u64))?;
@@ -332,6 +439,7 @@ pub fn signature_a_file(
     }
 }
 
+#[allow(dead_code)]
 pub fn write_signature_to_file(
     sig: &Signature,
     file_name: impl AsRef<Path>,
@@ -352,6 +460,7 @@ pub fn write_signature_to_file(
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn parse_signature_from_file(
     file_name: impl AsRef<Path>,
 ) -> Result<Option<Signature>, failure::Error> {
@@ -396,15 +505,14 @@ mod tests {
     use rand;
     use rand::distributions::Alphanumeric;
     use rand::Rng;
+    use std::io;
     use std::io::{Read, Seek, Write};
     use std::time::Instant;
-    use std::{fs, io};
-    use std::convert::TryFrom;
     use tempfile;
     // use tokio_core::reactor::Core;
     const WINDOW: usize = 32;
     #[test]
-    fn basic() -> Result<(), failure::Error>{
+    fn basic() -> Result<(), failure::Error> {
         log_util::setup_logger(vec![""], vec![]);
         for index in 0..10 {
             let source = rand::thread_rng()
@@ -498,7 +606,9 @@ mod tests {
         let sig_out_length = Path::new(sig_out).metadata()?.len();
         info!(
             "sig file length: {:?}, origin: {:?}, percent: {:?}",
-            sig_out_length, demo_file_length, (sig_out_length as f64 / demo_file_length as f64) * 100.0
+            sig_out_length,
+            demo_file_length,
+            (sig_out_length as f64 / demo_file_length as f64) * 100.0
         );
 
         let new_sig = parse_signature_from_file(sig_out)?;
@@ -529,12 +639,8 @@ mod tests {
         impl Aenum {
             pub fn set_value(&mut self, v: u8) {
                 match self {
-                    Self::A(_) => {
-
-                    },
-                    Self::B(_) => {
-
-                    }
+                    Self::A(_) => {}
+                    Self::B(_) => {}
                 }
             }
         }

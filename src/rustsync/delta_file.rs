@@ -1,57 +1,21 @@
-use super::{record, Block, Delta};
-use serde::{Deserialize, Serialize};
+use super::{record, Delta};
+use log::*;
+use std::convert::TryInto;
 use std::path::Path;
-use std::{fs, io, io::{Write, Read}};
-use std::marker::PhantomData;
+use std::{
+    fs, io,
+    io::{Read, Write},
+};
 
 const TEN_MEGA_BYTES: usize = 10 * 1024 * 1024;
 
+const WINDOW_FIELD_TYPE: u8 = 0;
 const LITERAL_FIELD_BYTE: u8 = 1;
 const FROM_SOURCE_FIELD_BYTE: u8 = 2;
 
-
-// #[derive(Debug)]
-// pub struct LiteralReader<'a> {
-//     len: u64,
-//     reader: &'a fs::File,
-// }
-
-#[derive(Debug)]
-pub enum BlockFile<'a> {
-    FromSource(u64),
-    Literal(u64, &'a fs::File),
-}
-
-impl Block for BlockFile<'_> {
-    fn is_from_source(&self) -> bool {
-         if let BlockFile::FromSource(i) = self {
-            true
-        } else {
-            false
-        }       
-    }
-    // fn from_source(&self) -> Option<u64> {
-    //     if let BlockFile::FromSource(i) = self {
-    //         Some(*i)
-    //     } else {
-    //         None
-    //     }
-    // }
-
-    // fn next_bytes(&mut self, len: usize) -> Result<Option<&[u8]>, failure::Error> {
-    //     Ok(None)
-    //     // if let BlockFile::Literal(v8) = self {
-    //     //     Ok(&v8[..])
-    //     // } else {
-    //     //     bail!("call get_bytes on from source block.");
-    //     // }
-    // }
-}
-
 #[derive(Debug)]
 /// The result of comparing two files
-pub struct DeltaFile<'a> {
-    /// Description of the new file in terms of blocks.
+pub struct DeltaFile {
     wr: Option<record::RecordWriter<fs::File>>,
     rr: Option<record::RecordReader<fs::File>>,
     pending_file: Option<fs::File>,
@@ -59,18 +23,17 @@ pub struct DeltaFile<'a> {
     window: usize,
     index: usize,
     pending_valve: usize,
-    current_block: Option<BlockFile<'a>>,
 }
 
-impl<'a> DeltaFile<'a> {
+impl DeltaFile {
+    #[allow(dead_code)]
     pub fn create_delta_file(
-        // record_writer: &'df mut record::RecordWriter::<fs::File>,
         file: impl AsRef<Path>,
         window: usize,
         pending_valve: Option<usize>,
     ) -> Result<Self, failure::Error> {
         let mut wr = record::RecordWriter::<fs::File>::with_file_writer(file.as_ref())?;
-        wr.write_field_slice(0_u8, &window.to_be_bytes())?;
+        wr.write_field_usize(WINDOW_FIELD_TYPE, window)?;
         Ok(Self {
             wr: Some(wr),
             rr: None,
@@ -79,22 +42,14 @@ impl<'a> DeltaFile<'a> {
             window,
             index: 0,
             pending_valve: pending_valve.unwrap_or(TEN_MEGA_BYTES),
-            current_block: None,
         })
     }
 
-    pub fn read_delta_file(
-        // rr: &mut record::RecordReader<fs::File>,
-        file: impl AsRef<Path>,
-    ) -> Result<Self, failure::Error> {
+    #[allow(dead_code)]
+    pub fn read_delta_file(file: impl AsRef<Path>) -> Result<Self, failure::Error> {
         let mut rr = record::RecordReader::<fs::File>::with_file_reader(file.as_ref())?;
-        // let record_reader = record::RecordReader::<fs::File>::with_file_reader(file)?;
-        let header = rr.read_field_slice()?;
-        ensure!(header.is_some(), "delta_file should has header record.");
-        let (_, u8_vec) = header.unwrap();
-        let mut ary = [0_u8; 8];
-        ary.copy_from_slice(&u8_vec[..8]);
-        let window = usize::from_be_bytes(ary);
+        let (_, window) = rr.read_field_usize()?.expect("should has window header.");
+        info!("got window size from delta file: {}", window);
         Ok(Self {
             wr: None,
             rr: Some(rr),
@@ -103,32 +58,84 @@ impl<'a> DeltaFile<'a> {
             window,
             index: 0,
             pending_valve: TEN_MEGA_BYTES,
-            current_block: None,
         })
     }
 
     fn flush_pending(&mut self) -> Result<(), failure::Error> {
-        ensure!(self.wr.is_some(), "delta_file in wr mode, wr should'nt be None.");
+        let cur_wr = self
+            .wr
+            .as_mut()
+            .expect("delta_file in wr mode, wr should'nt be None.");
         if let Some(pf) = self.pending_file.as_mut() {
+            // write pending bytes to pending_file first. then write pending_file to record file.
             if !self.pending.is_empty() {
                 pf.write_all(&self.pending[..])?;
             }
-            self.wr.as_mut().unwrap().write_field_from_file(1_u8, pf)?;
+            cur_wr.write_field_from_file(LITERAL_FIELD_BYTE, pf)?;
             self.pending_file.take();
         } else if !self.pending.is_empty() {
-            self.wr.as_mut().unwrap().write_field_slice(1_u8, &self.pending[..])?;
+            cur_wr.write_field_slice(LITERAL_FIELD_BYTE, &self.pending[..])?;
         }
         self.pending.clear();
         Ok(())
     }
 }
 
-impl<'a> Delta<BlockFile<'a>> for DeltaFile<'a> {
+impl Delta for DeltaFile {
     fn push_from_source(&mut self, position: u64) -> Result<(), failure::Error> {
-        ensure!(self.wr.is_some(), "delta_file in wr mode, wr should'nt be None.");
         self.flush_pending()?;
-        self.wr.as_mut().unwrap().write_field_slice(2_u8, &position.to_be_bytes())?;
+        let wr = self
+            .wr
+            .as_mut()
+            .expect("delta_file in wr mode, wr should'nt be None.");
+        wr.write_field_u64(FROM_SOURCE_FIELD_BYTE, position)?;
         Ok(())
+    }
+
+    fn block_count(&mut self) -> Result<(usize, usize), failure::Error> {
+        let cur_rr = self
+            .rr
+            .as_mut()
+            .expect("delta_file in rr mode, rr should'nt be None.");
+        let mut buf_v = vec![0_u8; self.window];
+        let mut from_source_count = 0_usize;
+        let mut literal_count = 0_usize;
+
+        while let Some((field_type, mut field_len)) = cur_rr.read_field_header()? {
+            info!(
+                "got field_type: {:?}, field_len: {:?}",
+                field_type, field_len
+            );
+            match field_type {
+                FROM_SOURCE_FIELD_BYTE => {
+                    if let Ok(Some(_)) = cur_rr.read_u64() {
+                        from_source_count += 1;
+                    } else {
+                        bail!("read_u64 failed.")
+                    }
+                }
+                LITERAL_FIELD_BYTE => {
+                    let mut reader = cur_rr.inner_reader();
+                    let window_u64: u64 =
+                        self.window.try_into().expect("usize should convert to u64");
+
+                    while field_len >= window_u64 {
+                        reader.read_exact(&mut buf_v[..])?;
+                        field_len -= window_u64;
+                    }
+                    if field_len > 0 {
+                        let field_len_usize: usize =
+                            field_len.try_into().expect("u64 should convert to usize.");
+                        reader.read_exact(&mut buf_v[..field_len_usize])?;
+                    }
+                    literal_count += 1;
+                }
+                _ => {
+                    bail!("got unexpected field_type");
+                }
+            }
+        }
+        Ok((from_source_count, literal_count))
     }
 
     fn push_byte(&mut self, byte: u8) -> Result<(), failure::Error> {
@@ -146,37 +153,60 @@ impl<'a> Delta<BlockFile<'a>> for DeltaFile<'a> {
         Ok(())
     }
 
-    fn window(&self) -> usize {
-        self.window
-    }
+    fn restore_seekable(
+        &mut self,
+        mut out: impl io::Write,
+        mut old: impl io::Read + io::Seek,
+    ) -> Result<(), failure::Error> {
+        ensure!(
+            self.rr.is_some(),
+            "delta_file in rr mode, rr should'nt be None."
+        );
 
-    fn next_segment(&mut self) -> Result<Option<&mut BlockFile<'a>>, failure::Error> {
-        ensure!(self.rr.is_some(), "delta_file in rr mode, rr should'nt be None.");
+        let mut buf_v = vec![0_u8; self.window];
+        let cur_rr = self.rr.as_mut().expect("rr should exists.");
 
-        if let Some((field_type, field_len)) = self.rr.as_mut().unwrap().read_field_header()? {
-           match field_type {
-               FROM_SOURCE_FIELD_BYTE => {
-                   if let Ok(Some(position)) = self.rr.as_mut().unwrap().read_u64() {
-                    let block = BlockFile::FromSource(position);
-                    self.current_block.replace(block);
-                   Ok(self.current_block.as_mut())
-                   } else {
-                       bail!("read_u64 failed.")
-                   }
-               },
-               LITERAL_FIELD_BYTE => {
-                   let reader = self.rr.as_mut().unwrap().inner_reader();
-                   let block = BlockFile::Literal(field_len, reader);
-                   self.current_block.replace(block);
-                   Ok(self.current_block.as_mut())
-               },
-               _ => {
-                   bail!("got unexpected field_type");
-               }
-           } 
-        } else {
-            Ok(None)
+        while let Some((field_type, mut field_len)) = cur_rr.read_field_header()? {
+            match field_type {
+                FROM_SOURCE_FIELD_BYTE => {
+                    if let Ok(Some(position)) = cur_rr.read_u64() {
+                        DeltaFile::restore_from_source_seekable(
+                            position,
+                            &mut buf_v[..],
+                            self.window,
+                            &mut out,
+                            &mut old,
+                        )?;
+                    } else {
+                        bail!("read_u64 failed.")
+                    }
+                }
+                LITERAL_FIELD_BYTE => {
+                    let mut reader = cur_rr.inner_reader();
+                    let window_u64: u64 =
+                        self.window.try_into().expect("usize should convert to u64");
+
+                    while field_len >= window_u64 {
+                        reader.read_exact(&mut buf_v[..])?;
+                        out.write_all(&mut buf_v[..])?;
+                        field_len -= window_u64;
+                    }
+                    if field_len > 0 {
+                        let field_len_usize: usize =
+                            field_len.try_into().expect("u64 should convert to usize.");
+                        reader.read_exact(&mut buf_v[..field_len_usize])?;
+                        out.write_all(&mut buf_v[..field_len_usize])?;
+                    }
+                }
+                _ => {
+                    bail!("got unexpected field_type: {:?}", field_type);
+                }
+            }
         }
+        Ok(())
+    }
+    fn restore(&mut self, mut out: impl io::Write, mut old: &[u8]) -> Result<(), failure::Error> {
+        Ok(())
     }
 
     fn finishup(&mut self) -> Result<(), failure::Error> {
@@ -187,43 +217,84 @@ impl<'a> Delta<BlockFile<'a>> for DeltaFile<'a> {
 
 #[cfg(test)]
 mod tests {
-struct FontLoader(String);
-struct Font<'a>(&'a str);
+    use super::*;
+    use crate::log_util;
+    use crate::rustsync::{compare, signature};
+    use rand;
+    use rand::distributions::Alphanumeric;
+    use rand::Rng;
+    const WINDOW: usize = 32;
 
-impl FontLoader {
-    fn load(&self) -> Font {
-        Font(&self.0)
+    #[test]
+    fn t_delta_file_equal() -> Result<(), failure::Error> {
+        log_util::setup_logger(vec![""], vec![]);
+        let source = vec![0_u8; 129]; // 129/WINDOW = 4 windows + 1 byte.
+                                      // self.window = 4 + 1(field_type) +  8
+                                      // 4 + 1 + 8 source_position = 13 * 4
+                                      // 4 + 1 + 8 = 13
+                                      // total size: 78
+        let modified = source.clone();
+        let buf = [0; WINDOW];
+        let source_sig = signature(&source[..], buf).unwrap();
+        let delta_file = "target/cc.delta";
+        DeltaFile::create_delta_file(delta_file, WINDOW, Some(10))?.compare(
+            &source_sig,
+            &modified[..],
+            buf,
+        )?;
+        let delta_file_len = Path::new(delta_file).metadata()?.len();
+        assert_eq!(delta_file_len, 78);
+
+        let mut delta = DeltaFile::read_delta_file(delta_file)?;
+        assert_eq!((5, 0), delta.block_count()?);
+
+        let mut delta = DeltaFile::read_delta_file(delta_file)?;
+        let mut restored = Vec::new();
+        let source = std::io::Cursor::new(source);
+        delta.restore_seekable(&mut restored, source)?;
+        Ok(())
+    }
+    #[test]
+    fn delta_file_basic() -> Result<(), failure::Error> {
+        log_util::setup_logger(vec![""], vec![]);
+        for index in 0..10 {
+            let source = rand::thread_rng()
+                .sample_iter(&Alphanumeric)
+                .take(WINDOW * 10 + 8)
+                .collect::<String>();
+            let mut modified = source.clone();
+            let index = WINDOW * index + 3;
+            unsafe {
+                modified.as_bytes_mut()[index] =
+                    ((source.as_bytes()[index] as usize + 1) & 255) as u8
+            }
+            let buf = [0; WINDOW];
+            let source_sig = signature(source.as_bytes(), buf).unwrap();
+            let delta_file = "target/cc.delta";
+            DeltaFile::create_delta_file(delta_file, WINDOW, Some(3))?.compare(
+                &source_sig,
+                modified.as_bytes(),
+                buf,
+            )?;
+
+            // compare(&source_sig, modified.as_bytes(), buf, delta)?;
+
+            let mut delta = DeltaFile::read_delta_file(delta_file)?;
+            let mut restored = Vec::new();
+            let source = std::io::Cursor::new(source.as_bytes());
+            delta.restore_seekable(&mut restored, source)?;
+            if &restored[..] != modified.as_bytes() {
+                for i in 0..10 {
+                    let a = &restored[i * WINDOW..(i + 1) * WINDOW];
+                    let b = &modified.as_bytes()[i * WINDOW..(i + 1) * WINDOW];
+                    println!("{:?}\n{:?}\n", a, b);
+                    if a != b {
+                        println!(">>>>>>>>");
+                    }
+                }
+                panic!("different");
+            }
+        }
+        Ok(())
     }
 }
-
-struct Window;
-
-// struct Phi<'window> {
-//     window: &'window Window,
-//     loader: FontLoader,
-//     font: Option<Font<'window>>,
-// }
-
-// impl<'window> Phi<'window> {
-//     fn do_the_thing(&mut self) {
-//         let font = self.loader.load();
-//         self.font = Some(font);
-//     }
-// }
-
-/// you cannot return a reference from owned object in the struct!!!!!!!!!!
-struct Phi<'a> {
-    window: &'a Window,
-    loader: &'a FontLoader,
-    font: Option<Font<'a>>,
-}
-
-impl<'a> Phi<'a> {
-    fn do_the_thing(&mut self) {
-        let font = self.loader.load();
-        self.font = Some(font);
-    }
-}
-
-}
-

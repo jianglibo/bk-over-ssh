@@ -1,4 +1,4 @@
-use super::{Block, Delta};
+use super::{Delta};
 use serde::{Deserialize, Serialize};
 use std::io;
 
@@ -8,57 +8,18 @@ pub enum BlockVec {
     Literal(usize, Vec<u8>),
 }
 
-impl Block for BlockVec {
-    fn is_from_source(&self) -> bool {
-        if let BlockVec::FromSource(i) = self {
-            true
-        } else {
-            false
-        }
-
-        // fn from_source(&self) -> Option<u64> {
-        //     if let BlockVec::FromSource(i) = self {
-        //         Some(*i)
-        //     } else {
-        //         None
-        //     }
-        // }
-
-        // fn next_bytes(&mut self, len: usize) -> Result<Option<&[u8]>, failure::Error> {
-        //     if let BlockVec::Literal(idx, v8) = self {
-        //         if *idx < v8.len() {
-        //             let old_idx = *idx;
-        //             let upper_limit = old_idx + len;
-        //             *idx = upper_limit;
-        //             if upper_limit < v8.len() {
-        //                 Ok(Some(&v8[old_idx..upper_limit]))
-        //             } else {
-        //                 Ok(Some(&v8[old_idx..]))
-        //             }
-        //         } else {
-        //             Ok(None)
-        //         }
-        //     } else {
-        //         bail!("call get_bytes on from source block.");
-        //     }
-    }
-
-    // fn get_bytes(&self) -> Result<&[u8], failure::Error> {
-    // }
-}
-
 #[derive(Default, Debug, PartialEq)]
 /// The result of comparing two files
 pub struct DeltaMem {
     /// Description of the new file in terms of blocks.
     blocks: Vec<BlockVec>,
     pending: Vec<u8>,
-    /// Size of the window.
     window: usize,
     index: usize,
 }
 
 impl DeltaMem {
+    #[allow(dead_code)]
     pub fn new(window: usize) -> Self {
         Self {
             blocks: Vec::new(),
@@ -69,7 +30,7 @@ impl DeltaMem {
     }
 }
 
-impl Delta<BlockVec> for DeltaMem {
+impl Delta for DeltaMem {
     fn push_from_source(&mut self, position: u64) -> Result<(), failure::Error> {
         if !self.pending.is_empty() {
             // We've reached the end of the file, and have never found
@@ -80,6 +41,19 @@ impl Delta<BlockVec> for DeltaMem {
         }
         self.blocks.push(BlockVec::FromSource(position));
         Ok(())
+    }
+
+    fn block_count(&mut self) -> Result<(usize, usize), failure::Error> {
+        Ok(self.blocks.iter().fold((0, 0), |acc, block| {
+            match block {
+                BlockVec::FromSource(i) => {
+                    (acc.0 + 1, acc.1)
+                },
+                BlockVec::Literal(_, _) => {
+                    (acc.0, acc.1 + 1)
+                }
+            }
+        }))
     }
 
     fn restore(&mut self, mut out: impl io::Write, old: &[u8]) -> Result<(), failure::Error> {
@@ -101,31 +75,17 @@ impl Delta<BlockVec> for DeltaMem {
         Ok(())
     }
 
+
     fn restore_seekable(
         &mut self,
         mut out: impl io::Write,
         mut old: impl io::Read + io::Seek,
     ) -> Result<(), failure::Error> {
         let mut buf_v = vec![0_u8; self.window];
-        let buf = &mut buf_v[..];
         for block in self.blocks.iter() {
             match block {
                 BlockVec::FromSource(i) => {
-                    old.seek(io::SeekFrom::Start(*i as u64))?;
-                    // fill the buffer from r.
-                    let mut n = 0;
-                    loop {
-                        let r = old.read(&mut buf[n..self.window])?;
-                        if r == 0 {
-                            break;
-                        }
-                        n += r
-                    }
-                    // write the buffer to w.
-                    let mut m = 0;
-                    while m < n {
-                        m += out.write(&buf[m..n])?;
-                    }
+                    DeltaMem::restore_from_source_seekable(*i, &mut buf_v[..], self.window, &mut out, &mut old)?;
                 }
                 BlockVec::Literal(_, v) => {
                     out.write_all(v.as_slice())?;
