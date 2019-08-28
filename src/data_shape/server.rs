@@ -23,6 +23,7 @@ pub struct Server {
     pub id_rsa_pub: String,
     pub host: String,
     pub port: u16,
+    pub remote_exec: String,
     pub username: String,
     pub directories: Vec<Directory>,
     pub file_list_file: Option<String>,
@@ -136,15 +137,15 @@ pub fn sync_dirs<P: AsRef<str>, R: Read>(name: P, from: Option<R>) -> Result<(),
 }
 
 pub fn load_server(name: impl AsRef<str>) -> Result<Server, failure::Error> {
-    let mut _name = name.as_ref();
+    let name = name.as_ref();
 
-    let server_path = if _name.contains('\\') || _name.contains('/') {
-        Path::new(_name).to_path_buf()
+    let server_path = if name.contains('\\') || name.contains('/') {
+        Path::new(name).to_path_buf()
     } else {
-        let name_only = if !_name.ends_with(".yml") {
-            format!("{}.yml", _name)
+        let name_only = if !name.ends_with(".yml") {
+            format!("{}.yml", name)
         } else {
-            _name.to_string()
+            name.to_string()
         };
         let sp = std::env::current_exe()?
             .parent()

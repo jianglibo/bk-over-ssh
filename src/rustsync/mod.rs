@@ -16,6 +16,8 @@ use serde::{Deserialize, Serialize};
 
 const BLAKE2_SIZE: usize = 32;
 
+pub const WINDOW_FIELD_TYPE: u8 = 0;
+
 #[derive(Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 struct Blake2b([u8; BLAKE2_SIZE]);
 
@@ -33,6 +35,60 @@ pub struct Signature {
     chunks: HashMap<u32, HashMap<Blake2b, usize>>,
 }
 
+impl Signature {
+    #[allow(dead_code)]
+    pub fn write_to_file(&mut self, file_name: impl AsRef<Path>) -> Result<(), failure::Error> {
+        let mut wr = record::RecordWriter::<fs::File>::with_file_writer(file_name.as_ref())?;
+        wr.write_field_usize(WINDOW_FIELD_TYPE, self.window)?;
+        // u32(4) + blake2_bytes(32) + position(4 or 8);
+        for (k, v) in self.chunks.iter() {
+            let u32_bytes = k.to_be_bytes();
+            let mut v_bytes = Vec::new();
+            v_bytes.extend_from_slice(&u32_bytes);
+            for (blake2_bytes, position) in v.iter() {
+                v_bytes.extend_from_slice(&blake2_bytes.0);
+                v_bytes.extend_from_slice(&position.to_be_bytes());
+            }
+            wr.write_field_slice(1_u8, v_bytes.as_slice())?;
+        }
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    pub fn load_signature_file(file_name: impl AsRef<Path>) -> Result<Signature, failure::Error> {
+        let mut rr = record::RecordReader::<fs::File>::with_file_reader(file_name.as_ref())?;
+        if let Some((_field_type, u8_vec)) = rr.read_field_slice()? {
+            let mut chunks = HashMap::new();
+            let usize_size = std::mem::size_of::<usize>();
+            let mut ary = [0_u8; 8];
+            ary.copy_from_slice(&u8_vec[..8]);
+            let window = usize::from_be_bytes(ary);
+            while let Some((_field_type, u8_vec)) = rr.read_field_slice()? {
+                let mut alder32_bytes = [0_u8; 4];
+                alder32_bytes.copy_from_slice(&u8_vec[..4]);
+                let alder32_value = u32::from_be_bytes(alder32_bytes);
+
+                let mut i = 4;
+                while i < u8_vec.len() {
+                    let mut blake2_bytes = [0_u8; BLAKE2_SIZE];
+                    blake2_bytes.copy_from_slice(&u8_vec[i..i + BLAKE2_SIZE]);
+                    let mut position = [0_u8; 8];
+                    position.copy_from_slice(&u8_vec[i + BLAKE2_SIZE..i + BLAKE2_SIZE + 8]);
+                    let position_usize = usize::from_be_bytes(position);
+                    chunks
+                        .entry(alder32_value)
+                        .or_insert_with(HashMap::new)
+                        .insert(Blake2b(blake2_bytes), position_usize);
+                    i += BLAKE2_SIZE + 8;
+                }
+            }
+            let sig = Signature { window, chunks };
+            Ok(sig)
+        } else {
+            bail!("damaged signature file.");
+        }
+    }
+
 /// Create the "signature" of a file, essentially a content-indexed
 /// map of blocks. The first step of the protocol is to run this
 /// function on the "source" (the remote file when downloading, the
@@ -40,7 +96,7 @@ pub struct Signature {
 pub fn signature<R: io::Read, B: AsRef<[u8]> + AsMut<[u8]>>(
     mut r: R,
     mut buff: B,
-) -> Result<Signature, std::io::Error> {
+) -> Result<Signature, failure::Error> {
     let mut chunks = HashMap::new();
 
     let mut i = 0;
@@ -77,6 +133,19 @@ pub fn signature<R: io::Read, B: AsRef<[u8]> + AsMut<[u8]>>(
         chunks,
     })
 }
+
+pub fn signature_a_file(
+    file_name: impl AsRef<Path>,
+    buf_size: Option<usize>,
+) -> Result<Signature, failure::Error> {
+    let f = fs::OpenOptions::new().read(true).open(file_name.as_ref())?;
+    let mut br = io::BufReader::new(f);
+    let mut buf = vec![0_u8; buf_size.unwrap_or(2048)];
+    Signature::signature(&mut br, &mut buf[..])
+}
+}
+
+
 
 struct State {
     // result: Vec<Block>,
@@ -222,280 +291,7 @@ pub trait Delta {
     }
 }
 
-/// Compare a signature with an existing file. This is the second step
-/// of the protocol, `r` is the local file when downloading, and the
-/// remote file when uploading.
-///
-/// `block` must be a buffer the same size as `sig.window`.
-#[allow(dead_code)]
-pub fn compare<R: io::Read, B: AsRef<[u8]> + AsMut<[u8]>, D: Delta>(
-    sig: &Signature,
-    mut r: R,
-    mut buff: B,
-    mut delta: D,
-) -> Result<D, failure::Error> {
-    let mut st = State::new();
-    let buff = buff.as_mut();
-    assert_eq!(buff.len(), sig.window);
-    while st.block_content_len > 0 {
-        let mut hash = {
-            let mut j = 0;
-            let readed_block = {
-                while j < sig.window {
-                    let r = r.read(&mut buff[..])?;
-                    if r == 0 {
-                        break;
-                    }
-                    j += r
-                }
-                st.oldest_byte_position = 0;
-                st.block_content_len = j;
-                &buff[..j]
-            };
-            adler32::RollingAdler32::from_buffer(readed_block)
-        };
 
-        // Starting from the current block (with hash `hash`), find
-        // the next block with a hash that appears in the signature.
-        loop {
-            if matches(&mut st, sig, &buff, &hash, &mut delta)? {
-                break;
-            }
-            info!("block_oldest: {:?}", st.oldest_byte_position);
-            info!("block_len: {:?}", st.block_content_len);
-            // The blocks are not equal. Move the hash by one byte
-            // until finding an equal block.
-            let oldest_u8 = buff[st.oldest_byte_position];
-            hash.remove(st.block_content_len, oldest_u8);
-            let r = r.read(&mut buff[st.oldest_byte_position..=st.oldest_byte_position])?;
-            if r > 0 {
-                // If there are still bytes to read, update the hash.
-                hash.update(buff[st.oldest_byte_position]);
-            } else if st.block_content_len > 0 {
-                // Else, just shrink the window, so that the current
-                // block's blake2 hash can be compared with the
-                // signature.
-                st.block_content_len -= 1;
-            } else {
-                // We're done reading the file.
-                break;
-            }
-            delta.push_byte(oldest_u8)?;
-            // info!("pending: {:?}", st.pending.len());
-            st.oldest_byte_position = (st.oldest_byte_position + 1) % sig.window;
-        }
-        delta.finishup()?;
-        // if !st.pending.is_empty() {
-        //     // We've reached the end of the file, and have never found
-        //     // a matching block again.
-        //     delta.push_block(Block::Literal(std::mem::replace(
-        //         &mut st.pending,
-        //         Vec::new(),
-        //     )))
-        // }
-    }
-    Ok(delta)
-}
-
-pub trait PendingStore {
-    fn push_byte(&mut self, byte: u8);
-    fn get_reader<R: io::Read>(&self) -> io::BufReader<R>;
-}
-
-fn matches<D: Delta>(
-    st: &mut State,
-    sig: &Signature,
-    block: &[u8],
-    hash: &adler32::RollingAdler32,
-    delta: &mut D,
-) -> Result<bool, failure::Error> {
-    if let Some(h) = sig.chunks.get(&hash.hash()) {
-        let blake2 = {
-            let mut b = blake2_rfc::blake2b::Blake2b::new(BLAKE2_SIZE);
-            if st.oldest_byte_position + st.block_content_len > sig.window {
-                b.update(&block[st.oldest_byte_position..]);
-                b.update(&block[..(st.oldest_byte_position + st.block_content_len) % sig.window]);
-            } else {
-                b.update(
-                    &block[st.oldest_byte_position..st.oldest_byte_position + st.block_content_len],
-                )
-            }
-            b.finalize()
-        };
-
-        if let Some(&index) = h.get(blake2.as_bytes()) {
-            // Matching hash found! If we have non-matching
-            // material before the match, add it.
-            // if !st.pending.is_empty() {
-            //     // result.push_block(Block::Literal(std::mem::replace(
-            //     //     &mut st.pending,
-            //     //     Vec::new(),
-            //     // )));
-            // }
-            // result.push_block(Block::FromSource(index as u64));
-            delta.push_from_source(index as u64)?;
-            return Ok(true);
-        }
-    }
-    Ok(false)
-}
-
-// /// Restore a file, using a "delta" (resulting from
-// /// [`compare`](fn.compare.html))
-// pub fn restore<W: io::Write, D: Delta<impl Block>>(mut w: W, s: &[u8], delta: &mut D) -> Result<(), failure::Error> {
-//     let window = delta.window();
-//     while let Some(block) = delta.next_segment()? {
-//         if block.is_from_source() {
-//             let i: u64 = delta.get_source_position(block)?;
-//                             let i = i as usize;
-//                 if i + delta.window() <= s.len() {
-//                     w.write_all(&s[i..i + delta.window()])?;
-//                 } else {
-//                     w.write_all(&s[i..])?;
-//                 }
-//         // }
-//         // if let Some(i) = block.from_source() {
-//         //         let i = i as usize;
-//         //         if i + delta.window() <= s.len() {
-//         //             w.write_all(&s[i..i + delta.window()])?;
-//         //         } else {
-//         //             w.write_all(&s[i..])?;
-//         //         }
-//         } else {
-//             // let reader = delta.get_reader(block)?;
-//             // io::copy(reader, &mut w)?;
-//             // while let Some(b) = block.next_bytes(window)? {
-//             //     w.write_all(b)?;
-//             // }
-//         }
-//     }
-//     Ok(())
-// }
-
-// /// Same as [`restore`](fn.restore.html), except that this function
-// /// uses a seekable, readable stream instead of the entire file in a
-// /// slice.
-// ///
-// /// `buf` must be a buffer the same size as `sig.window`.
-// pub fn restore_seek<W: io::Write, R: io::Read + io::Seek, B: AsRef<[u8]> + AsMut<[u8]>, D: Delta<impl Block>>(
-//     mut out: W,
-//     mut old: R,
-//     mut buf: B,
-//     delta: &mut D,
-// ) -> Result<(), failure::Error> {
-//     let buf = buf.as_mut();
-
-//     let window = delta.window();
-
-//     while let Some(block) = delta.next_segment()? {
-//         // if let Some(i) = block.from_source() {
-//             if block.is_from_source() {
-//                 let i: u64 = delta.get_source_position(block)?;
-//                 old.seek(io::SeekFrom::Start(i as u64))?;
-//                 // fill the buffer from r.
-//                 let mut n = 0;
-//                 loop {
-//                     let r = old.read(&mut buf[n..delta.window()])?;
-//                     if r == 0 {
-//                         break;
-//                     }
-//                     n += r
-//                 }
-//                 // write the buffer to w.
-//                 let mut m = 0;
-//                 while m < n {
-//                     m += out.write(&buf[m..n])?;
-//                 }
-//         } else {
-//             // let reader = delta.get_reader(block)?;
-//             // io::copy(reader, &mut out)?;
-//             // while let Some(b) = block.next_bytes(window)? {
-//             //     out.write_all(b)?;
-//             // }
-//         }
-//         }
-//     Ok(())
-// }
-
-pub fn signature_a_file(
-    file_name: impl AsRef<Path>,
-    buf_size: Option<usize>,
-    out_file: Option<&str>,
-) -> Result<Option<Signature>, failure::Error> {
-    let f = fs::OpenOptions::new().read(true).open(file_name.as_ref())?;
-    let mut br = io::BufReader::new(f);
-    let mut buf = vec![0_u8; buf_size.unwrap_or(2048)];
-    let sig = signature(&mut br, &mut buf[..])?;
-    if let Some(out) = out_file {
-        let f = fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(out)?;
-        serde_json::to_writer_pretty(f, &sig)?;
-        Ok(None)
-    } else {
-        Ok(Some(sig))
-    }
-}
-
-#[allow(dead_code)]
-pub fn write_signature_to_file(
-    sig: &Signature,
-    file_name: impl AsRef<Path>,
-) -> Result<(), failure::Error> {
-    let mut wr = record::RecordWriter::<fs::File>::with_file_writer(file_name.as_ref())?;
-    wr.write_field_slice(0_u8, &sig.window.to_be_bytes())?;
-    // u32(4) + blake2_bytes(32) + position(4 or 8);
-    for (k, v) in sig.chunks.iter() {
-        let u32_bytes = k.to_be_bytes();
-        let mut v_bytes = Vec::new();
-        v_bytes.extend_from_slice(&u32_bytes);
-        for (blake2_bytes, position) in v.iter() {
-            v_bytes.extend_from_slice(&blake2_bytes.0);
-            v_bytes.extend_from_slice(&position.to_be_bytes());
-        }
-        wr.write_field_slice(1_u8, v_bytes.as_slice())?;
-    }
-    Ok(())
-}
-
-#[allow(dead_code)]
-pub fn parse_signature_from_file(
-    file_name: impl AsRef<Path>,
-) -> Result<Option<Signature>, failure::Error> {
-    let mut rr = record::RecordReader::<fs::File>::with_file_reader(file_name.as_ref())?;
-    if let Some((_field_type, u8_vec)) = rr.read_field_slice()? {
-        let mut chunks = HashMap::new();
-        let usize_size = std::mem::size_of::<usize>();
-        let mut ary = [0_u8; 8];
-        ary.copy_from_slice(&u8_vec[..8]);
-        let window = usize::from_be_bytes(ary);
-        while let Some((_field_type, u8_vec)) = rr.read_field_slice()? {
-            let mut alder32_bytes = [0_u8; 4];
-            alder32_bytes.copy_from_slice(&u8_vec[..4]);
-            let alder32_value = u32::from_be_bytes(alder32_bytes);
-
-            let mut i = 4;
-            while i < u8_vec.len() {
-                let mut blake2_bytes = [0_u8; BLAKE2_SIZE];
-                blake2_bytes.copy_from_slice(&u8_vec[i..i + BLAKE2_SIZE]);
-                let mut position = [0_u8; 8];
-                position.copy_from_slice(&u8_vec[i + BLAKE2_SIZE..i + BLAKE2_SIZE + 8]);
-                let position_usize = usize::from_be_bytes(position);
-                chunks
-                    .entry(alder32_value)
-                    .or_insert_with(HashMap::new)
-                    .insert(Blake2b(blake2_bytes), position_usize);
-                i += BLAKE2_SIZE + 8;
-            }
-        }
-        let sig = Signature { window, chunks };
-        Ok(Some(sig))
-    } else {
-        Ok(None)
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -530,11 +326,12 @@ mod tests {
                     ((source.as_bytes()[index] as usize + 1) & 255) as u8
             }
             let block = [0; WINDOW];
-            let source_sig = signature(source.as_bytes(), block).unwrap();
+            let source_sig = Signature::signature(source.as_bytes(), block)?;
             // println!("source_sig: {:?}", source_sig);
             // let mut blocks = Vec::new();
-            let delta = delta_mem::DeltaMem::new(WINDOW);
-            let mut delta = compare(&source_sig, modified.as_bytes(), block, delta).unwrap();
+            let mut delta = delta_mem::DeltaMem::new(WINDOW);
+            delta.compare(&source_sig, modified.as_bytes(), block)?;
+            // let mut delta = compare(&source_sig, modified.as_bytes(), block, delta).unwrap();
 
             let mut restored = Vec::new();
             let source = std::io::Cursor::new(source.as_bytes());
@@ -597,10 +394,10 @@ mod tests {
         let dev_env = develope_data::load_env();
         let start = Instant::now();
         let demo_file = &dev_env.servers.ubuntu18.test_files.midum_binary_file;
-        let sig = signature_a_file(demo_file, Some(4096), None)?.expect("sig should create.");
+        let mut sig = Signature::signature_a_file(demo_file, Some(4096))?;
 
         let sig_out = "target/cc.sig";
-        write_signature_to_file(&sig, sig_out)?;
+        sig.write_to_file(sig_out)?;
 
         let demo_file_length = Path::new(demo_file).metadata()?.len();
         let sig_out_length = Path::new(sig_out).metadata()?.len();
@@ -610,13 +407,11 @@ mod tests {
             demo_file_length,
             (sig_out_length as f64 / demo_file_length as f64) * 100.0
         );
-
-        let new_sig = parse_signature_from_file(sig_out)?;
-        info!("time elapsed: {:?}", start.elapsed().as_secs());
-        assert_eq!(Some(sig), new_sig);
-        // let start = Instant::now();
-        // signature_a_file(&dev_env.servers.ubuntu18.test_files.midum_binary_file, Some(4096), None)?;
-        // info!("time elapsed: {:?}", start.elapsed().as_secs());
+        info!("signature time elapsed: {:?}", start.elapsed().as_secs());
+        let start = Instant::now();
+        let new_sig = Signature::load_signature_file(sig_out)?;
+        info!("load signature time elapsed: {:?}", start.elapsed().as_secs());
+        assert_eq!(sig, new_sig);
         Ok(())
     }
 

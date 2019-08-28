@@ -1,4 +1,4 @@
-use super::{record, Delta};
+use super::{record, Delta, WINDOW_FIELD_TYPE};
 use log::*;
 use std::convert::TryInto;
 use std::path::Path;
@@ -9,7 +9,6 @@ use std::{
 
 const TEN_MEGA_BYTES: usize = 10 * 1024 * 1024;
 
-const WINDOW_FIELD_TYPE: u8 = 0;
 const LITERAL_FIELD_BYTE: u8 = 1;
 const FROM_SOURCE_FIELD_BYTE: u8 = 2;
 
@@ -219,7 +218,7 @@ impl Delta for DeltaFile {
 mod tests {
     use super::*;
     use crate::log_util;
-    use crate::rustsync::{compare, signature};
+    use crate::rustsync::{Signature};
     use rand;
     use rand::distributions::Alphanumeric;
     use rand::Rng;
@@ -235,7 +234,7 @@ mod tests {
                                       // total size: 78
         let modified = source.clone();
         let buf = [0; WINDOW];
-        let source_sig = signature(&source[..], buf).unwrap();
+        let source_sig = Signature::signature(&source[..], buf)?;
         let delta_file = "target/cc.delta";
         DeltaFile::create_delta_file(delta_file, WINDOW, Some(10))?.compare(
             &source_sig,
@@ -269,7 +268,7 @@ mod tests {
                     ((source.as_bytes()[index] as usize + 1) & 255) as u8
             }
             let buf = [0; WINDOW];
-            let source_sig = signature(source.as_bytes(), buf).unwrap();
+            let source_sig = Signature::signature(source.as_bytes(), buf)?;
             let delta_file = "target/cc.delta";
             DeltaFile::create_delta_file(delta_file, WINDOW, Some(3))?.compare(
                 &source_sig,

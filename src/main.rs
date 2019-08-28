@@ -159,25 +159,38 @@ fn main() {
                 &mut io::stdout(),
             );
         }
-        ("sync-dirs", Some(sub_matches)) => {
-            let server_config_path = sub_matches.value_of("server-yml").unwrap();
-            if let Err(err) = server::sync_dirs(server_config_path, Option::<fs::File>::None) {
-                error!("sync-dirs failed: {:?}", err);
-            }
-        }
         ("rsync", Some(sub_matches)) => {
             match sub_matches.subcommand() {
+                ("sync-dirs", Some(sub_sub_matches)) => {
+                    let server_config_path = sub_sub_matches.value_of("server-yml").unwrap();
+                    if let Err(err) = server::sync_dirs(server_config_path, Option::<fs::File>::None) {
+                        error!("sync-dirs failed: {:?}", err);
+                    }
+                }
                 ("signature", Some(sub_sub_matches)) => {
                     let file = sub_sub_matches.value_of("file").unwrap();
                     let block_size: Option<usize> = sub_sub_matches.value_of("block-size").and_then(|s|s.parse().ok());
                     let out: Option<&str> = sub_sub_matches.value_of("out");
                     let start = Instant::now();
-                    if let Err(err) = rustsync::signature_a_file(file, block_size, out) {
-                        error!("rsync signature failed: {:?}", err);
+                    match rustsync::Signature::signature_a_file(file, block_size) {
+                        Ok(mut sig) => {
+                            if let Some(o) = out {
+                                if let Err(err) = sig.write_to_file(o) {
+                                    error!("rsync signature write_to_file failed: {:?}", err);
+                                }
+                            } else {
+                                info!("igonre signature result.");
+                            }
+                        }
+                        Err(err) => {
+                            error!("rsync signature failed: {:?}", err);
+                        }
                     }
+
                     println!("time costs: {:?}", start.elapsed().as_secs());
                 }
                 ("list-files", Some(sub_sub_matches)) => {
+                    let server_config_path = sub_sub_matches.value_of("server-yml").unwrap();
                     let dirs = sub_sub_matches.values_of("dirs").unwrap();
                     let out = sub_sub_matches.value_of("out").unwrap();
                     let skip_sha1 = sub_sub_matches.is_present("skip-sha1");
