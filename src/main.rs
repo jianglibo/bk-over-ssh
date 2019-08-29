@@ -25,7 +25,7 @@ use rustyline::hint::{Hinter, HistoryHinter};
 use rustyline::{Cmd, CompletionType, Config, Context, EditMode, Editor, Helper, KeyPress};
 use std::time::Instant;
 
-use data_shape::{server, load_dirs};
+use data_shape::{load_dirs, Server};
 
 struct MyHelper {
     completer: FilenameCompleter,
@@ -135,12 +135,12 @@ fn main_client() {
     rl.save_history("history.txt").unwrap();
 }
 
-fn main() {
+fn main() -> Result<(), failure::Error> {
     use clap::App;
     use clap::ArgMatches;
     use clap::Shell;
-    use std::{fs, io};
     use log::*;
+    use std::{fs, io};
 
     log_util::setup_logger(vec![""], vec![]);
 
@@ -163,13 +163,22 @@ fn main() {
             match sub_matches.subcommand() {
                 ("sync-dirs", Some(sub_sub_matches)) => {
                     let server_config_path = sub_sub_matches.value_of("server-yml").unwrap();
-                    if let Err(err) = server::sync_dirs(server_config_path, Option::<fs::File>::None) {
-                        error!("sync-dirs failed: {:?}", err);
+                    match Server::load_from_yml(server_config_path) {
+                        Ok(mut server) => {
+                            if let Err(err) = server.sync_dirs() {
+                                error!("sync-dirs failed: {:?}", err);
+                            }
+                        }
+                        Err(err) => {
+                            error!("load_from_yml failed: {:?}", err);
+                        }
                     }
                 }
                 ("signature", Some(sub_sub_matches)) => {
                     let file = sub_sub_matches.value_of("file").unwrap();
-                    let block_size: Option<usize> = sub_sub_matches.value_of("block-size").and_then(|s|s.parse().ok());
+                    let block_size: Option<usize> = sub_sub_matches
+                        .value_of("block-size")
+                        .and_then(|s| s.parse().ok());
                     let out: Option<&str> = sub_sub_matches.value_of("out");
                     let start = Instant::now();
                     match rustsync::Signature::signature_a_file(file, block_size) {
@@ -189,15 +198,30 @@ fn main() {
 
                     println!("time costs: {:?}", start.elapsed().as_secs());
                 }
-                ("list-files", Some(sub_sub_matches)) => {
+                ("list-remote-files", Some(sub_sub_matches)) => {
                     let server_config_path = sub_sub_matches.value_of("server-yml").unwrap();
                     let dirs = sub_sub_matches.values_of("dirs").unwrap();
                     let out = sub_sub_matches.value_of("out").unwrap();
                     let skip_sha1 = sub_sub_matches.is_present("skip-sha1");
                     let start = Instant::now();
-                    if let Err(err) = load_dirs(dirs, out, skip_sha1) {
+                    if let Err(err) = load_dirs(dirs, &mut std::io::stdout(), skip_sha1) {
                         error!("rsync signature failed: {:?}", err);
                     }
+                    println!("time costs: {:?}", start.elapsed().as_secs());
+                }
+                ("list-local-files", Some(sub_sub_matches)) => {
+                    let server_config_path = sub_sub_matches.value_of("server-yml").unwrap();
+                    let skip_sha1 = sub_sub_matches.is_present("skip-sha1");
+                    let start = Instant::now();
+
+                    let server = Server::load_from_yml(server_config_path)?;
+
+                    if let Some(out) = sub_sub_matches.value_of("out") {
+                        let mut out = fs::OpenOptions::new().create(true).truncate(true).write(true).open(out)?;
+                        server.load_dirs(&mut out, skip_sha1)?;
+                    } else {
+                        server.load_dirs(&mut io::stdout(), skip_sha1)?;
+                    }        
                     println!("time costs: {:?}", start.elapsed().as_secs());
                 }
                 (_, _) => unimplemented!(), // for brevity
@@ -208,6 +232,7 @@ fn main() {
         }
         (_, _) => unimplemented!(), // for brevity
     }
+    Ok(())
 
     // if let Some(mode) = m.value_of("mode") {
     //     match mode {

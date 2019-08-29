@@ -99,7 +99,13 @@ subcommands:
                         long: server-yml
                         required: true
                         takes_value: true
-            - list-files:
+            - list-remote-files:
+                args:
+                    - server-yml:
+                        long: server-yml
+                        required: true
+                        takes_value: true
+            - list-local-files:
                 args:
                     - server-yml:
                         long: server-yml
@@ -111,13 +117,13 @@ subcommands:
                     #     required: true
                     #     takes_value: true
                     #     min_values: 1
-                    # - out:
-                    #     long: out
-                    #     required: true
-                    #     takes_value: true
-                    # - skip-sha1:
-                    #     long: skip-sha1
-                    #     required: false
+                    - out:
+                        long: out
+                        required: false
+                        takes_value: true
+                    - skip-sha1:
+                        long: skip-sha1
+                        required: false
             - signature:
                 args:
                     - file:

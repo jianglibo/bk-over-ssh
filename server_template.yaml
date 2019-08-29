@@ -4,6 +4,7 @@ host: 127.0.0.1
 port: 2222
 username: jianglibo
 remote_exec: /home/osboxes/ws/ssh-client-demo/target/debug/ssh-client-demo
+remote_server_yml: /home/osboxes/ws/ssh-client-demo/servers/localhost.yml
 file_list_file: /home/jianglibo/ws/ssh-client-demo/fixtures/linux_remote_item_dir.txt
 directories:
   - remote_dir: /home/jianglibo/ws/ssh-client-demo/fixtures/adir

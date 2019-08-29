@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use std::{fs, io};
 use walkdir::WalkDir;
+use super::server::Directory;
 
 pub struct RemoteFileItemLineOwned {
     path: String,
@@ -98,18 +99,14 @@ impl<'a> RemoteFileItemLine<'a> {
     }
 }
 
-fn load_remote_item_owned<O: io::Write>(dir_path: impl AsRef<Path>, out: &mut O, skip_sha1: bool) {
-    let bp = Path::new(dir_path.as_ref()).canonicalize();
+pub fn load_remote_item_owned<O: io::Write>(directory: &Directory, out: &mut O, skip_sha1: bool) -> Result<(), failure::Error> {
+    let bp = Path::new(directory.remote_dir.as_str()).canonicalize();
     match bp {
         Ok(base_path) => {
             if let Some(path_str) = base_path.to_str() {
-                if let Err(err) = writeln!(out, "{}", path_str) {
-                    error!("{}", err);
-                    return;
-                }
+                writeln!(out, "{}", path_str)?;
             } else {
-                error!("base_path to_str failed: {:?}", base_path);
-                return;
+                bail!("base_path to_str failed: {:?}", base_path);
             }
             WalkDir::new(&base_path)
                 .follow_links(false)
@@ -117,6 +114,9 @@ fn load_remote_item_owned<O: io::Write>(dir_path: impl AsRef<Path>, out: &mut O,
                 .filter_map(|e| e.ok())
                 .filter(|d| d.file_type().is_file())
                 .filter_map(|d| d.path().canonicalize().ok())
+                .filter_map(|d| {
+                    directory.match_path(d)
+                })
                 .filter_map(|d| RemoteFileItemLineOwned::from_path(&base_path, d, skip_sha1))
                 .for_each(|owned| {
                     let it = RemoteFileItemLine::from(&owned);
@@ -136,17 +136,20 @@ fn load_remote_item_owned<O: io::Write>(dir_path: impl AsRef<Path>, out: &mut O,
             error!("load_dir resolve path failed: {:?}", err);
         }
     }
+    Ok(())
 }
 
-pub fn load_dirs<'a>(
+pub fn load_dirs<'a, O: io::Write>(
     dirs: impl Iterator<Item = &'a str>,
-    out: &'a str,
+    out: &'a mut O,
     skip_sha1: bool,
 ) -> Result<(), failure::Error> {
-    let mut wf = fs::OpenOptions::new().create(true).write(true).open(out)?;
-
     for one_dir in dirs {
-        load_remote_item_owned(one_dir, &mut wf, skip_sha1);
+        let directory = Directory {
+            remote_dir: one_dir.to_string(),
+            ..Directory::default()
+        };
+        load_remote_item_owned(&directory, out, skip_sha1)?;
     }
     Ok(())
 }
@@ -155,21 +158,28 @@ pub fn load_dirs<'a>(
 mod tests {
     use super::*;
     use crate::log_util;
+    use crate::develope::develope_data;
     use failure;
+
+    const L_DIR: &str = "fixtures/linux_remote_item_dir.txt";
 
     #[test]
     fn t_from_path() -> Result<(), failure::Error> {
-        log_util::setup_logger(vec![""], vec![]);
+        log_util::setup_logger_empty();
         let dirs = vec!["fixtures/adir"].into_iter();
-        load_dirs(dirs, "fixtures/linux_remote_item_dir.txt", true)?;
+        let mut cur = develope_data::get_a_cursor_writer();
+        load_dirs(dirs, &mut cur, true)?;
+        let num = develope_data::count_cursor_lines(cur);
+        assert_eq!(num, 6);
         Ok(())
     }
 
     #[test]
     fn t_from_path_to_path() -> Result<(), failure::Error> {
-        log_util::setup_logger(vec![""], vec![]);
+        log_util::setup_logger_empty();
         let dirs = vec!["F:/"].into_iter();
-        load_dirs(dirs, "target/linux_remote_item_dir.txt", true)?;
+        let mut out = fs::OpenOptions::new().create(true).truncate(true).write(true).open(L_DIR)?;
+        load_dirs(dirs, &mut out, true)?;
         Ok(())
     }
 }

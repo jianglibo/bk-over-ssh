@@ -3,9 +3,20 @@ use serde::{Deserialize, Serialize};
 use log::*;
 use ssh2::{self, Session};
 use std::fs::File;
-use std::io::BufReader;
+use std::{io::BufReader, io, io::BufRead, io::Seek};
 use std::net::TcpStream;
 use std::path::Path;
+
+
+pub fn get_a_cursor_writer() -> io::Cursor<Vec<u8>> {
+        let v = Vec::<u8>::new();
+        io::Cursor::new(v)
+}
+
+pub fn count_cursor_lines(mut cursor: io::Cursor<Vec<u8>>) -> usize {
+    cursor.seek(io::SeekFrom::Start(0)).unwrap();
+    io::BufReader::new(cursor).lines().count()
+}
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct SshClientParams {

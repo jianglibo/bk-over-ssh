@@ -2,6 +2,11 @@ use fern::colors::{Color, ColoredLevelConfig};
 use std::fs;
 use std::path::Path;
 
+
+pub fn setup_logger_empty() {
+    setup_logger(Vec::<String>::new(), vec![]);
+}
+
 pub fn setup_logger<T, I>(verbose_modules: T, other_modules: T)
 where
     I: AsRef<str>,
