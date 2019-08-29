@@ -16,6 +16,18 @@
 # PermitRootLogin yes
 # PasswordAuthentication yes
 
+# sudo apt install build-essential, this will install gcc.
+
+# sudo fuser -vki /var/lib/dpkg/lock
+# sudo apt purge snapd
+# sudo dpkg --configure -a
+# sudo apt update
+# sudo apt upgrade
+# sudo apt dist-upgrade
+# sudo apt install snapd
+# libssl-dev
+# sudo apt install pkg-config
+
 
 
 ssh_client:
