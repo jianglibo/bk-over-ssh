@@ -85,6 +85,11 @@ subcommands:
     - repl:
         about: enter repl mode.
     - rsync:
+        args:
+            - skip-sha1:
+                long: skip-sha1
+                required: false
+                global: true       
         # args:
         #     - server-yml:
         #         help: the path to server configuration file.
@@ -105,6 +110,10 @@ subcommands:
                         long: server-yml
                         required: true
                         takes_value: true
+                    - out:
+                        long: out
+                        required: false
+                        takes_value: true
             - list-local-files:
                 args:
                     - server-yml:
@@ -121,9 +130,6 @@ subcommands:
                         long: out
                         required: false
                         takes_value: true
-                    - skip-sha1:
-                        long: skip-sha1
-                        required: false
             - signature:
                 args:
                     - file:

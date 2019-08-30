@@ -163,9 +163,10 @@ fn main() -> Result<(), failure::Error> {
             match sub_matches.subcommand() {
                 ("sync-dirs", Some(sub_sub_matches)) => {
                     let server_config_path = sub_sub_matches.value_of("server-yml").unwrap();
+                    let skip_sha1 = sub_sub_matches.is_present("skip-sha1");
                     match Server::load_from_yml(server_config_path) {
                         Ok(mut server) => {
-                            if let Err(err) = server.sync_dirs() {
+                            if let Err(err) = server.sync_dirs(skip_sha1) {
                                 error!("sync-dirs failed: {:?}", err);
                             }
                         }
@@ -199,20 +200,23 @@ fn main() -> Result<(), failure::Error> {
                     println!("time costs: {:?}", start.elapsed().as_secs());
                 }
                 ("list-remote-files", Some(sub_sub_matches)) => {
-                    let server_config_path = sub_sub_matches.value_of("server-yml").unwrap();
-                    let dirs = sub_sub_matches.values_of("dirs").unwrap();
-                    let out = sub_sub_matches.value_of("out").unwrap();
+                    let server_config_path = sub_sub_matches.value_of("server-yml").expect("should load sever yml.");
                     let skip_sha1 = sub_sub_matches.is_present("skip-sha1");
                     let start = Instant::now();
-                    if let Err(err) = load_dirs(dirs, &mut std::io::stdout(), skip_sha1) {
-                        error!("rsync signature failed: {:?}", err);
-                    }
+                    let mut server = Server::load_from_yml(server_config_path)?;
+
+                    if let Some(out) = sub_sub_matches.value_of("out") {
+                        let mut out = fs::OpenOptions::new().create(true).truncate(true).write(true).open(out)?;
+                        server.list_remote_file(&mut out, skip_sha1)?;
+                    } else {
+                        server.list_remote_file(&mut io::stdout(), skip_sha1)?;
+                    }        
+
                     println!("time costs: {:?}", start.elapsed().as_secs());
                 }
                 ("list-local-files", Some(sub_sub_matches)) => {
-                    let server_config_path = sub_sub_matches.value_of("server-yml").unwrap();
+                    let server_config_path = sub_sub_matches.value_of("server-yml").expect("should load server yml.");
                     let skip_sha1 = sub_sub_matches.is_present("skip-sha1");
-                    let start = Instant::now();
 
                     let server = Server::load_from_yml(server_config_path)?;
 
@@ -222,7 +226,6 @@ fn main() -> Result<(), failure::Error> {
                     } else {
                         server.load_dirs(&mut io::stdout(), skip_sha1)?;
                     }        
-                    println!("time costs: {:?}", start.elapsed().as_secs());
                 }
                 (_, _) => unimplemented!(), // for brevity
             }

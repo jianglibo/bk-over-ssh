@@ -296,6 +296,7 @@ pub trait Delta {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use log::*;
     use crate::develope::develope_data;
     use crate::log_util;
     use rand;

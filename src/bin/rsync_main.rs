@@ -1,7 +1,7 @@
 extern crate ssh_client_demo;
 
 use std::io::prelude::*;
-use std::io::{self, Cursor};
+use std::io::{Cursor};
 use std::fs;
 use librsync::{Delta, Patch, Signature};
 use ssh_client_demo::develope::develope_data;

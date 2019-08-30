@@ -185,7 +185,7 @@ mod tests {
     #[test]
     fn t_signature_large_file() -> Result<(), failure::Error> {
         log_util::setup_logger(vec![""], vec![]);
-        let wr = RecordWriter::<fs::File>::with_file_writer("target/cc.sig")?;
+        let _wr = RecordWriter::<fs::File>::with_file_writer("target/cc.sig")?;
         Ok(())
     }
 }

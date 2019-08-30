@@ -1,107 +1,49 @@
-use crate::actions::{hash_file_sha1, write_str_to_file};
+use crate::actions::hash_file_sha1;
 use log::*;
 use serde::{Deserialize, Serialize};
 use std::iter::Iterator;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
+use std::{io};
 use walkdir::WalkDir;
-use std::{fs};
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct RemoteFileItemDir<'a> {
-    pub base_path: Option<&'a str>,
-    #[serde(borrow)]
-    items: Vec<RemoteFileItem<'a>>,
-}
-
-impl<'a> RemoteFileItemDir<'a> {
-    #[allow(dead_code)]
-    pub fn new() -> Self {
-        Self {
-            base_path: None,
-            items: Vec::<RemoteFileItem<'a>>::new(),
-        }
-    }
-
-    pub fn fill_base_dir(&mut self) {
-        if self.base_path.is_some() {
-            let bp = self.base_path.unwrap();
-            for it in self.items.iter_mut() {
-                it.base_dir.replace(bp);
-            }
-        }
-    }
-
-    pub fn get_items(&self) -> &Vec<RemoteFileItem<'a>> {
-        &self.items
-    }
-}
-
-impl<'a> std::convert::From<&'a RemoteFileItemDirOwned> for RemoteFileItemDir<'a> {
-    fn from(rfio: &'a RemoteFileItemDirOwned) -> Self {
-        Self {
-            base_path: rfio.base_path.as_ref().map(|ss| ss.as_str()),
-            items: rfio.items.iter().map(Into::into).collect(),
-        }
-    }
-}
-
-pub struct RemoteFileItemDirOwned {
-    pub base_path: Option<String>,
-    items: Vec<RemoteFileItemOwned>,
-}
-
-impl RemoteFileItemDirOwned {
-    fn load_remote_item_owned(dir_path: impl AsRef<Path>) -> Vec<RemoteFileItemOwned> {
-        let bp = Path::new(dir_path.as_ref()).canonicalize();
-        match bp {
-            Ok(base_path) => WalkDir::new(&base_path)
-                .follow_links(false)
-                .into_iter()
-                .filter_map(|e| e.ok())
-                .filter(|d| d.file_type().is_file())
-                .filter_map(|d| d.path().canonicalize().ok())
-                .filter_map(|d| RemoteFileItemOwned::from_path(&base_path, d))
-                .collect(),
-            Err(err) => {
-                error!("load_dir resolve path failed: {:?}", err);
-                Vec::new()
-            }
-        }
-    }
-
-    pub fn load_dir(base_path: impl AsRef<Path>) -> Self {
-        let ab = base_path.as_ref().canonicalize().expect("canonicalize remote_item_dir base_path should success.");
-        let items = RemoteFileItemDirOwned::load_remote_item_owned(&ab);
-        Self {
-            base_path: ab.to_str().map(str::to_string),
-            items,
-        }
-    }
-}
+use super::server::Directory;
 
 pub struct RemoteFileItemOwned {
     path: String,
     sha1: Option<String>,
     len: u64,
+    modified: Option<u64>,
+    created: Option<u64>,
 }
 
 impl RemoteFileItemOwned {
-    pub fn from_path(base_path: impl AsRef<Path>, path: PathBuf) -> Option<Self> {
+    pub fn from_path(base_path: impl AsRef<Path>, path: PathBuf, skip_sha1: bool) -> Option<Self> {
         let metadata_r = path.metadata();
         match metadata_r {
             Ok(metadata) => {
-                if let Some(sha1) = hash_file_sha1(&path) {
+                let sha1 = if !skip_sha1 { hash_file_sha1(&path) } else { Option::<String>::None };
+                // if let Some(sha1) = hash_file_sha1(&path) {
                     let relative_o = path.strip_prefix(&base_path).ok().and_then(|p| p.to_str());
                     if let Some(relative) = relative_o {
                         return Some(Self {
                             path: relative.to_string(),
-                            sha1: Some(sha1),
+                            sha1,
                             len: metadata.len(),
+                            modified: metadata
+                                .modified()
+                                .ok()
+                                .and_then(|st| st.duration_since(SystemTime::UNIX_EPOCH).ok())
+                                .map(|d| d.as_secs()),
+                            created: metadata
+                                .created()
+                                .ok()
+                                .and_then(|st| st.duration_since(SystemTime::UNIX_EPOCH).ok())
+                                .map(|d| d.as_secs()),
                         });
                     } else {
                         error!("RemoteFileItem path name to_str() failed. {:?}", path);
                     }
-                }
+                // }
             }
             Err(err) => {
                 error!("RemoteFileItem from_path failed: {:?}, {:?}", path, err);
@@ -114,44 +56,38 @@ impl RemoteFileItemOwned {
 impl<'a> std::convert::From<&'a RemoteFileItemOwned> for RemoteFileItem<'a> {
     fn from(rfio: &'a RemoteFileItemOwned) -> Self {
         Self {
-            base_dir: None,
             path: rfio.path.as_str(),
             sha1: rfio.sha1.as_ref().map(|ss| ss.as_str()),
             len: rfio.len,
+            modified: rfio.modified,
+            created: rfio.created,
         }
     }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct RemoteFileItem<'a> {
-    #[serde(skip)]
-    base_dir: Option<&'a str>,
     path: &'a str,
     sha1: Option<&'a str>,
     len: u64,
+    created: Option<u64>,
+    modified: Option<u64>,
 }
 
 impl<'a> RemoteFileItem<'a> {
     #[allow(dead_code)]
     pub fn new(path: &'a str) -> Self {
         Self {
-            base_dir: None,
             path,
             sha1: None,
             len: 0_u64,
+            created: None,
+            modified: None,
         }
     }
 
     pub fn get_path(&self) -> &'a str {
         self.path
-    }
-
-    pub fn get_full_path(&self) -> String {
-        if let Some(bp) = self.base_dir {
-            format!("{}{}{}", bp, std::path::MAIN_SEPARATOR, self.path)
-        } else {
-            self.path.to_string()
-        }
     }
 
     pub fn get_len(&self) -> u64 {
@@ -163,56 +99,88 @@ impl<'a> RemoteFileItem<'a> {
     }
 }
 
-pub fn load_dirs<'a>(dirs: impl Iterator<Item=&'a str>, out: &'a str) -> Result<(), failure::Error> {
-    let rdso = dirs.map(|dir|RemoteFileItemDirOwned::load_dir(dir)).collect::<Vec<RemoteFileItemDirOwned>>();
-    let rds = rdso.iter().map(Into::into).collect::<Vec<RemoteFileItemDir<'_>>>();
-    let wf = fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .open(out)?;
-    serde_json::to_writer(wf, &rds)?;
+pub fn load_remote_item_owned<O: io::Write>(directory: &Directory, out: &mut O, skip_sha1: bool) -> Result<(), failure::Error> {
+    let bp = Path::new(directory.remote_dir.as_str()).canonicalize();
+    match bp {
+        Ok(base_path) => {
+            if let Some(path_str) = base_path.to_str() {
+                writeln!(out, "{}", path_str)?;
+            } else {
+                bail!("base_path to_str failed: {:?}", base_path);
+            }
+            WalkDir::new(&base_path)
+                .follow_links(false)
+                .into_iter()
+                .filter_map(|e| e.ok())
+                .filter(|d| d.file_type().is_file())
+                .filter_map(|d| d.path().canonicalize().ok())
+                .filter_map(|d| {
+                    directory.match_path(d)
+                })
+                .filter_map(|d| RemoteFileItemOwned::from_path(&base_path, d, skip_sha1))
+                .for_each(|owned| {
+                    let it = RemoteFileItem::from(&owned);
+                    match serde_json::to_string(&it) {
+                        Ok(line) => {
+                            if let Err(err) = writeln!(out, "{}", line) {
+                                error!("write item line failed: {:?}, {:?}", err, line);
+                            }
+                        }
+                        Err(err) => {
+                            error!("serialize item line failed: {:?}", err);
+                        }
+                    }
+                });
+        }
+        Err(err) => {
+            error!("load_dir resolve path failed: {:?}", err);
+        }
+    }
+    Ok(())
+}
+
+#[allow(dead_code)]
+pub fn load_dirs<'a, O: io::Write>(
+    dirs: impl Iterator<Item = &'a str>,
+    out: &'a mut O,
+    skip_sha1: bool,
+) -> Result<(), failure::Error> {
+    for one_dir in dirs {
+        let directory = Directory {
+            remote_dir: one_dir.to_string(),
+            ..Directory::default()
+        };
+        load_remote_item_owned(&directory, out, skip_sha1)?;
+    }
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::actions::write_str_to_file;
     use crate::log_util;
+    use crate::develope::develope_data;
+    use failure;
 
     #[test]
-    fn deserialize_file_item() {
-        let s = r#"
-{
-    "base_path": "/abc",
-    "items":[
-    {
-            "path": "a",
-            "sha1": "cc",
-            "len": 55
-    }]
-}
-"#;
-        let rd: RemoteFileItemDir =
-            serde_json::from_str(&s).expect("load develope_data should success.");
-        assert_eq!(
-            rd.get_items()
-                .iter()
-                .next()
-                .and_then(|ri| Some(ri.get_path().to_string())),
-            Some("a".to_string())
-        );
+    fn t_from_path() -> Result<(), failure::Error> {
+        log_util::setup_logger_empty();
+        let dirs = vec!["fixtures/adir"].into_iter();
+        let mut cur = develope_data::get_a_cursor_writer();
+        load_dirs(dirs, &mut cur, true)?;
+        let num = develope_data::count_cursor_lines(cur);
+        assert_eq!(num, 7);
+        Ok(())
     }
 
     #[test]
-    fn t_from_path() {
-        log_util::setup_logger(vec![""], vec![]);
-        let rdo = RemoteFileItemDirOwned::load_dir("fixtures/adir");
-        let rd: RemoteFileItemDir = (&rdo).into();
-        let json_str = serde_json::to_string_pretty(&rd).expect("deserialize should success");
-        info!("{:?}", json_str);
-        write_str_to_file(json_str, "fixtures/linux_remote_item_dir.json")
-            .expect("should success.");
-        assert_eq!(rd.get_items().len(), 5_usize);
+    fn t_from_path_to_path() -> Result<(), failure::Error> {
+        log_util::setup_logger_empty();
+        let dirs = vec!["/home"].into_iter();
+        let mut cur = develope_data::get_a_cursor_writer();
+        load_dirs(dirs, &mut cur, true)?;
+        let num = develope_data::count_cursor_lines(cur);
+        assert_eq!(num, 58380);
+        Ok(())
     }
 }

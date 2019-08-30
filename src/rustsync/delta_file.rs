@@ -187,14 +187,14 @@ impl Delta for DeltaFile {
 
                     while field_len >= window_u64 {
                         reader.read_exact(&mut buf_v[..])?;
-                        out.write_all(&mut buf_v[..])?;
+                        out.write_all(&buf_v[..])?;
                         field_len -= window_u64;
                     }
                     if field_len > 0 {
                         let field_len_usize: usize =
                             field_len.try_into().expect("u64 should convert to usize.");
                         reader.read_exact(&mut buf_v[..field_len_usize])?;
-                        out.write_all(&mut buf_v[..field_len_usize])?;
+                        out.write_all(&buf_v[..field_len_usize])?;
                     }
                 }
                 _ => {
@@ -204,7 +204,7 @@ impl Delta for DeltaFile {
         }
         Ok(())
     }
-    fn restore(&mut self, mut out: impl io::Write, mut old: &[u8]) -> Result<(), failure::Error> {
+    fn restore(&mut self, mut _out: impl io::Write, mut _old: &[u8]) -> Result<(), failure::Error> {
         Ok(())
     }
 

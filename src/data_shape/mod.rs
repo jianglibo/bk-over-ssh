@@ -1,8 +1,8 @@
-pub mod file_item_line;
-pub mod remote_file_item_line;
+pub mod file_item;
+pub mod remote_file_item;
 pub mod server;
 pub mod string_path;
 
-pub use file_item_line::FileItemLine;
-pub use remote_file_item_line::{load_dirs, RemoteFileItemLine, load_remote_item_owned};
+pub use file_item::FileItem;
+pub use remote_file_item::{load_dirs, RemoteFileItem, load_remote_item_owned};
 pub use server::{Server, Directory};

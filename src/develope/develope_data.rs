@@ -7,12 +7,13 @@ use std::{io::BufReader, io, io::BufRead, io::Seek};
 use std::net::TcpStream;
 use std::path::Path;
 
-
+#[allow(dead_code)]
 pub fn get_a_cursor_writer() -> io::Cursor<Vec<u8>> {
         let v = Vec::<u8>::new();
         io::Cursor::new(v)
 }
 
+#[allow(dead_code)]
 pub fn count_cursor_lines(mut cursor: io::Cursor<Vec<u8>>) -> usize {
     cursor.seek(io::SeekFrom::Start(0)).unwrap();
     io::BufReader::new(cursor).lines().count()

@@ -1,14 +1,14 @@
 use crate::actions::copy_a_file_item;
-use crate::data_shape::{load_remote_item_owned, FileItemLine, RemoteFileItemLine};
+use crate::data_shape::{load_remote_item_owned, FileItem, RemoteFileItem};
+use glob::Pattern;
 use log::*;
 use serde::Deserialize;
 use ssh2;
 use std::io::prelude::{BufRead, Read};
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
-use std::{fs, io};
-use tempfile;
-use glob::Pattern;
+use std::{fs, io, io::Seek};
+// use tempfile;
 
 #[derive(Deserialize, Default)]
 pub struct Directory {
@@ -29,7 +29,7 @@ impl Directory {
     pub fn match_path(&self, path: PathBuf) -> Option<PathBuf> {
         let mut no_exlucdes = false;
         if let Some(exclude_ptns) = self.excludes_patterns.as_ref() {
-            if exclude_ptns.iter().any(|p|p.matches_path(&path)) {
+            if exclude_ptns.iter().any(|p| p.matches_path(&path)) {
                 return None;
             }
         } else {
@@ -40,7 +40,7 @@ impl Directory {
             if include_ptns.is_empty() {
                 return Some(path);
             }
-            if include_ptns.iter().any(|p|p.matches_path(&path)) {
+            if include_ptns.iter().any(|p| p.matches_path(&path)) {
                 return Some(path);
             }
         } else if no_exlucdes {
@@ -51,11 +51,21 @@ impl Directory {
 
     pub fn compile_patterns(&mut self) -> Result<(), failure::Error> {
         if self.includes_patterns.is_none() {
-            self.includes_patterns.replace(self.includes.iter().map(|s|Pattern::new(s).unwrap()).collect());
+            self.includes_patterns.replace(
+                self.includes
+                    .iter()
+                    .map(|s| Pattern::new(s).unwrap())
+                    .collect(),
+            );
         }
 
         if self.excludes_patterns.is_none() {
-            self.excludes_patterns.replace(self.excludes.iter().map(|s|Pattern::new(s).unwrap()).collect());
+            self.excludes_patterns.replace(
+                self.excludes
+                    .iter()
+                    .map(|s| Pattern::new(s).unwrap())
+                    .collect(),
+            );
         }
 
         Ok(())
@@ -72,7 +82,6 @@ pub struct Server {
     pub remote_server_yml: String,
     pub username: String,
     pub directories: Vec<Directory>,
-    pub file_list_file: Option<String>,
     #[serde(skip)]
     _tcp_stream: Option<TcpStream>,
     #[serde(skip)]
@@ -109,7 +118,10 @@ impl Server {
         let mut buf = String::new();
         f.read_to_string(&mut buf)?;
         let mut server: Server = serde_yaml::from_str(&buf)?;
-        server.directories.iter_mut().for_each(|d|d.compile_patterns().unwrap());
+        server
+            .directories
+            .iter_mut()
+            .for_each(|d| d.compile_patterns().unwrap());
         Ok(server)
     }
 
@@ -135,67 +147,95 @@ impl Server {
     }
 
     pub fn connect(&mut self) -> Result<(), failure::Error> {
-        let (tcp, sess) = self.get_ssh_session()?;
-        self._tcp_stream.replace(tcp);
-        self.session.replace(sess);
+        if !self.is_connected() {
+            let (tcp, sess) = self.get_ssh_session()?;
+            self._tcp_stream.replace(tcp);
+            self.session.replace(sess);
+        }
         Ok(())
     }
 
-    fn get_file_list_file(&self, url: impl AsRef<str>) -> Result<impl io::Read, failure::Error> {
-        let mut channel: ssh2::Channel = self.session.as_ref().unwrap().channel_session().unwrap();
-        let cmd = format!(
-            "{} rsync list-files --server-yml {}",
-            self.remote_exec, self.remote_server_yml
-        );
-        channel.exec(cmd.as_str()).unwrap();
-        let mut tmp = tempfile::tempfile()?;
-        io::copy(&mut channel, &mut tmp)?;
-        Ok(tmp)
+    fn create_channel(&self) -> Result<ssh2::Channel, failure::Error> {
+        Ok(self
+            .session
+            .as_ref()
+            .expect("should already connected.")
+            .channel_session()
+            .expect("a channel session."))
     }
 
-    pub fn start_sync<R: Read>(&self, file_item_lines: Option<R>) -> Result<(), failure::Error> {
-        ensure!(self.is_connected(), "please connect the server first.");
+    pub fn list_remote_file(
+        &mut self,
+        out: &mut impl io::Write,
+        skip_sha1: bool,
+    ) -> Result<(), failure::Error> {
+        self.connect()?;
+        let mut channel: ssh2::Channel = self.create_channel()?;
+        let cmd = format!(
+            "{} rsync list-local-files --server-yml {}{}",
+            self.remote_exec,
+            self.remote_server_yml,
+            if skip_sha1 { " --skip-sha1" } else { "" }
+        );
+        info!("invoking remote command: {:?}", cmd);
+        channel.exec(cmd.as_str())?;
+        io::copy(&mut channel, out)?;
+        Ok(())
+    }
+
+    pub fn start_sync<R: Read>(
+        &mut self,
+        skip_sha1: bool,
+        file_item_lines: Option<R>,
+    ) -> Result<(), failure::Error> {
+        self.connect()?;
         if let Some(r) = file_item_lines {
             self._start_sync(r)
-        } else if let Some(url) = self.file_list_file.as_ref().cloned() {
-            // let tmp = self.get_file_list_file(url)?;
-            let sftp = self.session.as_ref().unwrap().sftp()?;
-            let sftp_file: ssh2::File = sftp.open(Path::new(&url))?;
-            self._start_sync(sftp_file)
         } else {
-            bail!("no file_list_file.");
+            let mut cursor = io::Cursor::new(Vec::<u8>::new());
+            self.list_remote_file(&mut cursor, skip_sha1)?;
+            cursor.seek(io::SeekFrom::Start(0))?;
+            self._start_sync(cursor)
         }
     }
 
+    /// Do not try to return item stream from this function. consume it locally, pass in function to alter the behavior.
     fn _start_sync<R: Read>(&self, file_item_lines: R) -> Result<(), failure::Error> {
-        if self.session.is_none() {
-            bail!("please connect the server first.");
-        }
         let mut current_remote_dir = Option::<String>::None;
         let mut current_local_dir = Option::<&Path>::None;
+        let sftp = self.session.as_ref().unwrap().sftp()?;
         for line_r in io::BufReader::new(file_item_lines).lines() {
             match line_r {
                 Ok(line) => {
                     info!("got line: {:?}", line);
-                    if current_local_dir.is_none() {
+                    if line.starts_with('{') {
+                        if let (Some(rd), Some(ld)) =
+                            (current_remote_dir.as_ref(), current_local_dir)
+                        {
+                            match serde_json::from_str::<RemoteFileItem>(&line) {
+                                Ok(remote_item) => {
+                                    let local_item = FileItem::new(
+                                        ld,
+                                        rd.as_str(),
+                                        &remote_item,
+                                    );
+                                    copy_a_file_item(&sftp, local_item);
+                                }
+                                Err(err) => {
+                                    error!("deserialize line failed: {:?}, {:?}", line, err);
+                                }
+                            }
+                        }
+                    } else {
+                        // it's a directory line.
                         if let Some(rd) = self.directories.iter().find(|d| d.remote_dir == line) {
                             current_remote_dir = Some(line);
                             current_local_dir = Some(Path::new(rd.local_dir.as_str()));
-                        }
-                    } else {
-                        let sftp = self.session.as_ref().unwrap().sftp()?;
-                        match serde_json::from_str::<RemoteFileItemLine>(&line) {
-                            Ok(remote_item) => {
-                                let local_item = FileItemLine::new(
-                                    current_local_dir.unwrap(),
-                                    current_remote_dir.as_ref().unwrap().as_str(),
-                                    &remote_item,
-                                );
-                                copy_a_file_item(&sftp, local_item);
-                            }
-                            Err(err) => {
-                                error!("deserialize line failed: {:?}, {:?}", line, err);
-                            }
+                        } else {
+                            // cannot find corepsonding local_dir, skipping following lines.
+                            error!("can't find corepsonding local_dir: {:?}", line);
+                            current_remote_dir = None;
+                            current_local_dir = None;
                         }
                     }
                 }
@@ -207,16 +247,20 @@ impl Server {
         Ok(())
     }
 
-    pub fn sync_dirs(&mut self) -> Result<(), failure::Error> {
+    pub fn sync_dirs(&mut self, skip_sha1: bool) -> Result<(), failure::Error> {
         self.connect()?;
-        self.start_sync(Option::<fs::File>::None)?;
+        self.start_sync(skip_sha1, Option::<fs::File>::None)?;
         Ok(())
     }
 
     #[allow(dead_code)]
-    pub fn sync_file_item_lines<R: Read>(&mut self, from: R) -> Result<(), failure::Error> {
+    pub fn sync_file_item_lines<R: Read>(
+        &mut self,
+        skip_sha1: bool,
+        from: R,
+    ) -> Result<(), failure::Error> {
         self.connect()?;
-        self.start_sync(Some(from))?;
+        self.start_sync(skip_sha1, Some(from))?;
         Ok(())
     }
     #[allow(dead_code)]
@@ -226,7 +270,7 @@ impl Server {
         skip_sha1: bool,
     ) -> Result<(), failure::Error> {
         for one_dir in self.directories.iter() {
-            load_remote_item_owned(one_dir, out, skip_sha1);
+            load_remote_item_owned(one_dir, out, skip_sha1)?;
         }
         Ok(())
     }
@@ -270,7 +314,7 @@ mod tests {
         let f = fs::OpenOptions::new()
             .read(true)
             .open("fixtures/linux_remote_item_dir.txt")?;
-        server.start_sync(Some(f))?;
+        server.start_sync(true, Some(f))?;
 
         assert!(d.exists());
         Ok(())
@@ -285,7 +329,7 @@ mod tests {
         }
         assert!(!d.exists());
         let mut server = Server::load_from_yml("localhost")?;
-        server.sync_dirs()?;
+        server.sync_dirs(true)?;
         assert!(d.exists());
         Ok(())
     }

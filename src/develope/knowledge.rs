@@ -2,7 +2,7 @@
 mod tests {
     use super::super::super::log_util;
     use super::super::develope_data;
-    use crate::actions::{copy_a_file_item, copy_stream_to_file_return_sha1};
+    use crate::actions::{copy_stream_to_file_return_sha1};
     use failure;
     use log::*;
     use ssh2::{self, Session};
