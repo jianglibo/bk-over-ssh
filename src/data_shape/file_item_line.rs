@@ -1,10 +1,10 @@
-use super::RemoteFileItemOwned;
+use super::RemoteFileItemLine;
 use std::path::Path;
 use super::string_path;
 
 #[derive(Debug)]
-pub struct FileItem<'a> {
-    pub remote_item: &'a RemoteFileItem<'a>,
+pub struct FileItemLine<'a> {
+    pub remote_item: &'a RemoteFileItemLine<'a>,
     base_dir: &'a Path,
     remote_base_dir: Option<&'a str>,
     sha1: Option<String>,
@@ -12,9 +12,9 @@ pub struct FileItem<'a> {
     fail_reason: Option<String>,
 }
 
-impl<'a> FileItem<'a> {
+impl<'a> FileItemLine<'a> {
     #[allow(dead_code)]
-    pub fn standalone(file_path: &'a Path, remote_base_dir: Option<&'a str>, remote_item: &'a RemoteFileItem) -> Self {
+    pub fn standalone(file_path: &'a Path, remote_base_dir: Option<&'a str>, remote_item: &'a RemoteFileItemLine) -> Self {
         Self {
             remote_item,
             base_dir: file_path,
@@ -25,7 +25,7 @@ impl<'a> FileItem<'a> {
         }
     }
 
-    pub fn new(base_dir: &'a Path, remote_base_dir: &'a str, remote_item: &'a RemoteFileItem) -> Self {
+    pub fn new(base_dir: &'a Path, remote_base_dir: &'a str, remote_item: &'a RemoteFileItemLine) -> Self {
         Self {
             base_dir,
             remote_item,
@@ -37,7 +37,7 @@ impl<'a> FileItem<'a> {
     }
 }
 
-impl<'a> FileItem<'a> {
+impl<'a> FileItemLine<'a> {
     pub fn get_local_path(&self) -> Option<String> {
         let rp = self.remote_item.get_path();
         self.base_dir.join(&rp).to_str().map(|s| s.to_string())
