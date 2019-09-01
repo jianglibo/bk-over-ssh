@@ -1,26 +1,52 @@
-use super::super::data_shape::{FileItem, RemoteFileItem};
+use super::super::data_shape::{FileItem, FileItemProcessResult, RemoteFileItem};
 use log::*;
 use sha1::{Digest, Sha1};
 use ssh2;
 use std::ffi::OsStr;
-use std::io::prelude::{Write};
+use std::io::prelude::Write;
 use std::path::Path;
 use std::{fs, io};
 
-
 #[allow(dead_code)]
-pub fn copy_file_to_stream(mut to: &mut impl std::io::Write, from_file: impl AsRef<Path>) -> Result<(), failure::Error> {
+pub fn copy_file_to_stream(
+    mut to: &mut impl std::io::Write,
+    from_file: impl AsRef<Path>,
+) -> Result<(), failure::Error> {
     let path = from_file.as_ref();
     let mut rf = fs::OpenOptions::new().open(path)?;
     io::copy(&mut rf, &mut to)?;
     Ok(())
 }
 
+pub fn copy_stream_to_file<T: AsRef<Path>>(
+    from: &mut impl std::io::Read,
+    to_file: T,
+) -> Result<u64, failure::Error> {
+    let mut u8_buf = [0; 1024];
+    let mut length = 0_u64;
+    let path = to_file.as_ref();
+    if let Some(pp) = path.parent() {
+        if !pp.exists() {
+            fs::create_dir_all(pp)?;
+        }
+    }
+    let mut wf = fs::OpenOptions::new().create(true).write(true).open(path)?;
+    loop {
+        match from.read(&mut u8_buf[..]) {
+            Ok(n) if n > 0 => {
+                length += n as u64;
+                wf.write_all(&u8_buf[..n])?;
+            }
+            _ => break,
+        }
+    }
+    Ok(length)
+}
+
 pub fn copy_stream_to_file_return_sha1<T: AsRef<Path>>(
     from: &mut impl std::io::Read,
     to_file: T,
 ) -> Result<(u64, String), failure::Error> {
-    info!("trying to write to file: {:?}", to_file.as_ref());
     let mut u8_buf = [0; 1024];
     let mut length = 0_u64;
     let mut hasher = Sha1::new();
@@ -115,49 +141,61 @@ pub fn copy_a_file<'a>(
     session: &mut ssh2::Session,
     remote_file_path: &'a str,
     local_file_path: &'a str,
-) -> Result<(), failure::Error> {
+) -> Result<FileItemProcessResult, failure::Error> {
     let ri = RemoteFileItem::new(remote_file_path);
     let fi = FileItem::standalone(Path::new(local_file_path), None, &ri);
     let sftp = session.sftp()?;
     let r = copy_a_file_item(&sftp, fi);
-
-    if let Some(err) = r.get_fail_reason() {
-        bail!(err.clone())
-    } else {
-        Ok(())
-    }
+    Ok(r)
 }
 
-pub fn copy_a_file_item<'a>(
-    sftp: &ssh2::Sftp,
-    mut file_item: FileItem<'a>,
-) -> FileItem<'a> {
-    if file_item.get_fail_reason().is_some() {
-        return file_item;
-    }
-    match sftp.open(Path::new(&file_item.get_remote_path())) {
+pub fn copy_a_file_item<'a>(sftp: &ssh2::Sftp, file_item: FileItem<'a>) -> FileItemProcessResult {
+    let rp = &file_item.get_remote_path();
+    match sftp.open(Path::new(rp)) {
         Ok(mut file) => {
-            let lpo = file_item.get_local_path();
-            if let Some(lp) = lpo.as_ref().map(String::as_str) {
-                match copy_stream_to_file_return_sha1(&mut file, lp) {
-                    Ok((length, sha1)) => {
-                        file_item.set_len(length);
-                        file_item.set_sha1(sha1);
+            let lpo = file_item.get_local_path_str();
+            if let Some(lp) = lpo.as_ref() {
+                if let Some(_r_sha1) = file_item.get_remote_item().get_sha1() {
+                    match copy_stream_to_file_return_sha1(&mut file, lp) {
+                        Ok((length, sha1)) => {
+                            if length != file_item.get_remote_item().get_len() {
+                                FileItemProcessResult::LengthNotMatch(lp.to_string())
+                            } else if file_item.is_sha1_not_equal(&sha1) {
+                                error!("sha1 didn't match: {:?}, local sha1: {:?}", file_item, sha1);
+                                FileItemProcessResult::Sha1NotMatch(lp.to_string())
+                            } else {
+                                FileItemProcessResult::Successed
+                            }
+                        }
+                        Err(err) => {
+                            error!("write_stream_to_file failed: {:?}", err);
+                            FileItemProcessResult::CopyFailed(lp.to_string())
+                        }
                     }
-                    Err(err) => {
-                        file_item
-                            .set_fail_reason(format!("write_stream_to_file failed: {:?}", err));
+                } else {
+                    match copy_stream_to_file(&mut file, lp) {
+                        Ok(length) => {
+                            if length != file_item.get_remote_item().get_len() {
+                                FileItemProcessResult::LengthNotMatch(lp.to_string())
+                            } else {
+                                FileItemProcessResult::Successed
+                            }
+                        }
+                        Err(err) => {
+                            error!("write_stream_to_file failed: {:?}", err);
+                            FileItemProcessResult::CopyFailed(lp.to_string())
+                        }
                     }
                 }
             } else {
-                file_item.set_fail_reason("file_item get_path failed.");
+                FileItemProcessResult::GetLocalPathFailed
             }
         }
         Err(err) => {
-            file_item.set_fail_reason(format!("sftp open failed: {:?}", err));
+            error!("sftp open failed: {:?}", err);
+            FileItemProcessResult::SftpOpenFailed
         }
     }
-    file_item
 }
 
 // pub fn copy_a_file_item<'a>(
@@ -198,8 +236,8 @@ mod tests {
     use super::{copy_a_file, visit_dirs, Path};
     use crate::develope::develope_data;
     use crate::log_util;
-    use std::{fs, io};
     use std::io::prelude::*;
+    use std::{fs, io};
 
     #[test]
     fn t_visit() {
@@ -229,8 +267,6 @@ mod tests {
         assert!(Path::new(lp).exists());
         Ok(())
     }
-
-
 
     #[test]
     fn t_copy_to_stdout() -> Result<(), failure::Error> {

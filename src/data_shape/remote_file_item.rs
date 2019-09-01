@@ -86,6 +86,10 @@ impl<'a> RemoteFileItem<'a> {
         }
     }
 
+    pub fn get_modified(&self) -> Option<u64> {
+        self.modified
+    }
+
     pub fn get_path(&self) -> &'a str {
         self.path
     }

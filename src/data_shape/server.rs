@@ -1,5 +1,8 @@
 use crate::actions::copy_a_file_item;
-use crate::data_shape::{load_remote_item_owned, FileItem, RemoteFileItem};
+use crate::data_shape::{
+    load_remote_item_owned, FileItem, FileItemProcessResult, FileItemProcessResultStats,
+    RemoteFileItem,
+};
 use glob::Pattern;
 use log::*;
 use serde::Deserialize;
@@ -204,10 +207,10 @@ impl Server {
         let mut current_remote_dir = Option::<String>::None;
         let mut current_local_dir = Option::<&Path>::None;
         let sftp = self.session.as_ref().unwrap().sftp()?;
-        for line_r in io::BufReader::new(file_item_lines).lines() {
+        let result = io::BufReader::new(file_item_lines).lines().map(|line_r|{
             match line_r {
                 Ok(line) => {
-                    info!("got line: {:?}", line);
+                    // info!("got line: {:?}", line);
                     if line.starts_with('{') {
                         if let (Some(rd), Some(ld)) =
                             (current_remote_dir.as_ref(), current_local_dir)
@@ -219,31 +222,59 @@ impl Server {
                                         rd.as_str(),
                                         &remote_item,
                                     );
-                                    copy_a_file_item(&sftp, local_item);
+                                    if local_item.had_changed() {
+                                        copy_a_file_item(&sftp, local_item)
+                                    } else {
+                                        FileItemProcessResult::Skipped(local_item.get_local_path_str().expect("get_local_path_str should has some at thia point."))
+                                    }
                                 }
                                 Err(err) => {
                                     error!("deserialize line failed: {:?}, {:?}", line, err);
+                                    FileItemProcessResult::DeserializeFailed(line)
                                 }
                             }
+                        } else {
+                            FileItemProcessResult::SkipBecauseNoBaseDir
                         }
                     } else {
                         // it's a directory line.
                         if let Some(rd) = self.directories.iter().find(|d| d.remote_dir == line) {
-                            current_remote_dir = Some(line);
+                            current_remote_dir = Some(line.clone());
                             current_local_dir = Some(Path::new(rd.local_dir.as_str()));
+                            FileItemProcessResult::Directory(line)
                         } else {
                             // cannot find corepsonding local_dir, skipping following lines.
                             error!("can't find corepsonding local_dir: {:?}", line);
                             current_remote_dir = None;
                             current_local_dir = None;
+                            FileItemProcessResult::NoCorresponedLocalDir(line)
                         }
                     }
                 }
                 Err(err) => {
                     error!("read line failed: {:?}", err);
+                    FileItemProcessResult::ReadLineFailed
                 }
             }
-        }
+        }).fold(FileItemProcessResultStats::default(), |mut accu, item|{
+            match item {
+                FileItemProcessResult::DeserializeFailed(_) => accu.deserialize_failed += 1,
+                FileItemProcessResult::Skipped(_) => accu.skipped += 1,
+                FileItemProcessResult::NoCorresponedLocalDir(_) => accu.no_corresponed_local_dir += 1,
+                FileItemProcessResult::Directory(_) => accu.directory += 1,
+                FileItemProcessResult::LengthNotMatch(_) => accu.length_not_match += 1,
+                FileItemProcessResult::Sha1NotMatch(_) => accu.sha1_not_match += 1,
+                FileItemProcessResult::CopyFailed(_) => accu.copy_failed += 1,
+                FileItemProcessResult::SkipBecauseNoBaseDir => accu.skip_because_no_base_dir += 1,
+                FileItemProcessResult::Successed => accu.successed += 1,
+                FileItemProcessResult::GetLocalPathFailed => accu.get_local_path_failed += 1,
+                FileItemProcessResult::SftpOpenFailed => accu.sftp_open_failed += 1,
+                FileItemProcessResult::ReadLineFailed => accu.read_line_failed += 1,
+            };
+            accu
+        });
+
+        info!("copy result: {:?}", result);
         Ok(())
     }
 
