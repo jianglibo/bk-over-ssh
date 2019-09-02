@@ -120,12 +120,6 @@ subcommands:
                         long: server-yml
                         required: true
                         takes_value: true
-                    # - dirs:
-                    #     long: dirs
-                    #     multiple: true
-                    #     required: true
-                    #     takes_value: true
-                    #     min_values: 1
                     - out:
                         long: out
                         required: false
@@ -142,6 +136,34 @@ subcommands:
                         takes_value: true
                     - out:
                         long: out
+                        required: false
+                        takes_value: true
+            - delta-a-file:
+                args:
+                    - new-file:
+                        long: new-file
+                        required: true
+                        takes_value: true
+                    - sig-file:
+                        long: sig-file
+                        required: false
+                        takes_value: true
+                    - out-file:
+                        long: out-file
+                        required: false
+                        takes_value: true
+            - restore-a-file:
+                args:
+                    - old-file:
+                        long: old-file
+                        required: true
+                        takes_value: true
+                    - delta-file:
+                        long: delta-file
+                        required: false
+                        takes_value: true
+                    - out-file:
+                        long: out-file
                         required: false
                         takes_value: true
     - completions:

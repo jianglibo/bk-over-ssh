@@ -22,8 +22,8 @@ where
         Self { reader, source_len }
     }
 
-    pub fn inner_reader(&self) -> &T {
-        &self.reader
+    pub fn inner_reader(&mut self) -> &mut T {
+        &mut self.reader
     }
 
     pub fn with_file_reader(

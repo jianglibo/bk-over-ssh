@@ -15,6 +15,7 @@ mod develope;
 mod log_util;
 mod rustsync;
 
+use crate::rustsync::{DeltaWriter};
 use std::borrow::Cow::{self, Borrowed, Owned};
 
 use rustyline::completion::{Completer, FilenameCompleter, Pair};
@@ -175,57 +176,111 @@ fn main() -> Result<(), failure::Error> {
                         }
                     }
                 }
+                ("restore-a-file", Some(sub_sub_matches)) => {
+                    let old_file = sub_sub_matches.value_of("old-file").unwrap();
+                    let maybe_delta_file = sub_sub_matches.value_of("delta-file");
+                    let maybe_out_file = sub_sub_matches.value_of("out-file");
+                    
+                    let delta_file = if let Some(f) = maybe_delta_file {
+                        f.to_string()
+                    } else {
+                        format!("{}.delta", old_file)
+                    };
+
+                    let out_file = if let Some(f) = maybe_out_file {
+                        f.to_string()
+                    } else {
+                        format!("{}.restore", old_file)
+                    };
+
+                    let mut dr = rustsync::DeltaFileReader::<fs::File>::read_delta_file(delta_file)?;
+                    dr.restore_from_file_to_file(out_file, old_file)?;
+                }
+                ("delta-a-file", Some(sub_sub_matches)) => {
+                    let new_file = sub_sub_matches.value_of("new-file").unwrap();
+                    let maybe_sig_file = sub_sub_matches.value_of("sig-file");
+                    let maybe_out_file = sub_sub_matches.value_of("out-file");
+                    
+                    let sig_file = if let Some(f) = maybe_sig_file {
+                        f.to_string()
+                    } else {
+                        format!("{}.sig", new_file)
+                    };
+
+                    let out_file = if let Some(f) = maybe_out_file {
+                        f.to_string()
+                    } else {
+                        format!("{}.delta", new_file)
+                    };
+
+                    let sig = rustsync::Signature::load_signature_file(sig_file)?;
+
+                    let new_file_input = fs::OpenOptions::new().read(true).open(new_file)?;
+                    rustsync::DeltaFileWriter::<fs::File>::create_delta_file(
+                        out_file, sig.window, None,
+                    )?
+                    .compare(&sig, new_file_input)?;
+                }
                 ("signature", Some(sub_sub_matches)) => {
                     let file = sub_sub_matches.value_of("file").unwrap();
                     let block_size: Option<usize> = sub_sub_matches
                         .value_of("block-size")
                         .and_then(|s| s.parse().ok());
-                    let out: Option<&str> = sub_sub_matches.value_of("out");
+                    let sig_file = format!("{}.sig", file);
+                    let out = sub_sub_matches.value_of("out").unwrap_or_else(|| sig_file.as_str());
                     let start = Instant::now();
                     match rustsync::Signature::signature_a_file(file, block_size) {
                         Ok(mut sig) => {
-                            if let Some(o) = out {
-                                if let Err(err) = sig.write_to_file(o) {
+                            
+                                if let Err(err) = sig.write_to_file(out) {
                                     error!("rsync signature write_to_file failed: {:?}", err);
                                 }
-                            } else {
-                                info!("igonre signature result.");
-                            }
                         }
                         Err(err) => {
                             error!("rsync signature failed: {:?}", err);
                         }
                     }
-
                     println!("time costs: {:?}", start.elapsed().as_secs());
                 }
                 ("list-remote-files", Some(sub_sub_matches)) => {
-                    let server_config_path = sub_sub_matches.value_of("server-yml").expect("should load sever yml.");
+                    let server_config_path = sub_sub_matches
+                        .value_of("server-yml")
+                        .expect("should load sever yml.");
                     let skip_sha1 = sub_sub_matches.is_present("skip-sha1");
                     let start = Instant::now();
                     let mut server = Server::load_from_yml(server_config_path)?;
 
                     if let Some(out) = sub_sub_matches.value_of("out") {
-                        let mut out = fs::OpenOptions::new().create(true).truncate(true).write(true).open(out)?;
+                        let mut out = fs::OpenOptions::new()
+                            .create(true)
+                            .truncate(true)
+                            .write(true)
+                            .open(out)?;
                         server.list_remote_file(&mut out, skip_sha1)?;
                     } else {
                         server.list_remote_file(&mut io::stdout(), skip_sha1)?;
-                    }        
+                    }
 
                     println!("time costs: {:?}", start.elapsed().as_secs());
                 }
                 ("list-local-files", Some(sub_sub_matches)) => {
-                    let server_config_path = sub_sub_matches.value_of("server-yml").expect("should load server yml.");
+                    let server_config_path = sub_sub_matches
+                        .value_of("server-yml")
+                        .expect("should load server yml.");
                     let skip_sha1 = sub_sub_matches.is_present("skip-sha1");
 
                     let server = Server::load_from_yml(server_config_path)?;
 
                     if let Some(out) = sub_sub_matches.value_of("out") {
-                        let mut out = fs::OpenOptions::new().create(true).truncate(true).write(true).open(out)?;
+                        let mut out = fs::OpenOptions::new()
+                            .create(true)
+                            .truncate(true)
+                            .write(true)
+                            .open(out)?;
                         server.load_dirs(&mut out, skip_sha1)?;
                     } else {
                         server.load_dirs(&mut io::stdout(), skip_sha1)?;
-                    }        
+                    }
                 }
                 (_, _) => unimplemented!(), // for brevity
             }

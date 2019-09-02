@@ -1,4 +1,4 @@
-use super::{Delta};
+use super::{DeltaWriter, DeltaReader};
 use serde::{Deserialize, Serialize};
 use std::io;
 
@@ -30,7 +30,7 @@ impl DeltaMem {
     }
 }
 
-impl Delta for DeltaMem {
+impl DeltaWriter for DeltaMem {
     fn push_from_source(&mut self, position: u64) -> Result<(), failure::Error> {
         if !self.pending.is_empty() {
             // We've reached the end of the file, and have never found
@@ -42,6 +42,23 @@ impl Delta for DeltaMem {
         self.blocks.push(BlockVec::FromSource(position));
         Ok(())
     }
+    fn push_byte(&mut self, byte: u8) -> Result<(), failure::Error> {
+        self.pending.push(byte);
+        Ok(())
+    }
+
+    fn finishup(&mut self) -> Result<(), failure::Error> {
+        if !self.pending.is_empty() {
+            // We've reached the end of the file, and have never found
+            // a matching block again.
+            let b = BlockVec::Literal(0, std::mem::replace(&mut self.pending, Vec::new()));
+            self.blocks.push(b);
+        }
+        Ok(())
+    }
+
+}
+impl DeltaReader for DeltaMem {
 
     fn block_count(&mut self) -> Result<(usize, usize), failure::Error> {
         Ok(self.blocks.iter().fold((0, 0), |acc, block| {
@@ -95,18 +112,4 @@ impl Delta for DeltaMem {
         Ok(())
     }
 
-    fn push_byte(&mut self, byte: u8) -> Result<(), failure::Error> {
-        self.pending.push(byte);
-        Ok(())
-    }
-
-    fn finishup(&mut self) -> Result<(), failure::Error> {
-        if !self.pending.is_empty() {
-            // We've reached the end of the file, and have never found
-            // a matching block again.
-            let b = BlockVec::Literal(0, std::mem::replace(&mut self.pending, Vec::new()));
-            self.blocks.push(b);
-        }
-        Ok(())
-    }
 }

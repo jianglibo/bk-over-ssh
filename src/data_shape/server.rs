@@ -1,7 +1,7 @@
 use crate::actions::copy_a_file_item;
 use crate::data_shape::{
     load_remote_item_owned, FileItem, FileItemProcessResult, FileItemProcessResultStats,
-    RemoteFileItem,
+    RemoteFileItem, SyncType,
 };
 use glob::Pattern;
 use log::*;
@@ -84,6 +84,7 @@ pub struct Server {
     pub remote_exec: String,
     pub remote_server_yml: String,
     pub username: String,
+    pub rsync_valve: u64,
     pub directories: Vec<Directory>,
     #[serde(skip)]
     _tcp_stream: Option<TcpStream>,
@@ -158,7 +159,7 @@ impl Server {
         Ok(())
     }
 
-    fn create_channel(&self) -> Result<ssh2::Channel, failure::Error> {
+    pub fn create_channel(&self) -> Result<ssh2::Channel, failure::Error> {
         Ok(self
             .session
             .as_ref()
@@ -217,13 +218,19 @@ impl Server {
                         {
                             match serde_json::from_str::<RemoteFileItem>(&line) {
                                 Ok(remote_item) => {
+                                    let sync_type = if self.rsync_valve > 0 && remote_item.get_len() > self.rsync_valve {
+                                        SyncType::Rsync
+                                    } else {
+                                        SyncType::Sftp
+                                    };
                                     let local_item = FileItem::new(
                                         ld,
                                         rd.as_str(),
                                         &remote_item,
+                                        sync_type,
                                     );
                                     if local_item.had_changed() {
-                                        copy_a_file_item(&sftp, local_item)
+                                        copy_a_file_item(&self, &sftp, local_item)
                                     } else {
                                         FileItemProcessResult::Skipped(local_item.get_local_path_str().expect("get_local_path_str should has some at thia point."))
                                     }

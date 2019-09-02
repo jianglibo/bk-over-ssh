@@ -4,6 +4,13 @@ use crate::actions::hash_file_sha1;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+
+#[derive(Debug)]
+pub enum SyncType {
+    Sftp,
+    Rsync,
+}
+
 pub enum FileItemProcessResult {
     DeserializeFailed(String),
     Skipped(String),
@@ -41,6 +48,7 @@ pub struct FileItem<'a> {
     pub remote_item: &'a RemoteFileItem<'a>,
     base_dir: &'a Path,
     remote_base_dir: Option<&'a str>,
+    pub sync_type: SyncType,
 }
 
 impl<'a> FileItem<'a> {
@@ -49,11 +57,13 @@ impl<'a> FileItem<'a> {
         file_path: &'a Path,
         remote_base_dir: Option<&'a str>,
         remote_item: &'a RemoteFileItem,
+        sync_type: SyncType,
     ) -> Self {
         Self {
             remote_item,
             base_dir: file_path,
             remote_base_dir,
+            sync_type,
         }
     }
 
@@ -61,11 +71,13 @@ impl<'a> FileItem<'a> {
         base_dir: &'a Path,
         remote_base_dir: &'a str,
         remote_item: &'a RemoteFileItem,
+        sync_type: SyncType,
     ) -> Self {
         Self {
             base_dir,
             remote_item,
             remote_base_dir: Some(remote_base_dir),
+            sync_type,
         }
     }
 

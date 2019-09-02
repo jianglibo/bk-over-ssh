@@ -8,6 +8,8 @@ use log::*;
 use std::collections::HashMap;
 use std::path::Path;
 use std::{fs, io};
+
+pub use delta_file::{DeltaFileWriter, DeltaFileReader};
 // use tokio_io::{AsyncRead, AsyncWrite};
 // use tokio_io::io::{write_all, WriteAll};
 // use futures::{Async, Future, Poll};
@@ -38,7 +40,15 @@ pub struct Signature {
 impl Signature {
     #[allow(dead_code)]
     pub fn write_to_file(&mut self, file_name: impl AsRef<Path>) -> Result<(), failure::Error> {
-        let mut wr = record::RecordWriter::<fs::File>::with_file_writer(file_name.as_ref())?;
+        let writer = fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .open(file_name.as_ref())?;
+        self.write_to_stream(writer)
+    }
+
+    pub fn write_to_stream(&mut self, wr: impl io::Write) -> Result<(), failure::Error> {
+        let mut wr = record::RecordWriter::new(wr);
         wr.write_field_usize(WINDOW_FIELD_TYPE, self.window)?;
         // u32(4) + blake2_bytes(32) + position(4 or 8);
         for (k, v) in self.chunks.iter() {
@@ -89,63 +99,61 @@ impl Signature {
         }
     }
 
-/// Create the "signature" of a file, essentially a content-indexed
-/// map of blocks. The first step of the protocol is to run this
-/// function on the "source" (the remote file when downloading, the
-/// local file while uploading).
-pub fn signature<R: io::Read, B: AsRef<[u8]> + AsMut<[u8]>>(
-    mut r: R,
-    mut buff: B,
-) -> Result<Signature, failure::Error> {
-    let mut chunks = HashMap::new();
+    /// Create the "signature" of a file, essentially a content-indexed
+    /// map of blocks. The first step of the protocol is to run this
+    /// function on the "source" (the remote file when downloading, the
+    /// local file while uploading).
+    pub fn signature<R: io::Read, B: AsRef<[u8]> + AsMut<[u8]>>(
+        mut r: R,
+        mut buff: B,
+    ) -> Result<Signature, failure::Error> {
+        let mut chunks = HashMap::new();
 
-    let mut i = 0;
-    let buff = buff.as_mut();
-    let mut eof = false;
-    while !eof {
-        let mut j = 0;
-        while j < buff.len() {
-            // full fill the block. for the last block, maybe not full.
-            let r = r.read(&mut buff[j..])?;
-            if r == 0 {
-                eof = true;
-                break;
+        let mut i = 0;
+        let buff = buff.as_mut();
+        let mut eof = false;
+        while !eof {
+            let mut j = 0;
+            while j < buff.len() {
+                // full fill the block. for the last block, maybe not full.
+                let r = r.read(&mut buff[j..])?;
+                if r == 0 {
+                    eof = true;
+                    break;
+                }
+                j += r
             }
-            j += r
-        }
-        let readed_block = &buff[..j];
-        let hash = adler32::RollingAdler32::from_buffer(readed_block);
-        let mut blake2 = [0; BLAKE2_SIZE];
-        blake2.clone_from_slice(
-            blake2_rfc::blake2b::blake2b(BLAKE2_SIZE, &[], &readed_block).as_bytes(),
-        );
-        // println!("blake2: {:?}", blake2.len());
-        chunks
-            .entry(hash.hash())
-            .or_insert_with(HashMap::new)
-            .insert(Blake2b(blake2), i);
+            let readed_block = &buff[..j];
+            let hash = adler32::RollingAdler32::from_buffer(readed_block);
+            let mut blake2 = [0; BLAKE2_SIZE];
+            blake2.clone_from_slice(
+                blake2_rfc::blake2b::blake2b(BLAKE2_SIZE, &[], &readed_block).as_bytes(),
+            );
+            // println!("blake2: {:?}", blake2.len());
+            chunks
+                .entry(hash.hash())
+                .or_insert_with(HashMap::new)
+                .insert(Blake2b(blake2), i);
 
-        i += readed_block.len()
+            i += readed_block.len()
+        }
+
+        Ok(Signature {
+            window: buff.len(),
+            chunks,
+        })
     }
 
-    Ok(Signature {
-        window: buff.len(),
-        chunks,
-    })
+    pub fn signature_a_file(
+        file_name: impl AsRef<Path>,
+        buf_size: Option<usize>,
+    ) -> Result<Signature, failure::Error> {
+        let f = fs::OpenOptions::new().read(true).open(file_name.as_ref())?;
+        let mut br = io::BufReader::new(f);
+        let mut buf = vec![0_u8; buf_size.unwrap_or(2048)];
+        Signature::signature(&mut br, &mut buf[..])
+    }
 }
-
-pub fn signature_a_file(
-    file_name: impl AsRef<Path>,
-    buf_size: Option<usize>,
-) -> Result<Signature, failure::Error> {
-    let f = fs::OpenOptions::new().read(true).open(file_name.as_ref())?;
-    let mut br = io::BufReader::new(f);
-    let mut buf = vec![0_u8; buf_size.unwrap_or(2048)];
-    Signature::signature(&mut br, &mut buf[..])
-}
-}
-
-
 
 struct State {
     // result: Vec<Block>,
@@ -165,16 +173,15 @@ impl State {
     }
 }
 
-pub trait Delta {
-    fn push_from_source(&mut self, position: u64) -> Result<(), failure::Error>;
-    fn push_byte(&mut self, byte: u8) -> Result<(), failure::Error>;
+pub trait DeltaReader {
     fn block_count(&mut self) -> Result<(usize, usize), failure::Error>;
-    fn finishup(&mut self) -> Result<(), failure::Error>;
+    
     fn restore_seekable(
         &mut self,
         out: impl io::Write,
         old: impl io::Read + io::Seek,
     ) -> Result<(), failure::Error>;
+
     fn restore(&mut self, out: impl io::Write, old: &[u8]) -> Result<(), failure::Error>;
 
     fn restore_from_source_seekable(
@@ -202,16 +209,20 @@ pub trait Delta {
         }
         Ok(())
     }
+}
 
-    fn compare<R: io::Read, B: AsRef<[u8]> + AsMut<[u8]>>(
+pub trait DeltaWriter {
+    fn push_from_source(&mut self, position: u64) -> Result<(), failure::Error>;
+    fn push_byte(&mut self, byte: u8) -> Result<(), failure::Error>;
+    fn finishup(&mut self) -> Result<(), failure::Error>;
+
+    fn compare<R: io::Read>(
         &mut self,
         sig: &Signature,
         mut r: R,
-        mut buff: B,
     ) -> Result<(), failure::Error> {
         let mut st = State::new();
-        let buff = buff.as_mut();
-        assert_eq!(buff.len(), sig.window);
+        let mut buff = vec![0_u8; sig.window];
         while st.block_content_len > 0 {
             let mut hash = {
                 let mut j = 0;
@@ -291,14 +302,18 @@ pub trait Delta {
     }
 }
 
+pub trait Delta {
 
+
+
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use log::*;
     use crate::develope::develope_data;
     use crate::log_util;
+    use log::*;
     use rand;
     use rand::distributions::Alphanumeric;
     use rand::Rng;
@@ -331,7 +346,7 @@ mod tests {
             // println!("source_sig: {:?}", source_sig);
             // let mut blocks = Vec::new();
             let mut delta = delta_mem::DeltaMem::new(WINDOW);
-            delta.compare(&source_sig, modified.as_bytes(), block)?;
+            delta.compare(&source_sig, modified.as_bytes())?;
             // let mut delta = compare(&source_sig, modified.as_bytes(), block, delta).unwrap();
 
             let mut restored = Vec::new();
@@ -411,7 +426,10 @@ mod tests {
         info!("signature time elapsed: {:?}", start.elapsed().as_secs());
         let start = Instant::now();
         let new_sig = Signature::load_signature_file(sig_out)?;
-        info!("load signature time elapsed: {:?}", start.elapsed().as_secs());
+        info!(
+            "load signature time elapsed: {:?}",
+            start.elapsed().as_secs()
+        );
         assert_eq!(sig, new_sig);
         Ok(())
     }

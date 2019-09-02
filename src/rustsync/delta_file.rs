@@ -1,4 +1,4 @@
-use super::{record, Delta, WINDOW_FIELD_TYPE};
+use super::{record, DeltaReader, DeltaWriter, WINDOW_FIELD_TYPE};
 use log::*;
 use std::convert::TryInto;
 use std::path::Path;
@@ -13,10 +13,8 @@ const LITERAL_FIELD_BYTE: u8 = 1;
 const FROM_SOURCE_FIELD_BYTE: u8 = 2;
 
 #[derive(Debug)]
-/// The result of comparing two files
-pub struct DeltaFile {
-    wr: Option<record::RecordWriter<fs::File>>,
-    rr: Option<record::RecordReader<fs::File>>,
+pub struct DeltaFileWriter<W: io::Write> {
+    wr: Option<record::RecordWriter<W>>,
     pending_file: Option<fs::File>,
     pending: Vec<u8>,
     window: usize,
@@ -24,73 +22,16 @@ pub struct DeltaFile {
     pending_valve: usize,
 }
 
-impl DeltaFile {
-    #[allow(dead_code)]
-    pub fn create_delta_file(
-        file: impl AsRef<Path>,
-        window: usize,
-        pending_valve: Option<usize>,
-    ) -> Result<Self, failure::Error> {
-        let mut wr = record::RecordWriter::<fs::File>::with_file_writer(file.as_ref())?;
-        wr.write_field_usize(WINDOW_FIELD_TYPE, window)?;
-        Ok(Self {
-            wr: Some(wr),
-            rr: None,
-            pending_file: None,
-            pending: Vec::new(),
-            window,
-            index: 0,
-            pending_valve: pending_valve.unwrap_or(TEN_MEGA_BYTES),
-        })
-    }
-
-    #[allow(dead_code)]
-    pub fn read_delta_file(file: impl AsRef<Path>) -> Result<Self, failure::Error> {
-        let mut rr = record::RecordReader::<fs::File>::with_file_reader(file.as_ref())?;
-        let (_, window) = rr.read_field_usize()?.expect("should has window header.");
-        info!("got window size from delta file: {}", window);
-        Ok(Self {
-            wr: None,
-            rr: Some(rr),
-            pending_file: None,
-            pending: Vec::new(),
-            window,
-            index: 0,
-            pending_valve: TEN_MEGA_BYTES,
-        })
-    }
-
-    fn flush_pending(&mut self) -> Result<(), failure::Error> {
-        let cur_wr = self
-            .wr
-            .as_mut()
-            .expect("delta_file in wr mode, wr should'nt be None.");
-        if let Some(pf) = self.pending_file.as_mut() {
-            // write pending bytes to pending_file first. then write pending_file to record file.
-            if !self.pending.is_empty() {
-                pf.write_all(&self.pending[..])?;
-            }
-            cur_wr.write_field_from_file(LITERAL_FIELD_BYTE, pf)?;
-            self.pending_file.take();
-        } else if !self.pending.is_empty() {
-            cur_wr.write_field_slice(LITERAL_FIELD_BYTE, &self.pending[..])?;
-        }
-        self.pending.clear();
-        Ok(())
-    }
+#[derive(Debug)]
+pub struct DeltaFileReader<R: io::Read> {
+    rr: Option<record::RecordReader<R>>,
+    window: usize,
 }
 
-impl Delta for DeltaFile {
-    fn push_from_source(&mut self, position: u64) -> Result<(), failure::Error> {
-        self.flush_pending()?;
-        let wr = self
-            .wr
-            .as_mut()
-            .expect("delta_file in wr mode, wr should'nt be None.");
-        wr.write_field_u64(FROM_SOURCE_FIELD_BYTE, position)?;
-        Ok(())
-    }
-
+impl<R> DeltaReader for DeltaFileReader<R>
+where
+    R: io::Read,
+{
     fn block_count(&mut self) -> Result<(usize, usize), failure::Error> {
         let cur_rr = self
             .rr
@@ -114,7 +55,7 @@ impl Delta for DeltaFile {
                     }
                 }
                 LITERAL_FIELD_BYTE => {
-                    let mut reader = cur_rr.inner_reader();
+                    let reader = cur_rr.inner_reader();
                     let window_u64: u64 =
                         self.window.try_into().expect("usize should convert to u64");
 
@@ -137,21 +78,6 @@ impl Delta for DeltaFile {
         Ok((from_source_count, literal_count))
     }
 
-    fn push_byte(&mut self, byte: u8) -> Result<(), failure::Error> {
-        self.pending.push(byte);
-
-        if self.pending.len() > self.pending_valve {
-            if self.pending_file.is_none() {
-                self.pending_file = tempfile::tempfile().ok();
-            }
-            if let Some(tf) = self.pending_file.as_mut() {
-                tf.write_all(&self.pending[..])?;
-                self.pending.clear();
-            }
-        }
-        Ok(())
-    }
-
     fn restore_seekable(
         &mut self,
         mut out: impl io::Write,
@@ -169,7 +95,7 @@ impl Delta for DeltaFile {
             match field_type {
                 FROM_SOURCE_FIELD_BYTE => {
                     if let Ok(Some(position)) = cur_rr.read_u64() {
-                        DeltaFile::restore_from_source_seekable(
+                        DeltaFileReader::<fs::File>::restore_from_source_seekable(
                             position,
                             &mut buf_v[..],
                             self.window,
@@ -181,7 +107,7 @@ impl Delta for DeltaFile {
                     }
                 }
                 LITERAL_FIELD_BYTE => {
-                    let mut reader = cur_rr.inner_reader();
+                    let reader = cur_rr.inner_reader();
                     let window_u64: u64 =
                         self.window.try_into().expect("usize should convert to u64");
 
@@ -207,6 +133,126 @@ impl Delta for DeltaFile {
     fn restore(&mut self, mut _out: impl io::Write, mut _old: &[u8]) -> Result<(), failure::Error> {
         Ok(())
     }
+}
+
+impl<R> DeltaFileReader<R>
+where
+    R: io::Read,
+{
+    #[allow(dead_code)]
+    pub fn read_delta_file(
+        file: impl AsRef<Path>,
+    ) -> Result<DeltaFileReader<impl Read>, failure::Error> {
+        let mut rr = record::RecordReader::<fs::File>::with_file_reader(file.as_ref())?;
+        let (_, window) = rr.read_field_usize()?.expect("should has window header.");
+        info!("got window size from delta file: {}", window);
+        Ok(DeltaFileReader {
+            rr: Some(rr),
+            window,
+        })
+    }
+
+    pub fn read_delta_stream<T: io::Read>(
+        delta_stream: T,
+    ) -> Result<DeltaFileReader<T>, failure::Error> {
+        let mut rr = record::RecordReader::new(delta_stream, None);
+        let (_, window) = rr.read_field_usize()?.expect("should has window header.");
+        info!("got window size from delta file: {}", window);
+        Ok(DeltaFileReader {
+            rr: Some(rr),
+            window,
+        })
+    }
+
+    pub fn restore_from_file_to_file(
+        &mut self,
+        out_file: impl AsRef<str>,
+        old_file: impl AsRef<str>,
+    ) -> Result<(), failure::Error> {
+        let out = fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .open(out_file.as_ref())?;
+        let old = fs::OpenOptions::new().read(true).open(old_file.as_ref())?;
+        self.restore_seekable(out, old)
+    }
+}
+
+impl<W> DeltaFileWriter<W>
+where
+    W: io::Write,
+{
+    #[allow(dead_code)]
+    pub fn create_delta_file(
+        file: impl AsRef<Path>,
+        window: usize,
+        pending_valve: Option<usize>,
+    ) -> Result<DeltaFileWriter<impl io::Write>, failure::Error> {
+        let writer = fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .open(file.as_ref())?;
+
+        let mut wr = record::RecordWriter::new(writer);
+        wr.write_field_usize(WINDOW_FIELD_TYPE, window)?;
+        Ok(DeltaFileWriter {
+            wr: Some(wr),
+            pending_file: None,
+            pending: Vec::new(),
+            window,
+            index: 0,
+            pending_valve: pending_valve.unwrap_or(TEN_MEGA_BYTES),
+        })
+    }
+
+    fn flush_pending(&mut self) -> Result<(), failure::Error> {
+        let cur_wr = self
+            .wr
+            .as_mut()
+            .expect("delta_file in wr mode, wr should'nt be None.");
+        if let Some(pf) = self.pending_file.as_mut() {
+            // write pending bytes to pending_file first. then write pending_file to record file.
+            if !self.pending.is_empty() {
+                pf.write_all(&self.pending[..])?;
+            }
+            cur_wr.write_field_from_file(LITERAL_FIELD_BYTE, pf)?;
+            self.pending_file.take();
+        } else if !self.pending.is_empty() {
+            cur_wr.write_field_slice(LITERAL_FIELD_BYTE, &self.pending[..])?;
+        }
+        self.pending.clear();
+        Ok(())
+    }
+}
+
+impl<W> DeltaWriter for DeltaFileWriter<W>
+where
+    W: io::Write,
+{
+    fn push_from_source(&mut self, position: u64) -> Result<(), failure::Error> {
+        self.flush_pending()?;
+        let wr = self
+            .wr
+            .as_mut()
+            .expect("delta_file in wr mode, wr should'nt be None.");
+        wr.write_field_u64(FROM_SOURCE_FIELD_BYTE, position)?;
+        Ok(())
+    }
+
+    fn push_byte(&mut self, byte: u8) -> Result<(), failure::Error> {
+        self.pending.push(byte);
+
+        if self.pending.len() > self.pending_valve {
+            if self.pending_file.is_none() {
+                self.pending_file = tempfile::tempfile().ok();
+            }
+            if let Some(tf) = self.pending_file.as_mut() {
+                tf.write_all(&self.pending[..])?;
+                self.pending.clear();
+            }
+        }
+        Ok(())
+    }
 
     fn finishup(&mut self) -> Result<(), failure::Error> {
         self.flush_pending()?;
@@ -218,7 +264,7 @@ impl Delta for DeltaFile {
 mod tests {
     use super::*;
     use crate::log_util;
-    use crate::rustsync::{Signature};
+    use crate::rustsync::Signature;
     use rand;
     use rand::distributions::Alphanumeric;
     use rand::Rng;
@@ -236,18 +282,15 @@ mod tests {
         let buf = [0; WINDOW];
         let source_sig = Signature::signature(&source[..], buf)?;
         let delta_file = "target/cc.delta";
-        DeltaFile::create_delta_file(delta_file, WINDOW, Some(10))?.compare(
-            &source_sig,
-            &modified[..],
-            buf,
-        )?;
+        DeltaFileWriter::<fs::File>::create_delta_file(delta_file, WINDOW, Some(10))?
+            .compare(&source_sig, &modified[..])?;
         let delta_file_len = Path::new(delta_file).metadata()?.len();
         assert_eq!(delta_file_len, 78);
 
-        let mut delta = DeltaFile::read_delta_file(delta_file)?;
+        let mut delta = DeltaFileReader::<fs::File>::read_delta_file(delta_file)?;
         assert_eq!((5, 0), delta.block_count()?);
 
-        let mut delta = DeltaFile::read_delta_file(delta_file)?;
+        let mut delta = DeltaFileReader::<fs::File>::read_delta_file(delta_file)?;
         let mut restored = Vec::new();
         let source = std::io::Cursor::new(source);
         delta.restore_seekable(&mut restored, source)?;
@@ -270,15 +313,12 @@ mod tests {
             let buf = [0; WINDOW];
             let source_sig = Signature::signature(source.as_bytes(), buf)?;
             let delta_file = "target/cc.delta";
-            DeltaFile::create_delta_file(delta_file, WINDOW, Some(3))?.compare(
-                &source_sig,
-                modified.as_bytes(),
-                buf,
-            )?;
+            DeltaFileWriter::<fs::File>::create_delta_file(delta_file, WINDOW, Some(3))?
+                .compare(&source_sig, modified.as_bytes())?;
 
             // compare(&source_sig, modified.as_bytes(), buf, delta)?;
 
-            let mut delta = DeltaFile::read_delta_file(delta_file)?;
+            let mut delta = DeltaFileReader::<fs::File>::read_delta_file(delta_file)?;
             let mut restored = Vec::new();
             let source = std::io::Cursor::new(source.as_bytes());
             delta.restore_seekable(&mut restored, source)?;

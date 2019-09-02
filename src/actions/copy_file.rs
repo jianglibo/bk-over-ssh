@@ -1,11 +1,12 @@
-use super::super::data_shape::{FileItem, FileItemProcessResult, RemoteFileItem};
+use crate::data_shape::{FileItem, FileItemProcessResult, RemoteFileItem, Server, SyncType};
+use crate::rustsync::{DeltaFileReader, DeltaReader, Signature};
 use log::*;
 use sha1::{Digest, Sha1};
 use ssh2;
 use std::ffi::OsStr;
 use std::io::prelude::Write;
 use std::path::Path;
-use std::{fs, io};
+use std::{fs, io, io::Read};
 
 #[allow(dead_code)]
 pub fn copy_file_to_stream(
@@ -141,54 +142,54 @@ pub fn copy_a_file<'a>(
     session: &mut ssh2::Session,
     remote_file_path: &'a str,
     local_file_path: &'a str,
+    sync_type: SyncType,
 ) -> Result<FileItemProcessResult, failure::Error> {
     let ri = RemoteFileItem::new(remote_file_path);
-    let fi = FileItem::standalone(Path::new(local_file_path), None, &ri);
+    let fi = FileItem::standalone(Path::new(local_file_path), None, &ri, sync_type);
     let sftp = session.sftp()?;
-    let r = copy_a_file_item(&sftp, fi);
+    let server = Server::load_from_yml("localhost")?;
+    let r = copy_a_file_item(&server, &sftp, fi);
     Ok(r)
 }
 
-pub fn copy_a_file_item<'a>(sftp: &ssh2::Sftp, file_item: FileItem<'a>) -> FileItemProcessResult {
-    let rp = &file_item.get_remote_path();
-    match sftp.open(Path::new(rp)) {
+pub fn copy_a_file_item_sftp<'a>(
+    sftp: &ssh2::Sftp,
+    local_file_path: String,
+    file_item: &FileItem<'a>,
+) -> FileItemProcessResult {
+    match sftp.open(Path::new(&file_item.get_remote_path())) {
         Ok(mut file) => {
-            let lpo = file_item.get_local_path_str();
-            if let Some(lp) = lpo.as_ref() {
-                if let Some(_r_sha1) = file_item.get_remote_item().get_sha1() {
-                    match copy_stream_to_file_return_sha1(&mut file, lp) {
-                        Ok((length, sha1)) => {
-                            if length != file_item.get_remote_item().get_len() {
-                                FileItemProcessResult::LengthNotMatch(lp.to_string())
-                            } else if file_item.is_sha1_not_equal(&sha1) {
-                                error!("sha1 didn't match: {:?}, local sha1: {:?}", file_item, sha1);
-                                FileItemProcessResult::Sha1NotMatch(lp.to_string())
-                            } else {
-                                FileItemProcessResult::Successed
-                            }
-                        }
-                        Err(err) => {
-                            error!("write_stream_to_file failed: {:?}", err);
-                            FileItemProcessResult::CopyFailed(lp.to_string())
+            if let Some(_r_sha1) = file_item.get_remote_item().get_sha1() {
+                match copy_stream_to_file_return_sha1(&mut file, &local_file_path) {
+                    Ok((length, sha1)) => {
+                        if length != file_item.get_remote_item().get_len() {
+                            FileItemProcessResult::LengthNotMatch(local_file_path)
+                        } else if file_item.is_sha1_not_equal(&sha1) {
+                            error!("sha1 didn't match: {:?}, local sha1: {:?}", file_item, sha1);
+                            FileItemProcessResult::Sha1NotMatch(local_file_path)
+                        } else {
+                            FileItemProcessResult::Successed
                         }
                     }
-                } else {
-                    match copy_stream_to_file(&mut file, lp) {
-                        Ok(length) => {
-                            if length != file_item.get_remote_item().get_len() {
-                                FileItemProcessResult::LengthNotMatch(lp.to_string())
-                            } else {
-                                FileItemProcessResult::Successed
-                            }
-                        }
-                        Err(err) => {
-                            error!("write_stream_to_file failed: {:?}", err);
-                            FileItemProcessResult::CopyFailed(lp.to_string())
-                        }
+                    Err(err) => {
+                        error!("write_stream_to_file failed: {:?}", err);
+                        FileItemProcessResult::CopyFailed(local_file_path)
                     }
                 }
             } else {
-                FileItemProcessResult::GetLocalPathFailed
+                match copy_stream_to_file(&mut file, &local_file_path) {
+                    Ok(length) => {
+                        if length != file_item.get_remote_item().get_len() {
+                            FileItemProcessResult::LengthNotMatch(local_file_path)
+                        } else {
+                            FileItemProcessResult::Successed
+                        }
+                    }
+                    Err(err) => {
+                        error!("write_stream_to_file failed: {:?}", err);
+                        FileItemProcessResult::CopyFailed(local_file_path)
+                    }
+                }
             }
         }
         Err(err) => {
@@ -198,42 +199,89 @@ pub fn copy_a_file_item<'a>(sftp: &ssh2::Sftp, file_item: FileItem<'a>) -> FileI
     }
 }
 
-// pub fn copy_a_file_item<'a>(
-//     session: &ssh2::Session,
-//     mut file_item: FileItem<'a>,
-// ) -> FileItem<'a> {
-//     if file_item.get_fail_reason().is_some() {
-//         return file_item;
-//     }
-//     let sftp = session.sftp().expect("should got sfpt instance.");
-//     match sftp.open(Path::new(&file_item.get_remote_path())) {
-//         Ok(mut file) => {
-//             let lpo = file_item.get_local_path();
-//             if let Some(lp) = lpo.as_ref().map(String::as_str) {
-//                 match copy_stream_to_file_return_sha1(&mut file, lp) {
-//                     Ok((length, sha1)) => {
-//                         file_item.set_len(length);
-//                         file_item.set_sha1(sha1);
-//                     }
-//                     Err(err) => {
-//                         file_item
-//                             .set_fail_reason(format!("write_stream_to_file failed: {:?}", err));
-//                     }
-//                 }
-//             } else {
-//                 file_item.set_fail_reason("file_item get_path failed.");
-//             }
-//         }
-//         Err(err) => {
-//             file_item.set_fail_reason(format!("sftp open failed: {:?}", err));
-//         }
-//     }
-//     file_item
-// }
+pub fn copy_a_file_item_rsync<'a>(
+    server: &Server,
+    sftp: &ssh2::Sftp,
+    local_file_path: String,
+    file_item: &FileItem<'a>,
+) -> Result<FileItemProcessResult, failure::Error> {
+    let remote_path = file_item.get_remote_path();
+    let mut sig = Signature::signature_a_file(&local_file_path, Some(4096))?;
+    let remote_sig_file_path = format!("{}.sig", &remote_path);
+    let sig_file = sftp.create(Path::new(&remote_sig_file_path))?;
+    sig.write_to_stream(sig_file)?;
+    let delta_file_name = format!("{}.delta", &remote_path);
+    let cmd = format!(
+        "{} rsync delta-a-file --new-file {} --sig-file {} --out-file {}",
+        server.remote_exec,
+        &remote_path,
+        &remote_sig_file_path,
+        &delta_file_name,
+    );
+    let mut channel: ssh2::Channel = server.create_channel()?;
+    channel.exec(cmd.as_str())?;
+    let mut chout = String::new();
+    channel.read_to_string(&mut chout)?;
+    trace!("delta-a-file output: {:?}", chout);
+    let file = sftp.open(Path::new(&delta_file_name))?;
+    let mut delta_file = DeltaFileReader::<ssh2::File>::read_delta_stream(file)?;
+    let restore_path = fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(format!("{}.restore", local_file_path))?;
+    let old_file = fs::OpenOptions::new().read(true).open(&local_file_path)?;
+    delta_file.restore_seekable(restore_path, old_file)?;
+    update_local_file_from_restored(local_file_path)?;
+    Ok(FileItemProcessResult::Successed)
+}
+
+fn update_local_file_from_restored(local_file_path: impl AsRef<str>) -> Result<(), failure::Error> {
+    let old_tmp = format!("{}.old.tmp", local_file_path.as_ref());
+    let old_tmp_path = Path::new(&old_tmp);
+    if old_tmp_path.exists() {
+        fs::remove_file(old_tmp_path)?;
+    }
+    fs::rename(local_file_path.as_ref(), &old_tmp)?;
+    let restored = format!("{}.restore", local_file_path.as_ref());
+    fs::rename(&restored, local_file_path.as_ref())?;
+    if old_tmp_path.exists() {
+        fs::remove_file(&old_tmp_path)?;
+    }
+    Ok(())
+}
+
+pub fn copy_a_file_item<'a>(
+    server: &Server,
+    sftp: &ssh2::Sftp,
+    file_item: FileItem<'a>,
+) -> FileItemProcessResult {
+    if let Some(local_file_path) = file_item.get_local_path_str() {
+        match file_item.sync_type {
+            SyncType::Sftp => copy_a_file_item_sftp(sftp, local_file_path, &file_item),
+            SyncType::Rsync => {
+                if !Path::new(&local_file_path).exists() {
+                    copy_a_file_item_sftp(sftp, local_file_path, &file_item)
+                } else {
+                    match copy_a_file_item_rsync(server, sftp, local_file_path.clone(), &file_item)
+                    {
+                        Ok(r) => r,
+                        Err(err) => {
+                            error!("rsync file failed: {:?}, {:?}", file_item, err);
+                            copy_a_file_item_sftp(sftp, local_file_path, &file_item)
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        FileItemProcessResult::GetLocalPathFailed
+    }
+}
 
 #[cfg(test)]
 mod tests {
-    use super::{copy_a_file, visit_dirs, Path};
+    use super::{copy_a_file, visit_dirs, Path, SyncType};
     use crate::develope::develope_data;
     use crate::log_util;
     use std::io::prelude::*;
@@ -263,6 +311,7 @@ mod tests {
             &mut sess,
             dev_env.servers.ubuntu18.test_dirs.aatxt.as_str(),
             lpn,
+            SyncType::Sftp,
         )?;
         assert!(Path::new(lp).exists());
         Ok(())
