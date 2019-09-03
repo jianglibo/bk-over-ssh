@@ -139,15 +139,18 @@ pub fn visit_dirs(dir: &Path, cb: &dyn Fn(&fs::DirEntry)) -> io::Result<()> {
 
 #[allow(dead_code)]
 pub fn copy_a_file<'a>(
-    session: &mut ssh2::Session,
-    remote_file_path: &'a str,
-    local_file_path: &'a str,
+    session: &ssh2::Session,
+    local_base_dir: &'a Path,
+    remote_base_dir: &'a str,
+    remote_relative_path: &'a str,
+    remote_file_len: u64,
     sync_type: SyncType,
 ) -> Result<FileItemProcessResult, failure::Error> {
-    let ri = RemoteFileItem::new(remote_file_path);
-    let fi = FileItem::standalone(Path::new(local_file_path), None, &ri, sync_type);
+    let ri = RemoteFileItem::new(remote_relative_path, remote_file_len);
+    let fi = FileItem::new(local_base_dir, remote_base_dir, &ri, sync_type);
     let sftp = session.sftp()?;
-    let server = Server::load_from_yml("localhost")?;
+    let mut server = Server::load_from_yml("localhost")?;
+    server.connect()?;
     let r = copy_a_file_item(&server, &sftp, fi);
     Ok(r)
 }
@@ -168,7 +171,7 @@ pub fn copy_a_file_item_sftp<'a>(
                             error!("sha1 didn't match: {:?}, local sha1: {:?}", file_item, sha1);
                             FileItemProcessResult::Sha1NotMatch(local_file_path)
                         } else {
-                            FileItemProcessResult::Successed
+                            FileItemProcessResult::Successed(local_file_path, SyncType::Sftp)
                         }
                     }
                     Err(err) => {
@@ -182,7 +185,7 @@ pub fn copy_a_file_item_sftp<'a>(
                         if length != file_item.get_remote_item().get_len() {
                             FileItemProcessResult::LengthNotMatch(local_file_path)
                         } else {
-                            FileItemProcessResult::Successed
+                            FileItemProcessResult::Successed(local_file_path, SyncType::Sftp)
                         }
                     }
                     Err(err) => {
@@ -213,10 +216,7 @@ pub fn copy_a_file_item_rsync<'a>(
     let delta_file_name = format!("{}.delta", &remote_path);
     let cmd = format!(
         "{} rsync delta-a-file --new-file {} --sig-file {} --out-file {}",
-        server.remote_exec,
-        &remote_path,
-        &remote_sig_file_path,
-        &delta_file_name,
+        server.remote_exec, &remote_path, &remote_sig_file_path, &delta_file_name,
     );
     let mut channel: ssh2::Channel = server.create_channel()?;
     channel.exec(cmd.as_str())?;
@@ -232,8 +232,11 @@ pub fn copy_a_file_item_rsync<'a>(
         .open(format!("{}.restore", local_file_path))?;
     let old_file = fs::OpenOptions::new().read(true).open(&local_file_path)?;
     delta_file.restore_seekable(restore_path, old_file)?;
-    update_local_file_from_restored(local_file_path)?;
-    Ok(FileItemProcessResult::Successed)
+    update_local_file_from_restored(&local_file_path)?;
+    Ok(FileItemProcessResult::Successed(
+        local_file_path,
+        SyncType::Rsync,
+    ))
 }
 
 fn update_local_file_from_restored(local_file_path: impl AsRef<str>) -> Result<(), failure::Error> {
@@ -281,10 +284,13 @@ pub fn copy_a_file_item<'a>(
 
 #[cfg(test)]
 mod tests {
-    use super::{copy_a_file, visit_dirs, Path, SyncType};
-    use crate::develope::develope_data;
+    use super::{copy_a_file, visit_dirs, FileItemProcessResult, Path, SyncType};
+    use crate::data_shape::Server;
+    use crate::develope::tutil;
     use crate::log_util;
+    use log::*;
     use std::io::prelude::*;
+    use std::panic;
     use std::{fs, io};
 
     #[test]
@@ -300,20 +306,64 @@ mod tests {
     #[test]
     fn t_copy_a_file() -> Result<(), failure::Error> {
         log_util::setup_logger(vec![""], vec![]);
-        let (_tcp, mut sess, dev_env) = develope_data::connect_to_ubuntu();
-        let lpn = "not_in_git/xx.txt";
-        let lp = Path::new(lpn);
 
-        if lp.exists() {
-            fs::remove_file(lp)?;
-        }
-        copy_a_file(
-            &mut sess,
-            dev_env.servers.ubuntu18.test_dirs.aatxt.as_str(),
-            lpn,
+        let mut server = Server::load_from_yml("localhost")?;
+        server.connect()?;
+        server.rsync_valve = 4;
+        let test_dir1 = tutil::create_a_dir_and_a_filename("xx.txt")?;
+        let local_file_name = test_dir1.tmp_dir.path().join("yy.txt");
+        let test_dir2 = tutil::create_a_dir_and_a_file_with_content("yy.txt", "hello")?;
+        let remote_file_name = test_dir2.tmp_file_str();
+
+        assert!(Path::new(remote_file_name).exists());
+        info!("{:?}, local: {:?}", remote_file_name, local_file_name);
+        // let result = panic::catch_unwind(|| {
+        let r = copy_a_file(
+            server.get_ssh_session(),
+            test_dir1.tmp_dir_path(),
+            test_dir2.tmp_dir_str(),
+            test_dir2.tmp_file_name_only(),
+            test_dir2.tmp_file_len(),
             SyncType::Sftp,
         )?;
-        assert!(Path::new(lp).exists());
+        assert!(
+            if let FileItemProcessResult::Successed(_, SyncType::Sftp) = r {
+                true
+            } else {
+                false
+            }
+        );
+        assert!(local_file_name.exists());
+        // });
+
+        tutil::change_file_content(&local_file_name)?;
+        let r = copy_a_file(
+            server.get_ssh_session(),
+            test_dir1.tmp_dir_path(),
+            test_dir2.tmp_dir_str(),
+            test_dir2.tmp_file_name_only(),
+            test_dir2.tmp_file_len(),
+            SyncType::Rsync,
+        )?;
+
+        tutil::change_file_content(&local_file_name)?;
+        assert!(
+            if let FileItemProcessResult::Successed(_, SyncType::Rsync) = r {
+                true
+            } else {
+                false
+            }
+        );
+
+        tutil::change_file_content(&local_file_name)?;
+        let r = copy_a_file(
+            server.get_ssh_session(),
+            test_dir1.tmp_dir_path(),
+            test_dir2.tmp_dir_str(),
+            test_dir2.tmp_file_name_only(),
+            test_dir2.tmp_file_len(),
+            SyncType::Rsync,
+        )?;
         Ok(())
     }
 

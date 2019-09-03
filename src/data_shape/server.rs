@@ -26,6 +26,20 @@ pub struct Directory {
 }
 
 impl Directory {
+
+    /// for test purpose.
+    #[allow(dead_code)]
+    pub fn new(remote_dir: impl AsRef<str>, local_dir: impl AsRef<str>, includes: Vec<impl AsRef<str>>, excludes: Vec<impl AsRef<str>>) -> Self {
+        let mut o = Self {
+            remote_dir: remote_dir.as_ref().to_string(),
+            local_dir: local_dir.as_ref().to_string(),
+            includes: includes.iter().map(|s|s.as_ref().to_string()).collect(),
+            excludes: excludes.iter().map(|s|s.as_ref().to_string()).collect(),
+            ..Directory::default()
+        };
+        o.compile_patterns().expect("directory pattern should compile.");
+        o
+    }
     /// if has exclude items any matching will return None,
     /// if has include items, only matched item will return.
     /// if neither exclude nor include, mathes.
@@ -82,6 +96,7 @@ pub struct Server {
     pub host: String,
     pub port: u16,
     pub remote_exec: String,
+    pub file_list_file: String,
     pub remote_server_yml: String,
     pub username: String,
     pub rsync_valve: u64,
@@ -93,6 +108,11 @@ pub struct Server {
 }
 
 impl Server {
+    /// Test purpose.
+    #[allow(dead_code)]
+    pub fn replace_directories(&mut self, directories: Vec<Directory>) {
+        self.directories = directories;
+    }
     pub fn load_from_yml(name: impl AsRef<str>) -> Result<Server, failure::Error> {
         let name = name.as_ref();
 
@@ -133,7 +153,13 @@ impl Server {
         self._tcp_stream.is_some() && self.session.is_some()
     }
 
-    pub fn get_ssh_session(&self) -> Result<(TcpStream, ssh2::Session), failure::Error> {
+    pub fn get_ssh_session(&mut self) -> &ssh2::Session {
+        self.connect().expect("ssh connection should be created.");
+        self.session.as_ref().expect("session should be created.")
+    }
+
+
+    fn create_ssh_session(&self) -> Result<(TcpStream, ssh2::Session), failure::Error> {
         let url = format!("{}:{}", self.host, self.port);
         let tcp = TcpStream::connect(&url)?;
         if let Some(mut sess) = ssh2::Session::new() {
@@ -152,7 +178,7 @@ impl Server {
 
     pub fn connect(&mut self) -> Result<(), failure::Error> {
         if !self.is_connected() {
-            let (tcp, sess) = self.get_ssh_session()?;
+            let (tcp, sess) = self.create_ssh_session()?;
             self._tcp_stream.replace(tcp);
             self.session.replace(sess);
         }
@@ -168,7 +194,32 @@ impl Server {
             .expect("a channel session."))
     }
 
-    pub fn list_remote_file(
+    pub fn list_remote_file_sftp(
+        &mut self,
+        out: &mut impl io::Write,
+        skip_sha1: bool,
+    ) -> Result<(), failure::Error> {
+        self.connect()?;
+        let mut channel: ssh2::Channel = self.create_channel()?;
+        let cmd = format!(
+            "{} rsync list-local-files --server-yml {} --out {}{}",
+            self.remote_exec,
+            self.remote_server_yml,
+            self.file_list_file,
+            if skip_sha1 { " --skip-sha1" } else { "" }
+        );
+        trace!("invoking remote command: {:?}", cmd);
+        channel.exec(cmd.as_str())?;
+        let mut contents = String::new();
+        channel.read_to_string(&mut contents)?;
+        trace!("list-local-files output: {:?}", contents);
+        let sftp = self.session.as_ref().unwrap().sftp()?;
+        let mut f = sftp.open(Path::new(&self.file_list_file))?;
+        io::copy(&mut f, out)?;
+        Ok(())
+    }
+
+    pub fn list_remote_file_exec(
         &mut self,
         out: &mut impl io::Write,
         skip_sha1: bool,
@@ -191,20 +242,20 @@ impl Server {
         &mut self,
         skip_sha1: bool,
         file_item_lines: Option<R>,
-    ) -> Result<(), failure::Error> {
+    ) -> Result<FileItemProcessResultStats, failure::Error> {
         self.connect()?;
         if let Some(r) = file_item_lines {
             self._start_sync(r)
         } else {
             let mut cursor = io::Cursor::new(Vec::<u8>::new());
-            self.list_remote_file(&mut cursor, skip_sha1)?;
+            self.list_remote_file_sftp(&mut cursor, skip_sha1)?;
             cursor.seek(io::SeekFrom::Start(0))?;
             self._start_sync(cursor)
         }
     }
 
     /// Do not try to return item stream from this function. consume it locally, pass in function to alter the behavior.
-    fn _start_sync<R: Read>(&self, file_item_lines: R) -> Result<(), failure::Error> {
+    fn _start_sync<R: Read>(&self, file_item_lines: R) -> Result<FileItemProcessResultStats, failure::Error> {
         let mut current_remote_dir = Option::<String>::None;
         let mut current_local_dir = Option::<&Path>::None;
         let sftp = self.session.as_ref().unwrap().sftp()?;
@@ -273,22 +324,19 @@ impl Server {
                 FileItemProcessResult::Sha1NotMatch(_) => accu.sha1_not_match += 1,
                 FileItemProcessResult::CopyFailed(_) => accu.copy_failed += 1,
                 FileItemProcessResult::SkipBecauseNoBaseDir => accu.skip_because_no_base_dir += 1,
-                FileItemProcessResult::Successed => accu.successed += 1,
+                FileItemProcessResult::Successed(_,_) => accu.successed += 1,
                 FileItemProcessResult::GetLocalPathFailed => accu.get_local_path_failed += 1,
                 FileItemProcessResult::SftpOpenFailed => accu.sftp_open_failed += 1,
                 FileItemProcessResult::ReadLineFailed => accu.read_line_failed += 1,
             };
             accu
         });
-
-        info!("copy result: {:?}", result);
-        Ok(())
+        Ok(result)
     }
 
-    pub fn sync_dirs(&mut self, skip_sha1: bool) -> Result<(), failure::Error> {
+    pub fn sync_dirs(&mut self, skip_sha1: bool) -> Result<FileItemProcessResultStats, failure::Error> {
         self.connect()?;
-        self.start_sync(skip_sha1, Option::<fs::File>::None)?;
-        Ok(())
+        self.start_sync(skip_sha1, Option::<fs::File>::None)
     }
 
     #[allow(dead_code)]
@@ -367,9 +415,9 @@ mod tests {
         }
         assert!(!d.exists());
         let mut server = Server::load_from_yml("localhost")?;
-        server.sync_dirs(true)?;
+        let stats = server.sync_dirs(true)?;
+        assert_eq!(stats.successed, 1);
         assert!(d.exists());
         Ok(())
     }
-
 }

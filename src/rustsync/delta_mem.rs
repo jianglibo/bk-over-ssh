@@ -1,4 +1,4 @@
-use super::{DeltaWriter, DeltaReader};
+use super::{DeltaReader, DeltaWriter};
 use serde::{Deserialize, Serialize};
 use std::io;
 
@@ -56,20 +56,12 @@ impl DeltaWriter for DeltaMem {
         }
         Ok(())
     }
-
 }
 impl DeltaReader for DeltaMem {
-
     fn block_count(&mut self) -> Result<(usize, usize), failure::Error> {
-        Ok(self.blocks.iter().fold((0, 0), |acc, block| {
-            match block {
-                BlockVec::FromSource(i) => {
-                    (acc.0 + 1, acc.1)
-                },
-                BlockVec::Literal(_, _) => {
-                    (acc.0, acc.1 + 1)
-                }
-            }
+        Ok(self.blocks.iter().fold((0, 0), |acc, block| match block {
+            BlockVec::FromSource(i) => (acc.0 + 1, acc.1),
+            BlockVec::Literal(_, _) => (acc.0, acc.1 + 1),
         }))
     }
 
@@ -92,7 +84,6 @@ impl DeltaReader for DeltaMem {
         Ok(())
     }
 
-
     fn restore_seekable(
         &mut self,
         mut out: impl io::Write,
@@ -102,7 +93,13 @@ impl DeltaReader for DeltaMem {
         for block in self.blocks.iter() {
             match block {
                 BlockVec::FromSource(i) => {
-                    DeltaMem::restore_from_source_seekable(*i, &mut buf_v[..], self.window, &mut out, &mut old)?;
+                    DeltaMem::restore_from_source_seekable(
+                        *i,
+                        &mut buf_v[..],
+                        self.window,
+                        &mut out,
+                        &mut old,
+                    )?;
                 }
                 BlockVec::Literal(_, v) => {
                     out.write_all(v.as_slice())?;
@@ -111,5 +108,4 @@ impl DeltaReader for DeltaMem {
         }
         Ok(())
     }
-
 }

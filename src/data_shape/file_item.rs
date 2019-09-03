@@ -2,7 +2,6 @@ use super::string_path;
 use super::RemoteFileItem;
 use crate::actions::hash_file_sha1;
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
 
 
 #[derive(Debug)]
@@ -11,6 +10,7 @@ pub enum SyncType {
     Rsync,
 }
 
+#[derive(Debug)]
 pub enum FileItemProcessResult {
     DeserializeFailed(String),
     Skipped(String),
@@ -20,7 +20,7 @@ pub enum FileItemProcessResult {
     Sha1NotMatch(String),
     CopyFailed(String),
     SkipBecauseNoBaseDir,
-    Successed,
+    Successed(String, SyncType),
     GetLocalPathFailed,
     SftpOpenFailed,
     ReadLineFailed,
@@ -52,20 +52,20 @@ pub struct FileItem<'a> {
 }
 
 impl<'a> FileItem<'a> {
-    #[allow(dead_code)]
-    pub fn standalone(
-        file_path: &'a Path,
-        remote_base_dir: Option<&'a str>,
-        remote_item: &'a RemoteFileItem,
-        sync_type: SyncType,
-    ) -> Self {
-        Self {
-            remote_item,
-            base_dir: file_path,
-            remote_base_dir,
-            sync_type,
-        }
-    }
+    // #[allow(dead_code)]
+    // pub fn standalone(
+    //     file_path: &'a Path,
+    //     remote_base_dir: Option<&'a str>,
+    //     remote_item: &'a RemoteFileItem,
+    //     sync_type: SyncType,
+    // ) -> Self {
+    //     Self {
+    //         remote_item,
+    //         base_dir: file_path,
+    //         remote_base_dir,
+    //         sync_type,
+    //     }
+    // }
 
     pub fn new(
         base_dir: &'a Path,
@@ -124,6 +124,7 @@ impl<'a> FileItem<'a> {
         self.base_dir.join(&rp)
     }
 
+    /// If remote path is absolute then remote path will returned.
     pub fn get_local_path_str(&self) -> Option<String> {
         let rp = self.remote_item.get_path();
         self.base_dir.join(&rp).to_str().map(str::to_string)

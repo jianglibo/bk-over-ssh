@@ -113,6 +113,7 @@ where
         Self { writer }
     }
 
+    #[allow(dead_code)]
     pub fn with_file_writer(
         file: impl AsRef<Path>,
     ) -> Result<RecordWriter<fs::File>, failure::Error> {
@@ -135,11 +136,7 @@ where
     }
 
     /// will first write a four bytes u32 represent the length of field_type(1) + slice.len().
-    pub fn write_field_u64(
-        &mut self,
-        field_type: u8,
-        an_u64: u64,
-    ) -> Result<u32, failure::Error> {
+    pub fn write_field_u64(&mut self, field_type: u8, an_u64: u64) -> Result<u32, failure::Error> {
         self.write_field_slice(field_type, &an_u64.to_be_bytes())
     }
 

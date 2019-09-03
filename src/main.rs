@@ -256,9 +256,9 @@ fn main() -> Result<(), failure::Error> {
                             .truncate(true)
                             .write(true)
                             .open(out)?;
-                        server.list_remote_file(&mut out, skip_sha1)?;
+                        server.list_remote_file_exec(&mut out, skip_sha1)?;
                     } else {
-                        server.list_remote_file(&mut io::stdout(), skip_sha1)?;
+                        server.list_remote_file_exec(&mut io::stdout(), skip_sha1)?;
                     }
 
                     println!("time costs: {:?}", start.elapsed().as_secs());

@@ -3,7 +3,7 @@ use rand::Rng;
 
 use rand::distributions::Alphanumeric;
 
-use crate::develope::develope_data;
+// use crate::develope::develope_data;
 use librsync::{Delta, Patch, Signature};
 use log::*;
 use std::fs;
@@ -151,54 +151,9 @@ fn create_delta_file(old_name: impl AsRef<str>,changed_name: impl AsRef<str>, si
     Ok(delta_name)
 }
 
-fn get_changed_file(old_name: impl AsRef<str>) -> Result<String, failure::Error> {
-    let changed_name = format!(
-        "{}.changed",
-        old_name.as_ref()
-    );
 
-    if !Path::new(&changed_name).exists() {
-        fs::copy(
-            old_name.as_ref(),
-            &changed_name,
-        )?;
-    }
-    Ok(changed_name)
-}
 
-fn rsynclib() -> Result<(), failure::Error> {
-    let start = Instant::now();
-    let dev_env = develope_data::load_env();
-    let old_name = &dev_env.servers.ubuntu18.test_files.midum_binary_file;
-    let changed_name = get_changed_file(old_name)?;
 
-    let sig_name = create_sig_file(old_name)?;
-    let delta_name = create_delta_file(old_name, changed_name, sig_name)?;
-
-    create_patch_file(
-        old_name,
-        delta_name,
-    )?;
-    println!("costs seconds: {:?}", start.elapsed().as_secs());
-    Ok(())
-}
-
-fn rsynclib_whole() -> Result<(), failure::Error> {
-    let start = Instant::now();
-    let dev_env = develope_data::load_env();
-    let old_name = &dev_env.servers.ubuntu18.test_files.midum_binary_file;
-    let changed_name = get_changed_file(old_name)?;
-    let sig_name = create_sig_file_whole(old_name)?;
-
-    let delta_name = create_delta_file_whole(old_name, changed_name, sig_name)?;
-
-    create_patch_file_whole(
-        old_name,
-        delta_name,
-    )?;
-    println!("costs seconds: {:?}", start.elapsed().as_secs());
-    Ok(())
-}
 
 fn create_patch_file_whole(
     old_name: impl AsRef<str>,
@@ -261,6 +216,7 @@ fn create_patch_file(
 mod tests {
     use super::*;
     use crate::log_util;
+    use crate::develope::tutil;
     use log::*;
     use std::{fs, io};
 
@@ -274,6 +230,55 @@ mod tests {
     //     println!("{:?}", sig);
     //     Ok(())
     // }
+
+    fn get_changed_file(old_name: impl AsRef<str>) -> Result<String, failure::Error> {
+    let changed_name = format!(
+        "{}.changed",
+        old_name.as_ref()
+    );
+
+    if !Path::new(&changed_name).exists() {
+        fs::copy(
+            old_name.as_ref(),
+            &changed_name,
+        )?;
+    }
+    Ok(changed_name)
+}
+
+    fn rsynclib() -> Result<(), failure::Error> {
+    let start = Instant::now();
+    let test_dir = tutil::create_a_dir_and_a_file_with_len("xx.bin", 1024*1024*4)?;
+    let old_name = test_dir.tmp_file_str();
+    let changed_name = get_changed_file(&old_name)?;
+
+    let sig_name = create_sig_file(&old_name)?;
+    let delta_name = create_delta_file(&old_name, changed_name, sig_name)?;
+
+    create_patch_file(
+        &old_name,
+        delta_name,
+    )?;
+    println!("costs seconds: {:?}", start.elapsed().as_secs());
+    Ok(())
+}
+
+fn rsynclib_whole() -> Result<(), failure::Error> {
+    let start = Instant::now();
+    let test_dir = tutil::create_a_dir_and_a_file_with_len("xx.bin", 1024*1024*4)?;
+    let old_name = test_dir.tmp_file_str();
+    let changed_name = get_changed_file(&old_name)?;
+    let sig_name = create_sig_file_whole(&old_name)?;
+
+    let delta_name = create_delta_file_whole(&old_name, changed_name, sig_name)?;
+
+    create_patch_file_whole(
+        &old_name,
+        delta_name,
+    )?;
+    println!("costs seconds: {:?}", start.elapsed().as_secs());
+    Ok(())
+}
 
     #[test]
     fn t_librsync() -> Result<(), failure::Error>{

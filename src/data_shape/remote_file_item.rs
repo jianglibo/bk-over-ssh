@@ -64,7 +64,7 @@ impl<'a> std::convert::From<&'a RemoteFileItemOwned> for RemoteFileItem<'a> {
         }
     }
 }
-
+/// remote file has a relative path, it doesn't know where itself lives.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct RemoteFileItem<'a> {
     path: &'a str,
@@ -76,11 +76,11 @@ pub struct RemoteFileItem<'a> {
 
 impl<'a> RemoteFileItem<'a> {
     #[allow(dead_code)]
-    pub fn new(path: &'a str) -> Self {
+    pub fn new(relative_path: &'a str, len: u64) -> Self {
         Self {
-            path,
+            path: relative_path,
             sha1: None,
-            len: 0_u64,
+            len,
             created: None,
             modified: None,
         }
@@ -163,16 +163,16 @@ pub fn load_dirs<'a, O: io::Write>(
 mod tests {
     use super::*;
     use crate::log_util;
-    use crate::develope::develope_data;
+    use crate::develope::tutil;
     use failure;
 
     #[test]
     fn t_from_path() -> Result<(), failure::Error> {
         log_util::setup_logger_empty();
         let dirs = vec!["fixtures/adir"].into_iter();
-        let mut cur = develope_data::get_a_cursor_writer();
+        let mut cur = tutil::get_a_cursor_writer();
         load_dirs(dirs, &mut cur, true)?;
-        let num = develope_data::count_cursor_lines(cur);
+        let num =tutil::count_cursor_lines(cur);
         assert_eq!(num, 7);
         Ok(())
     }
@@ -181,9 +181,9 @@ mod tests {
     fn t_from_path_to_path() -> Result<(), failure::Error> {
         log_util::setup_logger_empty();
         let dirs = vec!["/home"].into_iter();
-        let mut cur = develope_data::get_a_cursor_writer();
+        let mut cur = tutil::get_a_cursor_writer();
         load_dirs(dirs, &mut cur, true)?;
-        let num = develope_data::count_cursor_lines(cur);
+        let num = tutil::count_cursor_lines(cur);
         assert_eq!(num, 58380);
         Ok(())
     }

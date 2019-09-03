@@ -311,7 +311,7 @@ pub trait Delta {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::develope::develope_data;
+    use crate::develope::tutil;
     use crate::log_util;
     use log::*;
     use rand;
@@ -407,15 +407,15 @@ mod tests {
     #[test]
     fn t_signature_large_file() -> Result<(), failure::Error> {
         log_util::setup_logger(vec![""], vec![]);
-        let dev_env = develope_data::load_env();
         let start = Instant::now();
-        let demo_file = &dev_env.servers.ubuntu18.test_files.midum_binary_file;
-        let mut sig = Signature::signature_a_file(demo_file, Some(4096))?;
+        let test_dir = tutil::create_a_dir_and_a_file_with_len("xx.bin", 1024*1024*4)?;
+        let demo_file = test_dir.tmp_file_str();
+        let mut sig = Signature::signature_a_file(&demo_file, Some(4096))?;
 
         let sig_out = "target/cc.sig";
         sig.write_to_file(sig_out)?;
 
-        let demo_file_length = Path::new(demo_file).metadata()?.len();
+        let demo_file_length = Path::new(&demo_file).metadata()?.len();
         let sig_out_length = Path::new(sig_out).metadata()?.len();
         info!(
             "sig file length: {:?}, origin: {:?}, percent: {:?}",

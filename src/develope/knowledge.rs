@@ -1,7 +1,6 @@
 #[cfg(test)]
 mod tests {
     use super::super::super::log_util;
-    use super::super::develope_data;
     use crate::actions::{copy_stream_to_file_return_sha1};
     use failure;
     use log::*;
@@ -10,6 +9,8 @@ mod tests {
     use std::net::TcpStream;
     use std::path::Path;
     use walkdir::WalkDir;
+    use crate::develope::tutil;
+    use crate::data_shape::{Server};
 
     #[test]
     fn t_main_password() {
@@ -22,14 +23,6 @@ mod tests {
             .unwrap();
         assert!(sess.authenticated());
     }
-
-    #[test]
-    fn t_main_pubkey() {
-        log_util::setup_logger(vec![""], vec![]);
-        let (_tcp, sess, _dev_env) = develope_data::connect_to_ubuntu();
-        assert!(sess.authenticated());
-    }
-
     #[test]
     fn t_main_agent_inspect() {
         // Almost all APIs require a `Session` to be available
@@ -48,28 +41,34 @@ mod tests {
         }
     }
     #[test]
-    fn t_scp_file() {
+    fn t_scp_file() -> Result<(), failure::Error> {
         log_util::setup_logger(vec![""], vec![]);
-        let (tcp, sess, dev_env) = develope_data::connect_to_ubuntu();
-        info!("{:?}", tcp);
+
+        let mut server = Server::load_from_yml("localhost")?;
+        let sess = server.get_ssh_session();
+        let test_dir = tutil::create_a_dir_and_a_file_with_len("xx.bin", 1024*1024*4)?;
+        let file = test_dir.tmp_file_str();
         let (mut remote_file, stat) = sess
-            .scp_recv(Path::new(&dev_env.servers.ubuntu18.test_dirs.aatxt))
+            .scp_recv(Path::new(&file))
             .unwrap();
         println!("remote file size: {}", stat.size());
         let mut contents = Vec::new();
         remote_file.read_to_end(&mut contents).unwrap();
         info!("{:?}", contents);
+        Ok(())
     }
 
     #[test]
     fn t_sftp_file() -> Result<(), failure::Error> {
         log_util::setup_logger(vec![""], vec![]);
-        let (tcp, sess, dev_env) = develope_data::connect_to_ubuntu();
-        info!("{:?}", tcp);
+        let mut server = Server::load_from_yml("localhost")?;
+        let sess = server.get_ssh_session();
+        let test_dir =tutil::create_a_dir_and_a_file_with_len("xx.bin", 1024*1024*4)?; 
+        let file = test_dir.tmp_file_str();
         let sftp = sess.sftp().expect("should got sfpt instance.");
 
         let mut file: ssh2::File =
-            sftp.open(Path::new(&dev_env.servers.ubuntu18.test_dirs.aatxt))?;
+            sftp.open(Path::new(&file))?;
         let mut buf = String::new();
         file.read_to_string(&mut buf)?;
         assert_eq!(buf, "hello\nworld");
@@ -103,22 +102,12 @@ mod tests {
     fn t_channel_1() -> Result<(), failure::Error> {
         log_util::setup_logger(vec![""], vec![]);
 
-        let (_tcp, sess, _dev_env) = develope_data::connect_to_ubuntu();
+        let mut server = Server::load_from_yml("localhost")?;
+        let sess = server.get_ssh_session();
         let mut channel: ssh2::Channel = sess.channel_session().unwrap();
         channel.exec("ls").unwrap();
         copy_stream_to_file_return_sha1(&mut channel, "not_in_git/t.txt")?;
         Ok(())
-    }
-
-    #[test]
-    fn t_load_env() {
-        let develope_env = develope_data::load_env();
-        assert!(develope_env
-            .servers
-            .ubuntu18
-            .test_dirs
-            .aatxt
-            .contains("aa.txt"));
     }
 
     #[test]
