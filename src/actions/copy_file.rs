@@ -218,25 +218,37 @@ pub fn copy_a_file_item_rsync<'a>(
         "{} rsync delta-a-file --new-file {} --sig-file {} --out-file {}",
         server.remote_exec, &remote_path, &remote_sig_file_path, &delta_file_name,
     );
+    trace!("about to invoke command: {:?}", cmd);
     let mut channel: ssh2::Channel = server.create_channel()?;
     channel.exec(cmd.as_str())?;
+    let mut ch_stderr = channel.stderr();
     let mut chout = String::new();
+    ch_stderr.read_to_string(&mut chout)?;
+    trace!("after invoke delta command, there maybe err in channel: {:?}", chout);
     channel.read_to_string(&mut chout)?;
-    trace!("delta-a-file output: {:?}", chout);
-    let file = sftp.open(Path::new(&delta_file_name))?;
-    let mut delta_file = DeltaFileReader::<ssh2::File>::read_delta_stream(file)?;
-    let restore_path = fs::OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .open(format!("{}.restore", local_file_path))?;
-    let old_file = fs::OpenOptions::new().read(true).open(&local_file_path)?;
-    delta_file.restore_seekable(restore_path, old_file)?;
-    update_local_file_from_restored(&local_file_path)?;
-    Ok(FileItemProcessResult::Successed(
-        local_file_path,
-        SyncType::Rsync,
-    ))
+    trace!(
+        "delta-a-file output: {:?}, delta_file_name: {:?}",
+        chout,
+        delta_file_name
+    );
+    if let Ok(file) = sftp.open(Path::new(&delta_file_name)) {
+        let mut delta_file = DeltaFileReader::<ssh2::File>::read_delta_stream(file)?;
+        let restore_path = fs::OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(format!("{}.restore", local_file_path))?;
+        trace!("restore_path: {:?}", restore_path);
+        let old_file = fs::OpenOptions::new().read(true).open(&local_file_path)?;
+        delta_file.restore_seekable(restore_path, old_file)?;
+        update_local_file_from_restored(&local_file_path)?;
+        Ok(FileItemProcessResult::Successed(
+            local_file_path,
+            SyncType::Rsync,
+        ))
+    } else {
+        bail!("sftp open delta_file: {:?} failed.", delta_file_name);
+    }
 }
 
 fn update_local_file_from_restored(local_file_path: impl AsRef<str>) -> Result<(), failure::Error> {
@@ -305,7 +317,7 @@ mod tests {
 
     #[test]
     fn t_copy_a_file() -> Result<(), failure::Error> {
-        log_util::setup_logger(vec![""], vec![]);
+        log_util::setup_logger(vec!["actions::copy_file"], vec![]);
 
         let mut server = Server::load_from_yml("localhost")?;
         server.connect()?;
@@ -313,16 +325,15 @@ mod tests {
         let test_dir1 = tutil::create_a_dir_and_a_filename("xx.txt")?;
         let local_file_name = test_dir1.tmp_dir.path().join("yy.txt");
         let test_dir2 = tutil::create_a_dir_and_a_file_with_content("yy.txt", "hello")?;
-        let remote_file_name = test_dir2.tmp_file_str();
+        let remote_file_name = test_dir2.tmp_file_name_only();
 
-        assert!(Path::new(remote_file_name).exists());
         info!("{:?}, local: {:?}", remote_file_name, local_file_name);
         // let result = panic::catch_unwind(|| {
         let r = copy_a_file(
             server.get_ssh_session(),
             test_dir1.tmp_dir_path(),
             test_dir2.tmp_dir_str(),
-            test_dir2.tmp_file_name_only(),
+            remote_file_name,
             test_dir2.tmp_file_len(),
             SyncType::Sftp,
         )?;
