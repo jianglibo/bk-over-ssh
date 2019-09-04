@@ -1,10 +1,11 @@
 [package]
-name = "ssh-client-demo"
+name = "bk-over-ssh"
 version = "0.1.0"
 authors = ["libo <jianglibo@gmail.com>"]
 edition = "2018"
 # default-run = "rsync_main"
-default-run = "ssh-client-demo"
+# pick a binary for cargo run.
+default-run = "bk-over-ssh"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -36,9 +37,9 @@ version = "~2.33"
 default-features = false
 features = ["suggestions", "color", "yaml"]
 
-# [[bin]]
-# name = "mybin"
-# path = "src/main.rs"
+[[bin]]
+name = "bk-over-ssh"
+path = "src/main.rs"
 
 [lib]
 name = "ssh_client_demo"

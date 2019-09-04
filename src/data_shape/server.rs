@@ -108,12 +108,23 @@ pub struct Server {
 }
 
 impl Server {
+    pub fn copy_a_file(&mut self, local: impl AsRef<str>, remote: impl AsRef<str>) -> Result<(), failure::Error> {
+        self.connect()?;
+        let sftp: ssh2::Sftp = self.session.as_ref().unwrap().sftp()?;
+
+        info!("copy from {:?} to {:?}", local.as_ref(), remote.as_ref());
+        let mut r_file = sftp.create(Path::new(remote.as_ref()))?;
+        let mut l_file = fs::File::open(local.as_ref())?;
+        io::copy(&mut l_file, &mut r_file)?;
+        Ok(())
+    }
     /// Test purpose.
     #[allow(dead_code)]
     pub fn replace_directories(&mut self, directories: Vec<Directory>) {
         self.directories = directories;
     }
-    pub fn load_from_yml(name: impl AsRef<str>) -> Result<Server, failure::Error> {
+
+    pub fn guess_server_yml_file(name: impl AsRef<str>) -> Result<PathBuf, failure::Error> {
         let name = name.as_ref();
 
         let server_path = if name.contains('\\') || name.contains('/') {
@@ -136,7 +147,10 @@ impl Server {
                 std::env::current_dir()?.join("servers").join(&name_only)
             }
         };
-
+        Ok(server_path)
+    }
+    pub fn load_from_yml(name: impl AsRef<str>) -> Result<Server, failure::Error> {
+        let server_path = Server::guess_server_yml_file(name)?;
         info!("loading server configuration: {:?}", server_path);
         let mut f = fs::OpenOptions::new().read(true).open(server_path)?;
         let mut buf = String::new();

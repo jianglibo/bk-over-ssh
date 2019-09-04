@@ -1,6 +1,6 @@
-name: yml_app
-version: "1.0"
-about: an example using a .yml file to build a CLI
+name: bk-over-ssh
+version: "0.1.0"
+about: backup files over ssh.
 author: jianglibo <jianglibo@gmail.com>
 
 # AppSettings can be defined as a list and are **not** ascii case sensitive
@@ -25,6 +25,10 @@ args:
     #     possible_values:
     #         - generate-bash-completions
     #         - generate-zsh-completions
+    - print-conf:
+        help: print out the current configuration of application.
+        long: print-conf
+        required: false
     - servers-dir:
         help: The directory where the server describes put.
         long: servers-dir
@@ -90,11 +94,14 @@ subcommands:
     - repl:
         about: enter repl mode.
     - rsync:
+        about: sync relative functions.
         args:
             - skip-sha1:
                 long: skip-sha1
                 required: false
-                global: true       
+                global: true
+                conflicts_with:
+                    - copy-server-yml
         # args:
         #     - server-yml:
         #         help: the path to server configuration file.
@@ -104,6 +111,13 @@ subcommands:
         #         global: true       
         subcommands:
             - sync-dirs:
+                args:
+                    - server-yml:
+                        long: server-yml
+                        required: true
+                        takes_value: true
+            - copy-server-yml:
+                about: copy the local server yml to the target server, the target location is in the local yml file.
                 args:
                     - server-yml:
                         long: server-yml

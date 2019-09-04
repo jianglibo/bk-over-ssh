@@ -15,10 +15,11 @@ mod develope;
 mod log_util;
 mod rustsync;
 
-use crate::rustsync::{DeltaWriter};
+use crate::rustsync::DeltaWriter;
 use std::borrow::Cow::{self, Borrowed, Owned};
-use std::env;
 
+use std::env;
+use log::*;
 use rustyline::completion::{Completer, FilenameCompleter, Pair};
 use rustyline::config::OutputStreamType;
 use rustyline::error::ReadlineError;
@@ -26,10 +27,8 @@ use rustyline::highlight::{Highlighter, MatchingBracketHighlighter};
 use rustyline::hint::{Hinter, HistoryHinter};
 use rustyline::{Cmd, CompletionType, Config, Context, EditMode, Editor, Helper, KeyPress};
 use std::time::Instant;
-use std::path::{Path, PathBuf};
-use log::*;
 
-use data_shape::{Server, AppConf};
+use data_shape::{AppConf, Server};
 
 struct MyHelper {
     completer: FilenameCompleter,
@@ -156,6 +155,13 @@ fn main() -> Result<(), failure::Error> {
 
     let servers_dir = m.value_of("servers-dir");
 
+    let app_conf = AppConf::new(servers_dir)?;
+
+    if m.is_present("print-conf") {
+        println!("{:?}", app_conf);
+        return Ok(());
+    }
+
     match m.subcommand() {
         ("completions", Some(sub_matches)) => {
             let shell = sub_matches.value_of("shell_name").unwrap();
@@ -181,11 +187,31 @@ fn main() -> Result<(), failure::Error> {
                         }
                     }
                 }
+                ("copy-server-yml", Some(sub_sub_matches)) => {
+                    let server_config_path = sub_sub_matches.value_of("server-yml").unwrap();
+                    match Server::load_from_yml(server_config_path) {
+                        Ok(mut server) => {
+                            let rp = server.remote_server_yml.clone();
+                            let lpb = Server::guess_server_yml_file(server_config_path)?;
+                            let lp = lpb.to_str().expect("server yml should exists.");
+                            if let Err(err) = server.copy_a_file(lp, rp) {
+                                bail!("copy_a_file failed: {:?}", err);
+                            }
+                            // if let Ok(current_exe) = env::current_exe() {
+                            //     let rp = server.remote_exec.clone();
+                            //     let lp = current_exe.to_str().expect("current_exe PathBuf to_str should success.");
+                            //     server.copy_a_file(lp, rp)?;
+                            // }
+                        }
+                        Err(err) => {
+                            error!("load_from_yml failed: {:?}", err);
+                        }
+                    }
+                }
                 ("restore-a-file", Some(sub_sub_matches)) => {
                     let old_file = sub_sub_matches.value_of("old-file").unwrap();
                     let maybe_delta_file = sub_sub_matches.value_of("delta-file");
                     let maybe_out_file = sub_sub_matches.value_of("out-file");
-                    
                     let delta_file = if let Some(f) = maybe_delta_file {
                         f.to_string()
                     } else {
@@ -198,14 +224,14 @@ fn main() -> Result<(), failure::Error> {
                         format!("{}.restore", old_file)
                     };
 
-                    let mut dr = rustsync::DeltaFileReader::<fs::File>::read_delta_file(delta_file)?;
+                    let mut dr =
+                        rustsync::DeltaFileReader::<fs::File>::read_delta_file(delta_file)?;
                     dr.restore_from_file_to_file(out_file, old_file)?;
                 }
                 ("delta-a-file", Some(sub_sub_matches)) => {
                     let new_file = sub_sub_matches.value_of("new-file").unwrap();
                     let maybe_sig_file = sub_sub_matches.value_of("sig-file");
                     let maybe_out_file = sub_sub_matches.value_of("out-file");
-                    
                     let sig_file = if let Some(f) = maybe_sig_file {
                         f.to_string()
                     } else {
@@ -232,14 +258,15 @@ fn main() -> Result<(), failure::Error> {
                         .value_of("block-size")
                         .and_then(|s| s.parse().ok());
                     let sig_file = format!("{}.sig", file);
-                    let out = sub_sub_matches.value_of("out").unwrap_or_else(|| sig_file.as_str());
+                    let out = sub_sub_matches
+                        .value_of("out")
+                        .unwrap_or_else(|| sig_file.as_str());
                     let start = Instant::now();
                     match rustsync::Signature::signature_a_file(file, block_size) {
                         Ok(mut sig) => {
-                            
-                                if let Err(err) = sig.write_to_file(out) {
-                                    error!("rsync signature write_to_file failed: {:?}", err);
-                                }
+                            if let Err(err) = sig.write_to_file(out) {
+                                error!("rsync signature write_to_file failed: {:?}", err);
+                            }
                         }
                         Err(err) => {
                             error!("rsync signature failed: {:?}", err);
