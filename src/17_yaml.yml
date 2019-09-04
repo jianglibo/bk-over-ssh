@@ -1,7 +1,7 @@
 name: yml_app
 version: "1.0"
 about: an example using a .yml file to build a CLI
-author: Kevin K. <kbknapp@gmail.com>
+author: jianglibo <jianglibo@gmail.com>
 
 # AppSettings can be defined as a list and are **not** ascii case sensitive
 settings:
@@ -25,6 +25,11 @@ args:
     #     possible_values:
     #         - generate-bash-completions
     #         - generate-zsh-completions
+    - servers-dir:
+        help: The directory where the server describes put.
+        long: servers-dir
+        takes_value: true
+        required: false
     # - flag:
     #     help: demo flag argument
     #     short: F

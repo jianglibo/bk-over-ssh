@@ -142,4 +142,13 @@ mod tests {
 
         println!("{:?}", pp.as_os_str());
     }
+
+    #[test]
+    fn t_env_base() -> Result<(), failure::Error> {
+        use std::env;
+        let c_path = env::current_dir()?;
+        let e_path = env::current_exe()?;
+        assert_eq!(c_path, e_path);
+        Ok(())
+    }
 }

@@ -17,6 +17,7 @@ mod rustsync;
 
 use crate::rustsync::{DeltaWriter};
 use std::borrow::Cow::{self, Borrowed, Owned};
+use std::env;
 
 use rustyline::completion::{Completer, FilenameCompleter, Pair};
 use rustyline::config::OutputStreamType;
@@ -25,8 +26,10 @@ use rustyline::highlight::{Highlighter, MatchingBracketHighlighter};
 use rustyline::hint::{Hinter, HistoryHinter};
 use rustyline::{Cmd, CompletionType, Config, Context, EditMode, Editor, Helper, KeyPress};
 use std::time::Instant;
+use std::path::{Path, PathBuf};
+use log::*;
 
-use data_shape::{load_dirs, Server};
+use data_shape::{Server, AppConf};
 
 struct MyHelper {
     completer: FilenameCompleter,
@@ -142,14 +145,16 @@ fn main() -> Result<(), failure::Error> {
     use clap::Shell;
     use log::*;
     use std::{fs, io};
-
-    log_util::setup_logger(vec![""], vec![]);
+    let a = "";
+    log_util::setup_logger(vec![a], vec![]);
 
     let yml = load_yaml!("17_yaml.yml");
     let app = App::from_yaml(yml);
     let m: ArgMatches = app.get_matches();
 
     let mut app1 = App::from_yaml(yml);
+
+    let servers_dir = m.value_of("servers-dir");
 
     match m.subcommand() {
         ("completions", Some(sub_matches)) => {
