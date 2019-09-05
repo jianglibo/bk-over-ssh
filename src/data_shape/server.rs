@@ -383,7 +383,7 @@ mod tests {
 
     #[test]
     fn t_load_server() -> Result<(), failure::Error> {
-        log_util::setup_logger(vec![""], vec![]);
+        log_util::setup_logger_empty();
         let server = Server::load_from_yml("localhost")?;
         assert_eq!(
             server.directories[0].excludes,
@@ -394,7 +394,7 @@ mod tests {
 
     #[test]
     fn t_connect_server() -> Result<(), failure::Error> {
-        log_util::setup_logger(vec![""], vec![]);
+        log_util::setup_logger_empty();
         let mut server = Server::load_from_yml("localhost")?;
         server.connect()?;
         assert!(server.is_connected());
@@ -403,7 +403,7 @@ mod tests {
 
     #[test]
     fn t_download_dirs() -> Result<(), failure::Error> {
-        log_util::setup_logger(vec![""], vec![]);
+        log_util::setup_logger_empty();
         let d = Path::new("target/adir");
         if d.exists() {
             fs::remove_dir_all(d)?;
@@ -422,7 +422,7 @@ mod tests {
 
     #[test]
     fn t_sync_dirs() -> Result<(), failure::Error> {
-        log_util::setup_logger(vec![""], vec![]);
+        log_util::setup_logger_empty();
         let d = Path::new("target/adir");
         if d.exists() {
             fs::remove_dir_all(d)?;

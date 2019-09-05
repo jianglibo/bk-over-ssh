@@ -1,4 +1,4 @@
-extern crate ssh_client_demo;
+extern crate bk_over_ssh;
 use std::{fs, io};
 // use std::io::prelude::{Read, Write};
 

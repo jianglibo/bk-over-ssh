@@ -317,7 +317,7 @@ mod tests {
 
     #[test]
     fn t_copy_a_file() -> Result<(), failure::Error> {
-        log_util::setup_logger(vec!["actions::copy_file"], vec![]);
+        log_util::setup_test_logger_only_self(vec!["actions::copy_file"]);
 
         let mut server = Server::load_from_yml("localhost")?;
         server.connect()?;

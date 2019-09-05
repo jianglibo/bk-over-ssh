@@ -42,7 +42,7 @@ mod tests {
     }
     #[test]
     fn t_scp_file() -> Result<(), failure::Error> {
-        log_util::setup_logger(vec![""], vec![]);
+        log_util::setup_logger_empty();
 
         let mut server = Server::load_from_yml("localhost")?;
         let sess = server.get_ssh_session();
@@ -60,7 +60,7 @@ mod tests {
 
     #[test]
     fn t_sftp_file() -> Result<(), failure::Error> {
-        log_util::setup_logger(vec![""], vec![]);
+        log_util::setup_logger_empty();
         let mut server = Server::load_from_yml("localhost")?;
         let sess = server.get_ssh_session();
         let test_dir =tutil::create_a_dir_and_a_file_with_len("xx.bin", 1024*1024*4)?; 
@@ -100,7 +100,7 @@ mod tests {
 
     #[test]
     fn t_channel_1() -> Result<(), failure::Error> {
-        log_util::setup_logger(vec![""], vec![]);
+        log_util::setup_logger_empty();
 
         let mut server = Server::load_from_yml("localhost")?;
         let sess = server.get_ssh_session();

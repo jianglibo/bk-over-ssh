@@ -272,7 +272,7 @@ mod tests {
 
     #[test]
     fn t_delta_file_equal() -> Result<(), failure::Error> {
-        log_util::setup_logger(vec![""], vec![]);
+        log_util::setup_logger_empty();
         let source = vec![0_u8; 129]; // 129/WINDOW = 4 windows + 1 byte.
                                       // self.window = 4 + 1(field_type) +  8
                                       // 4 + 1 + 8 source_position = 13 * 4
@@ -298,7 +298,7 @@ mod tests {
     }
     #[test]
     fn delta_file_basic() -> Result<(), failure::Error> {
-        log_util::setup_logger(vec![""], vec![]);
+        log_util::setup_logger_empty();
         for index in 0..10 {
             let source = rand::thread_rng()
                 .sample_iter(&Alphanumeric)

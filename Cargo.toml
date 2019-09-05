@@ -42,7 +42,7 @@ name = "bk-over-ssh"
 path = "src/main.rs"
 
 [lib]
-name = "ssh_client_demo"
+name = "bk_over_ssh"
 path = "src/lib.rs"
 
 # http://ticki.github.io/blog/making-terminal-applications-in-rust-with-termion/

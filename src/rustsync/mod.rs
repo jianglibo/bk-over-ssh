@@ -325,7 +325,7 @@ mod tests {
     const WINDOW: usize = 32;
     #[test]
     fn basic() -> Result<(), failure::Error> {
-        log_util::setup_logger(vec![""], vec![]);
+        log_util::setup_logger_empty();
         for index in 0..10 {
             let source = rand::thread_rng()
                 .sample_iter(&Alphanumeric)
@@ -384,7 +384,7 @@ mod tests {
 
     #[test]
     fn t_write_object() -> Result<(), failure::Error> {
-        log_util::setup_logger(vec![""], vec![]);
+        log_util::setup_logger_empty();
         let tf = tempfile::tempfile()?;
         let mut br = io::BufReader::new(tf);
         let mut buf: [u8; 32] = [0; 32];
@@ -406,7 +406,7 @@ mod tests {
 
     #[test]
     fn t_signature_large_file() -> Result<(), failure::Error> {
-        log_util::setup_logger(vec![""], vec![]);
+        log_util::setup_logger_empty();
         let start = Instant::now();
         let test_dir = tutil::create_a_dir_and_a_file_with_len("xx.bin", 1024*1024*4)?;
         let demo_file = test_dir.tmp_file_str();

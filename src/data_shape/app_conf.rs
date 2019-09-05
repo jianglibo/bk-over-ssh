@@ -4,8 +4,16 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize)]
+pub struct LogConf {
+    pub console: bool,
+    pub log_file_name: String,
+    pub verbose_modules: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
 pub struct AppConf {
     servers_dir: PathBuf,
+    log_conf: Option<LogConf>,
 }
 
 fn guess_servers_dir() -> Result<PathBuf, failure::Error> {
@@ -44,11 +52,16 @@ impl AppConf {
         };
         Ok(Self {
             servers_dir,
+            log_conf: None,
         })
     }
 
     pub fn get_servers_dir(&self) -> &Path {
         self.servers_dir.as_path()
+    }
+
+    pub fn get_log_conf(&self) -> Option<&LogConf> {
+        self.log_conf.as_ref()
     }
 }
 
