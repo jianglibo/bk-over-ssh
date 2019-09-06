@@ -7,3 +7,5 @@ develope_env.yaml
 .vscode/launch.json
 .vscode/settings.json
 /servers
+bk_over_ssh.yml
+/data

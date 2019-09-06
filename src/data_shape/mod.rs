@@ -7,4 +7,4 @@ pub mod app_conf;
 pub use file_item::{FileItem, FileItemProcessResult, FileItemProcessResultStats, SyncType};
 pub use remote_file_item::{load_dirs, RemoteFileItem, load_remote_item_owned};
 pub use server::{Server, Directory};
-pub use app_conf::{AppConf};
+pub use app_conf::{AppConf, CONF_FILE_NAME};

@@ -1,4 +1,4 @@
-use crate::data_shape::{FileItem, FileItemProcessResult, RemoteFileItem, Server, SyncType};
+use crate::data_shape::{FileItem, FileItemProcessResult, Server, SyncType};
 use crate::rustsync::{DeltaFileReader, DeltaReader, Signature};
 use log::*;
 use sha1::{Digest, Sha1};
@@ -137,24 +137,6 @@ pub fn visit_dirs(dir: &Path, cb: &dyn Fn(&fs::DirEntry)) -> io::Result<()> {
 
 // https://stackoverflow.com/questions/32300132/why-cant-i-store-a-value-and-a-reference-to-that-value-in-the-same-struct
 
-#[allow(dead_code)]
-pub fn copy_a_file<'a>(
-    session: &ssh2::Session,
-    local_base_dir: &'a Path,
-    remote_base_dir: &'a str,
-    remote_relative_path: &'a str,
-    remote_file_len: u64,
-    sync_type: SyncType,
-) -> Result<FileItemProcessResult, failure::Error> {
-    let ri = RemoteFileItem::new(remote_relative_path, remote_file_len);
-    let fi = FileItem::new(local_base_dir, remote_base_dir, &ri, sync_type);
-    let sftp = session.sftp()?;
-    let mut server = Server::load_from_yml("localhost")?;
-    server.connect()?;
-    let r = copy_a_file_item(&server, &sftp, fi);
-    Ok(r)
-}
-
 pub fn copy_a_file_item_sftp<'a>(
     sftp: &ssh2::Sftp,
     local_file_path: String,
@@ -224,7 +206,10 @@ pub fn copy_a_file_item_rsync<'a>(
     let mut ch_stderr = channel.stderr();
     let mut chout = String::new();
     ch_stderr.read_to_string(&mut chout)?;
-    trace!("after invoke delta command, there maybe err in channel: {:?}", chout);
+    trace!(
+        "after invoke delta command, there maybe err in channel: {:?}",
+        chout
+    );
     channel.read_to_string(&mut chout)?;
     trace!(
         "delta-a-file output: {:?}, delta_file_name: {:?}",
@@ -296,14 +281,30 @@ pub fn copy_a_file_item<'a>(
 
 #[cfg(test)]
 mod tests {
-    use super::{copy_a_file, visit_dirs, FileItemProcessResult, Path, SyncType};
-    use crate::data_shape::Server;
+    use super::*;
+    use crate::data_shape::{FileItem, FileItemProcessResult, RemoteFileItem, Server, SyncType};
     use crate::develope::tutil;
     use crate::log_util;
     use log::*;
-    use std::io::prelude::*;
     use std::panic;
     use std::{fs, io};
+
+    fn copy_a_file<'a>(
+        session: &ssh2::Session,
+        local_base_dir: &'a Path,
+        remote_base_dir: &'a str,
+        remote_relative_path: &'a str,
+        remote_file_len: u64,
+        sync_type: SyncType,
+    ) -> Result<FileItemProcessResult, failure::Error> {
+        let ri = RemoteFileItem::new(remote_relative_path, remote_file_len);
+        let fi = FileItem::new(local_base_dir, remote_base_dir, &ri, sync_type);
+        let sftp = session.sftp()?;
+        let mut server = Server::load_from_yml("servers", "localhost")?;
+        server.connect()?;
+        let r = copy_a_file_item(&server, &sftp, fi);
+        Ok(r)
+    }
 
     #[test]
     fn t_visit() {
@@ -319,7 +320,7 @@ mod tests {
     fn t_copy_a_file() -> Result<(), failure::Error> {
         log_util::setup_test_logger_only_self(vec!["actions::copy_file"]);
 
-        let mut server = Server::load_from_yml("localhost")?;
+        let mut server = Server::load_from_yml("servers", "localhost")?;
         server.connect()?;
         server.rsync_valve = 4;
         let test_dir1 = tutil::create_a_dir_and_a_filename("xx.txt")?;
@@ -367,7 +368,7 @@ mod tests {
         );
 
         tutil::change_file_content(&local_file_name)?;
-        let r = copy_a_file(
+        let _r = copy_a_file(
             server.get_ssh_session(),
             test_dir1.tmp_dir_path(),
             test_dir2.tmp_dir_str(),

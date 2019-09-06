@@ -1,6 +1,6 @@
 use crate::actions::copy_a_file_item;
 use crate::data_shape::{
-    load_remote_item_owned, FileItem, FileItemProcessResult, FileItemProcessResultStats,
+    load_remote_item_owned, AppConf, FileItem, FileItemProcessResult, FileItemProcessResultStats,
     RemoteFileItem, SyncType,
 };
 use glob::Pattern;
@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::{fs, io, io::Seek};
 // use tempfile;
 
-#[derive(Deserialize, Default)]
+#[derive(Deserialize, Default, Debug)]
 pub struct Directory {
     pub remote_dir: String,
     pub local_dir: String,
@@ -26,18 +26,23 @@ pub struct Directory {
 }
 
 impl Directory {
-
     /// for test purpose.
     #[allow(dead_code)]
-    pub fn new(remote_dir: impl AsRef<str>, local_dir: impl AsRef<str>, includes: Vec<impl AsRef<str>>, excludes: Vec<impl AsRef<str>>) -> Self {
+    pub fn new(
+        remote_dir: impl AsRef<str>,
+        local_dir: impl AsRef<str>,
+        includes: Vec<impl AsRef<str>>,
+        excludes: Vec<impl AsRef<str>>,
+    ) -> Self {
         let mut o = Self {
             remote_dir: remote_dir.as_ref().to_string(),
             local_dir: local_dir.as_ref().to_string(),
-            includes: includes.iter().map(|s|s.as_ref().to_string()).collect(),
-            excludes: excludes.iter().map(|s|s.as_ref().to_string()).collect(),
+            includes: includes.iter().map(|s| s.as_ref().to_string()).collect(),
+            excludes: excludes.iter().map(|s| s.as_ref().to_string()).collect(),
             ..Directory::default()
         };
-        o.compile_patterns().expect("directory pattern should compile.");
+        o.compile_patterns()
+            .expect("directory pattern should compile.");
         o
     }
     /// if has exclude items any matching will return None,
@@ -84,7 +89,6 @@ impl Directory {
                     .collect(),
             );
         }
-
         Ok(())
     }
 }
@@ -108,7 +112,12 @@ pub struct Server {
 }
 
 impl Server {
-    pub fn copy_a_file(&mut self, local: impl AsRef<str>, remote: impl AsRef<str>) -> Result<(), failure::Error> {
+    #[allow(dead_code)]
+    pub fn copy_a_file(
+        &mut self,
+        local: impl AsRef<str>,
+        remote: impl AsRef<str>,
+    ) -> Result<(), failure::Error> {
         self.connect()?;
         let sftp: ssh2::Sftp = self.session.as_ref().unwrap().sftp()?;
 
@@ -124,33 +133,37 @@ impl Server {
         self.directories = directories;
     }
 
-    pub fn guess_server_yml_file(name: impl AsRef<str>) -> Result<PathBuf, failure::Error> {
-        let name = name.as_ref();
+    // pub fn guess_server_yml_file(name: impl AsRef<str>) -> Result<PathBuf, failure::Error> {
+    //     let name = name.as_ref();
 
-        let server_path = if name.contains('\\') || name.contains('/') {
-            Path::new(name).to_path_buf()
-        } else {
-            let name_only = if !name.ends_with(".yml") {
-                format!("{}.yml", name)
-            } else {
-                name.to_string()
-            };
-            let sp = std::env::current_exe()?
-                .parent()
-                .expect("executable's parent should exists.")
-                .join("servers")
-                .join(&name_only);
+    //     let server_path = if name.contains('\\') || name.contains('/') {
+    //         Path::new(name).to_path_buf()
+    //     } else {
+    //         let name_only = if !name.ends_with(".yml") {
+    //             format!("{}.yml", name)
+    //         } else {
+    //             name.to_string()
+    //         };
+    //         let sp = std::env::current_exe()?
+    //             .parent()
+    //             .expect("executable's parent should exists.")
+    //             .join("servers")
+    //             .join(&name_only);
 
-            if sp.exists() {
-                sp
-            } else {
-                std::env::current_dir()?.join("servers").join(&name_only)
-            }
-        };
-        Ok(server_path)
-    }
-    pub fn load_from_yml(name: impl AsRef<str>) -> Result<Server, failure::Error> {
-        let server_path = Server::guess_server_yml_file(name)?;
+    //         if sp.exists() {
+    //             sp
+    //         } else {
+    //             std::env::current_dir()?.join("servers").join(&name_only)
+    //         }
+    //     };
+    //     Ok(server_path)
+    // }
+
+    pub fn load_from_yml(
+        servers_dir: impl AsRef<Path>,
+        name: impl AsRef<str>,
+    ) -> Result<Server, failure::Error> {
+        let server_path = servers_dir.as_ref().join(name.as_ref());
         info!("loading server configuration: {:?}", server_path);
         let mut f = fs::OpenOptions::new().read(true).open(server_path)?;
         let mut buf = String::new();
@@ -163,15 +176,55 @@ impl Server {
         Ok(server)
     }
 
+    pub fn load_from_yml_with_app_config(
+        app_conf: &AppConf,
+        name: impl AsRef<str>,
+    ) -> Result<Server, failure::Error> {
+        let server_yml_path = app_conf.get_servers_dir().join(name.as_ref());
+        info!("loading server configuration: {:?}", server_yml_path);
+        let mut f = fs::OpenOptions::new().read(true).open(server_yml_path)?;
+        let mut buf = String::new();
+        f.read_to_string(&mut buf)?;
+        let mut server: Server = serde_yaml::from_str(&buf)?;
+        let data_dir = app_conf.get_data_dir();
+        let maybe_local_server_base_dir = Path::new(data_dir).join(&server.host);
+        server.directories.iter_mut().for_each(|d| {
+            d.compile_patterns().unwrap();
+            trace!("origin directory: {:?}", d);
+            let ld = d.local_dir.trim();
+            if ld.is_empty() || ld == "~" || ld == "null" {
+                let mut splited = d.remote_dir.trim().rsplitn(3, &['/', '\\'][..]);
+                let mut s = splited.next().expect("remote_dir should has dir name.");
+                if s.is_empty() {
+                    s = splited.next().expect("remote_dir should has dir name.");
+                }
+                d.local_dir = s.to_string();
+                info!("local_dir is empty. change to {}", s);
+            } else {
+                d.local_dir = ld.to_string();
+            }
+
+            let dpath = Path::new(&d.local_dir);
+            if !dpath.is_absolute() {
+                d.local_dir = maybe_local_server_base_dir
+                    .join(&d.local_dir)
+                    .to_str()
+                    .expect("local_dir to_str should success.")
+                    .to_string();
+            }
+        });
+        trace!("loaded server: {:?}", server.directories.iter().map(|d|format!("{}, {}", d.local_dir, d.remote_dir)).collect::<Vec<String>>());
+        Ok(server)
+    }
+
     pub fn is_connected(&self) -> bool {
         self._tcp_stream.is_some() && self.session.is_some()
     }
-
+    #[allow(dead_code)]
     pub fn get_ssh_session(&mut self) -> &ssh2::Session {
         self.connect().expect("ssh connection should be created.");
         self.session.as_ref().expect("session should be created.")
     }
-
 
     fn create_ssh_session(&self) -> Result<(TcpStream, ssh2::Session), failure::Error> {
         let url = format!("{}:{}", self.host, self.port);
@@ -227,6 +280,12 @@ impl Server {
         let mut contents = String::new();
         channel.read_to_string(&mut contents)?;
         trace!("list-local-files output: {:?}", contents);
+        contents.clear();
+        channel.stderr().read_to_string(&mut contents)?;
+        trace!("list-local-files stderr: {:?}", contents);
+        if !contents.is_empty() {
+            bail!("list-local-files return error: {:?}", contents);
+        }
         let sftp = self.session.as_ref().unwrap().sftp()?;
         let mut f = sftp.open(Path::new(&self.file_list_file))?;
         io::copy(&mut f, out)?;
@@ -269,7 +328,10 @@ impl Server {
     }
 
     /// Do not try to return item stream from this function. consume it locally, pass in function to alter the behavior.
-    fn _start_sync<R: Read>(&self, file_item_lines: R) -> Result<FileItemProcessResultStats, failure::Error> {
+    fn _start_sync<R: Read>(
+        &self,
+        file_item_lines: R,
+    ) -> Result<FileItemProcessResultStats, failure::Error> {
         let mut current_remote_dir = Option::<String>::None;
         let mut current_local_dir = Option::<&Path>::None;
         let sftp = self.session.as_ref().unwrap().sftp()?;
@@ -348,7 +410,10 @@ impl Server {
         Ok(result)
     }
 
-    pub fn sync_dirs(&mut self, skip_sha1: bool) -> Result<FileItemProcessResultStats, failure::Error> {
+    pub fn sync_dirs(
+        &mut self,
+        skip_sha1: bool,
+    ) -> Result<FileItemProcessResultStats, failure::Error> {
         self.connect()?;
         self.start_sync(skip_sha1, Option::<fs::File>::None)
     }
@@ -381,10 +446,30 @@ mod tests {
     use super::*;
     use crate::log_util;
 
+    fn load_server_yml(name: &str) -> Server {
+        Server::load_from_yml("servers", name).unwrap()
+    }
+
+    #[test]
+    fn t_rsplitn() {
+        let s = "a/b/c\\d/c0";
+        assert_eq!(s.rsplitn(2, &['/', '\\'][..]).next(), Some("c0"));
+        assert_eq!(s.rsplitn(20, &['/', '\\'][..]).next(), Some("c0"));
+
+        let s = "a/b/c\\d\\c0";
+        assert_eq!(s.rsplitn(2, &['/', '\\'][..]).next(), Some("c0"));
+        assert_eq!(s.rsplitn(20, &['/', '\\'][..]).next(), Some("c0"));
+
+        let s = "a/b/c\\d\\c0\\";
+        assert!(s.ends_with(&['/', '\\'][..]));
+        // assert_eq!(s.rsplitn(2, &['/', '\\'][..]).next(), Some("c0"));
+        // assert_eq!(s.rsplitn(20, &['/', '\\'][..]).next(), Some("c0"));
+    }
+
     #[test]
     fn t_load_server() -> Result<(), failure::Error> {
         log_util::setup_logger_empty();
-        let server = Server::load_from_yml("localhost")?;
+        let server = load_server_yml("localhost");
         assert_eq!(
             server.directories[0].excludes,
             vec!["*.log".to_string(), "*.bak".to_string()]
@@ -395,7 +480,7 @@ mod tests {
     #[test]
     fn t_connect_server() -> Result<(), failure::Error> {
         log_util::setup_logger_empty();
-        let mut server = Server::load_from_yml("localhost")?;
+        let mut server = load_server_yml("localhost");
         server.connect()?;
         assert!(server.is_connected());
         Ok(())
@@ -409,7 +494,7 @@ mod tests {
             fs::remove_dir_all(d)?;
         }
         assert!(!d.exists());
-        let mut server = Server::load_from_yml("localhost")?;
+        let mut server = load_server_yml("localhost");
         server.connect()?;
         let f = fs::OpenOptions::new()
             .read(true)
@@ -428,7 +513,7 @@ mod tests {
             fs::remove_dir_all(d)?;
         }
         assert!(!d.exists());
-        let mut server = Server::load_from_yml("localhost")?;
+        let mut server = load_server_yml("localhost");
         let stats = server.sync_dirs(true)?;
         assert_eq!(stats.successed, 1);
         assert!(d.exists());

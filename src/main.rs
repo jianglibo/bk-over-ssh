@@ -18,6 +18,9 @@ mod rustsync;
 use crate::rustsync::DeltaWriter;
 use std::borrow::Cow::{self, Borrowed, Owned};
 
+use clap::App;
+use clap::ArgMatches;
+use clap::Shell;
 use log::*;
 use rustyline::completion::{Completer, FilenameCompleter, Pair};
 use rustyline::config::OutputStreamType;
@@ -26,11 +29,10 @@ use rustyline::highlight::{Highlighter, MatchingBracketHighlighter};
 use rustyline::hint::{Hinter, HistoryHinter};
 use rustyline::{Cmd, CompletionType, Config, Context, EditMode, Editor, Helper, KeyPress};
 use std::env;
-use std::path::Path;
 use std::time::Instant;
-use std::{fs, io::Read};
+use std::{fs, io, io::Write};
 
-use data_shape::{AppConf, Server};
+use data_shape::{AppConf, Server, CONF_FILE_NAME};
 
 struct MyHelper {
     completer: FilenameCompleter,
@@ -140,43 +142,7 @@ fn main_client() {
     rl.save_history("history.txt").unwrap();
 }
 
-fn read_app_conf(file: impl AsRef<Path>) -> Result<AppConf, failure::Error> {
-    if let Ok(mut f) = fs::OpenOptions::new().read(true).open(file.as_ref()) {
-        let mut buf = String::new();
-        if let Ok(_) = f.read_to_string(&mut buf) {
-            match serde_yaml::from_str::<AppConf>(&buf) {
-                Ok(app_conf) => return Ok(app_conf),
-                Err(err) => bail!("deserialize failed: {:?}, {:?}", file.as_ref(), err),
-            }
-        } else {
-            bail!("read_to_string failure: {:?}", file.as_ref());
-        }
-    } else {
-        bail!("open conf file failed: {:?}", file.as_ref());
-    }
-}
-
-fn guess_conf_file(app_conf_file: Option<&str>) -> Result<AppConf, failure::Error> {
-    if let Some(af) = app_conf_file {
-        return read_app_conf(af);
-    } else {
-        if let Ok(current_exe) = env::current_exe() {
-            if let Some(pp) = current_exe.parent() {
-                let cf = pp.join("bk_over_ssh.yml");
-                return read_app_conf(cf);
-            }
-        }
-    }
-    bail!("read app_conf failed.")
-}
-
 fn main() -> Result<(), failure::Error> {
-    use clap::App;
-    use clap::ArgMatches;
-    use clap::Shell;
-    use log::*;
-    use std::{fs, io};
-    log_util::setup_logger_for_this_app(true, "output.log", Vec::<String>::new())?;
 
     let yml = load_yaml!("17_yaml.yml");
     let app = App::from_yaml(yml);
@@ -184,19 +150,30 @@ fn main() -> Result<(), failure::Error> {
 
     let mut app1 = App::from_yaml(yml);
 
-    let servers_dir = m.value_of("servers-dir");
-
     let conf = m.value_of("conf");
 
-    let app_conf = match guess_conf_file(conf) {
-        Ok(cfg) => cfg,
+    let mut app_conf = match AppConf::guess_conf_file(conf) {
+        Ok(cfg) => {
+            if let Some(cfg) = cfg {
+                cfg
+            } else {
+                let bytes = include_bytes!("app_config_demo.yml");
+                let path = env::current_dir()?.join(CONF_FILE_NAME);
+                let mut file = fs::OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .open(&path)?;
+                file.write_all(bytes)?;
+                bail!("cann't find app configuration file and had created one for you in the current directory. {:?}", path);
+            }
+        }
         Err(err) => {
-            warn!("{:?}", err);
-            AppConf::new(servers_dir)?
+            bail!("read app configuration file failed: {:?}", err);
         }
     };
 
-    // let app_conf = AppConf::new(servers_dir)?;
+    app_conf.validate_conf()?;
+    log_util::setup_logger_for_this_app(true, app_conf.get_log_file().as_str(), &app_conf.get_log_conf().verbose_modules)?;
 
     if m.is_present("print-conf") {
         println!("{:?}", app_conf);
@@ -217,10 +194,11 @@ fn main() -> Result<(), failure::Error> {
                 ("sync-dirs", Some(sub_sub_matches)) => {
                     let server_config_path = sub_sub_matches.value_of("server-yml").unwrap();
                     let skip_sha1 = sub_sub_matches.is_present("skip-sha1");
-                    match Server::load_from_yml(server_config_path) {
+                    match Server::load_from_yml_with_app_config(&app_conf, server_config_path) {
                         Ok(mut server) => {
-                            if let Err(err) = server.sync_dirs(skip_sha1) {
-                                error!("sync-dirs failed: {:?}", err);
+                            match server.sync_dirs(skip_sha1) {
+                                Ok(result) => println!("{:?}", result),
+                                Err(err) => error!("sync-dirs failed: {:?}", err),
                             }
                         }
                         Err(err) => {
@@ -230,20 +208,20 @@ fn main() -> Result<(), failure::Error> {
                 }
                 ("deploy-to-server", Some(sub_sub_matches)) => {
                     let server_config_path = sub_sub_matches.value_of("server-yml").unwrap();
-                    match Server::load_from_yml(server_config_path) {
-                        Ok(mut server) => {
+                    match Server::load_from_yml_with_app_config(&app_conf, server_config_path) {
+                        Ok(server) => {
                             if ["127.0.0.1", "localhost"]
                                 .iter()
                                 .any(|&s| s == server.host.as_str())
                             {
                                 bail!("no need to copy to self.");
                             }
-                            let rp = server.remote_server_yml.clone();
-                            let lpb = Server::guess_server_yml_file(server_config_path)?;
-                            let lp = lpb.to_str().expect("server yml should exists.");
-                            if let Err(err) = server.copy_a_file(lp, rp) {
-                                bail!("copy_a_file failed: {:?}", err);
-                            }
+                            // let rp = server.remote_server_yml.clone();
+                            // let lpb = app_conf.get_servers_dir()
+                            // let lp = lpb.to_str().expect("server yml should exists.");
+                            // if let Err(err) = server.copy_a_file(lp, rp) {
+                            //     bail!("copy_a_file failed: {:?}", err);
+                            // }
                             // It's useless because of different of platform.
                             // if let Ok(current_exe) = env::current_exe() {
                             //     let rp = server.remote_exec.clone();
@@ -328,7 +306,7 @@ fn main() -> Result<(), failure::Error> {
                         .expect("should load sever yml.");
                     let skip_sha1 = sub_sub_matches.is_present("skip-sha1");
                     let start = Instant::now();
-                    let mut server = Server::load_from_yml(server_config_path)?;
+                    let mut server = Server::load_from_yml_with_app_config(&app_conf, server_config_path)?;
 
                     if let Some(out) = sub_sub_matches.value_of("out") {
                         let mut out = fs::OpenOptions::new()
@@ -349,7 +327,7 @@ fn main() -> Result<(), failure::Error> {
                         .expect("should load server yml.");
                     let skip_sha1 = sub_sub_matches.is_present("skip-sha1");
 
-                    let server = Server::load_from_yml(server_config_path)?;
+                    let server = Server::load_from_yml_with_app_config(&app_conf, server_config_path)?;
 
                     if let Some(out) = sub_sub_matches.value_of("out") {
                         let mut out = fs::OpenOptions::new()
@@ -362,7 +340,9 @@ fn main() -> Result<(), failure::Error> {
                         server.load_dirs(&mut io::stdout(), skip_sha1)?;
                     }
                 }
-                (_, _) => unimplemented!(), // for brevity
+                (_, _) => {
+                    println!("please add --help to view usage help.");
+                }
             }
         }
         ("repl", Some(_)) => {

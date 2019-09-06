@@ -1,7 +1,9 @@
 #[cfg(test)]
 mod tests {
     use super::super::super::log_util;
-    use crate::actions::{copy_stream_to_file_return_sha1};
+    use crate::actions::copy_stream_to_file_return_sha1;
+    use crate::data_shape::Server;
+    use crate::develope::tutil;
     use failure;
     use log::*;
     use ssh2::{self, Session};
@@ -9,8 +11,6 @@ mod tests {
     use std::net::TcpStream;
     use std::path::Path;
     use walkdir::WalkDir;
-    use crate::develope::tutil;
-    use crate::data_shape::{Server};
 
     #[test]
     fn t_main_password() {
@@ -44,13 +44,11 @@ mod tests {
     fn t_scp_file() -> Result<(), failure::Error> {
         log_util::setup_logger_empty();
 
-        let mut server = Server::load_from_yml("localhost")?;
+        let mut server = Server::load_from_yml("servers", "localhost")?;
         let sess = server.get_ssh_session();
-        let test_dir = tutil::create_a_dir_and_a_file_with_len("xx.bin", 1024*1024*4)?;
+        let test_dir = tutil::create_a_dir_and_a_file_with_len("xx.bin", 1024 * 1024 * 4)?;
         let file = test_dir.tmp_file_str();
-        let (mut remote_file, stat) = sess
-            .scp_recv(Path::new(&file))
-            .unwrap();
+        let (mut remote_file, stat) = sess.scp_recv(Path::new(&file)).unwrap();
         println!("remote file size: {}", stat.size());
         let mut contents = Vec::new();
         remote_file.read_to_end(&mut contents).unwrap();
@@ -61,14 +59,13 @@ mod tests {
     #[test]
     fn t_sftp_file() -> Result<(), failure::Error> {
         log_util::setup_logger_empty();
-        let mut server = Server::load_from_yml("localhost")?;
+        let mut server = Server::load_from_yml("servers", "localhost")?;
         let sess = server.get_ssh_session();
-        let test_dir =tutil::create_a_dir_and_a_file_with_len("xx.bin", 1024*1024*4)?; 
+        let test_dir = tutil::create_a_dir_and_a_file_with_len("xx.bin", 1024 * 1024 * 4)?;
         let file = test_dir.tmp_file_str();
         let sftp = sess.sftp().expect("should got sfpt instance.");
 
-        let mut file: ssh2::File =
-            sftp.open(Path::new(&file))?;
+        let mut file: ssh2::File = sftp.open(Path::new(&file))?;
         let mut buf = String::new();
         file.read_to_string(&mut buf)?;
         assert_eq!(buf, "hello\nworld");
@@ -102,7 +99,7 @@ mod tests {
     fn t_channel_1() -> Result<(), failure::Error> {
         log_util::setup_logger_empty();
 
-        let mut server = Server::load_from_yml("localhost")?;
+        let mut server = Server::load_from_yml("servers", "localhost")?;
         let sess = server.get_ssh_session();
         let mut channel: ssh2::Channel = sess.channel_session().unwrap();
         channel.exec("ls").unwrap();
