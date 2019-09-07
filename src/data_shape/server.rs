@@ -13,6 +13,13 @@ use std::path::{Path, PathBuf};
 use std::{fs, io, io::Seek};
 // use tempfile;
 
+#[derive(Deserialize, Debug)]
+pub enum AuthMethod {
+    Password,
+    Agent,
+    IdentityFile,
+}
+
 #[derive(Deserialize, Default, Debug)]
 pub struct Directory {
     pub remote_dir: String,
@@ -97,6 +104,7 @@ impl Directory {
 pub struct Server {
     pub id_rsa: String,
     pub id_rsa_pub: String,
+    pub auth_method: AuthMethod,
     pub host: String,
     pub port: u16,
     pub remote_exec: String,
@@ -245,7 +253,8 @@ impl Server {
     }
 
     pub fn is_connected(&self) -> bool {
-        self._tcp_stream.is_some() && self.session.is_some()
+        // self._tcp_stream.is_some() && self.session.is_some()
+        self.session.is_some()
     }
     #[allow(dead_code)]
     pub fn get_ssh_session(&mut self) -> &ssh2::Session {
@@ -253,18 +262,54 @@ impl Server {
         self.session.as_ref().expect("session should be created.")
     }
 
-    fn create_ssh_session(&self) -> Result<(TcpStream, ssh2::Session), failure::Error> {
+    fn create_ssh_session(&self) -> Result<(Option<TcpStream>, ssh2::Session), failure::Error> {
         let url = format!("{}:{}", self.host, self.port);
+        trace!("connecting to: {}", url);
         let tcp = TcpStream::connect(&url)?;
         if let Some(mut sess) = ssh2::Session::new() {
+            trace!("1111");
+            // sess.set_tcp_stream(tcp);
             sess.handshake(&tcp)?;
-            sess.userauth_pubkey_file(
-                &self.username,
-                Some(Path::new(&self.id_rsa_pub)),
-                Path::new(&self.id_rsa),
-                None,
-            )?;
-            Ok((tcp, sess))
+            trace!("www:");
+            match self.auth_method {
+                AuthMethod::Agent => {
+                    let mut agent = sess.agent()?;
+                    agent.connect()?;
+                    agent.list_identities()?;
+
+                    for id in agent.identities() {
+                        match id {
+                            Ok(identity) => {
+                                trace!("start authenticate with pubkey.");
+                                if let Err(err) = agent.userauth(&self.username, &identity) {
+                                    warn!("ssh agent authentication failed. {:?}", err);
+                                } else {
+                                    break;
+                                }
+                            }
+                            Err(err) => warn!("can't get key from ssh agent {:?}.", err),
+                        }
+                    }
+                },
+                AuthMethod::IdentityFile => {
+                    trace!(
+                        "about authenticate to {:?} with IdentityFile: {:?}",
+                        url,
+                        self.id_rsa_pub,
+                    );
+                    sess.userauth_pubkey_file(
+                        &self.username,
+                        Some(Path::new(&self.id_rsa_pub)),
+                        Path::new(&self.id_rsa),
+                        None,
+                    )?;
+                },
+                AuthMethod::Password => {
+                    bail!("password authentication not supported.");
+                },
+            }
+            // Ok((None, sess))
+            Ok((Some(tcp), sess))
         } else {
             bail!("Session::new failed.");
         }
@@ -273,7 +318,9 @@ impl Server {
     pub fn connect(&mut self) -> Result<(), failure::Error> {
         if !self.is_connected() {
             let (tcp, sess) = self.create_ssh_session()?;
-            self._tcp_stream.replace(tcp);
+            if tcp.is_some() {
+                self._tcp_stream.replace(tcp.unwrap());
+            }
             self.session.replace(sess);
         }
         Ok(())
@@ -474,7 +521,7 @@ mod tests {
     use crate::log_util;
 
     fn load_server_yml(name: &str) -> Server {
-        Server::load_from_yml("servers", name).unwrap()
+        Server::load_from_yml("data/servers", name).unwrap()
     }
 
     #[test]
@@ -496,7 +543,7 @@ mod tests {
     #[test]
     fn t_load_server() -> Result<(), failure::Error> {
         log_util::setup_logger_empty();
-        let server = load_server_yml("localhost");
+        let server = load_server_yml("localhost.yml");
         assert_eq!(
             server.directories[0].excludes,
             vec!["*.log".to_string(), "*.bak".to_string()]
@@ -506,8 +553,10 @@ mod tests {
 
     #[test]
     fn t_connect_server() -> Result<(), failure::Error> {
-        log_util::setup_logger_empty();
-        let mut server = load_server_yml("localhost");
+        // log_util::setup_test_logger_only_self(vec!["data_shape::server"]);
+        log_util::setup_logger_detail(true, "output.log", vec!["data_shape::server"], Some(vec!["ssh2"]))?;
+        let mut server = load_server_yml("localhost.yml");
+        info!("start connecting...");
         server.connect()?;
         assert!(server.is_connected());
         Ok(())

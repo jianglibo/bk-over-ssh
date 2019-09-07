@@ -10,7 +10,6 @@ default-run = "bk-over-ssh"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-ssh2 = "0.3"
 log = "0.4"
 env_logger = "0.6"
 fern = { version = "0.5", features = ["colored"] }
@@ -30,6 +29,7 @@ adler32 = "1.0.3"
 blake2-rfc = "0.2.18"
 glob = "0.3.0"
 filetime = "0.2"
+ssh2 = "0.3"
 
 # https://docs.rs/crate/rustsync/0.2.3
 [dependencies.clap]
@@ -37,6 +37,13 @@ version = "~2.33"
 default-features = false
 features = ["suggestions", "color", "yaml"]
 
+#https://stackoverflow.com/questions/41742046/is-there-a-list-of-all-cfg-features
+
+# [target.'cfg(windows)'.dependencies]
+# ssh2 = {git="https://github.com/wez/ssh2-rs", branch="win10dh"}
+
+# [target.'cfg(unix)'.dependencies]
+# ssh2 = "0.3"
 
 [dev-dependencies]
 sha2 = "0.8.0"

@@ -17,7 +17,7 @@ mod tests {
         // Connect to the local SSH server
         let tcp = TcpStream::connect("127.0.0.1:22").unwrap();
         let mut sess = Session::new().unwrap();
-        sess.handshake(&tcp).unwrap();
+        // sess.handshake(&tcp).unwrap();
 
         sess.userauth_password("administrator", "apassword")
             .unwrap();

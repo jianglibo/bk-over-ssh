@@ -3,8 +3,9 @@ id_rsa_pub: /home/jianglibo/.ssh/id_rsa.pub
 host: 127.0.0.1
 port: 2222
 username: jianglibo
+auth_method: IdentityFile # Password, Agent, IdentityFile.
 remote_exec: /home/osboxes/ws/ssh-client-demo/target/debug/bk-over-ssh
-remote_server_yml: /home/osboxes/ws/ssh-client-demo/servers/localhost.yml
+remote_server_yml: /home/osboxes/ws/ssh-client-demo/data/servers/localhost.yml
 file_list_file: /home/jianglibo/file_list_file.txt
 rsync_valve: 419430400
 directories:
