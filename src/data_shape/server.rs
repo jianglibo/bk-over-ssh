@@ -1,7 +1,7 @@
 use crate::actions::copy_a_file_item;
 use crate::data_shape::{
     load_remote_item_owned, AppConf, FileItem, FileItemProcessResult, FileItemProcessResultStats,
-    RemoteFileItem, SyncType,
+    RemoteFileItem, SyncType, string_path,
 };
 use glob::Pattern;
 use log::*;
@@ -172,7 +172,10 @@ impl Server {
         name: impl AsRef<str>,
     ) -> Result<Server, failure::Error> {
         let server_path = servers_dir.as_ref().join(name.as_ref());
-        info!("loading server configuration: {:?}", server_path);
+        if !server_path.exists() {
+            bail!("configuration file does't exist: {:?}", server_path);
+        }
+        
         let mut f = fs::OpenOptions::new().read(true).open(server_path)?;
         let mut buf = String::new();
         f.read_to_string(&mut buf)?;
@@ -190,7 +193,7 @@ impl Server {
     ) -> Result<Server, failure::Error> {
         trace!("got server yml name: {:?}", name.as_ref());
         let mut server_yml_path = Path::new(name.as_ref()).to_path_buf();
-        if server_yml_path.is_absolute() && !server_yml_path.exists() {
+        if (server_yml_path.is_absolute() || name.as_ref().starts_with('/')) && !server_yml_path.exists() {
             bail!(
                 "server yml file does't exist, please create one: {:?}",
                 server_yml_path
@@ -412,8 +415,8 @@ impl Server {
         let result = io::BufReader::new(file_item_lines).lines().map(|line_r|{
             match line_r {
                 Ok(line) => {
-                    // info!("got line: {:?}", line);
                     if line.starts_with('{') {
+                        trace!("got item line {}", line);
                         if let (Some(rd), Some(ld)) =
                             (current_remote_dir.as_ref(), current_local_dir)
                         {
@@ -437,7 +440,7 @@ impl Server {
                                     }
                                 }
                                 Err(err) => {
-                                    error!("deserialize line failed: {:?}, {:?}", line, err);
+                                    error!("deserialize line failed: {}, {:?}", line, err);
                                     FileItemProcessResult::DeserializeFailed(line)
                                 }
                             }
@@ -446,7 +449,8 @@ impl Server {
                         }
                     } else {
                         // it's a directory line.
-                        if let Some(rd) = self.directories.iter().find(|d| d.remote_dir == line) {
+                        trace!("got directory line, it's a remote represent of path, be careful: {:?}", line);
+                        if let Some(rd) = self.directories.iter().find(|d| string_path::path_equal(&d.remote_dir, &line)) {
                             current_remote_dir = Some(line.clone());
                             current_local_dir = Some(Path::new(rd.local_dir.as_str()));
                             FileItemProcessResult::Directory(line)
@@ -520,8 +524,8 @@ mod tests {
     use super::*;
     use crate::log_util;
 
-    fn load_server_yml(name: &str) -> Server {
-        Server::load_from_yml("data/servers", name).unwrap()
+    fn load_server_yml() -> Server {
+        Server::load_from_yml("data/servers", "localhost_1.yml").unwrap()
     }
 
     #[test]
@@ -543,7 +547,7 @@ mod tests {
     #[test]
     fn t_load_server() -> Result<(), failure::Error> {
         log_util::setup_logger_empty();
-        let server = load_server_yml("localhost.yml");
+        let server = load_server_yml();
         assert_eq!(
             server.directories[0].excludes,
             vec!["*.log".to_string(), "*.bak".to_string()]
@@ -555,7 +559,7 @@ mod tests {
     fn t_connect_server() -> Result<(), failure::Error> {
         // log_util::setup_test_logger_only_self(vec!["data_shape::server"]);
         log_util::setup_logger_detail(true, "output.log", vec!["data_shape::server"], Some(vec!["ssh2"]))?;
-        let mut server = load_server_yml("localhost.yml");
+        let mut server = load_server_yml();
         info!("start connecting...");
         server.connect()?;
         assert!(server.is_connected());
@@ -570,7 +574,7 @@ mod tests {
             fs::remove_dir_all(d)?;
         }
         assert!(!d.exists());
-        let mut server = load_server_yml("localhost");
+        let mut server = load_server_yml();
         server.connect()?;
         let f = fs::OpenOptions::new()
             .read(true)
@@ -583,16 +587,12 @@ mod tests {
 
     #[test]
     fn t_sync_dirs() -> Result<(), failure::Error> {
-        log_util::setup_logger_empty();
-        let d = Path::new("target/adir");
-        if d.exists() {
-            fs::remove_dir_all(d)?;
-        }
-        assert!(!d.exists());
-        let mut server = load_server_yml("localhost");
+        log_util::setup_logger_detail(true, "output.log", vec!["data_shape::server"], Some(vec!["ssh2"]))?;
+        let mut server = load_server_yml();
         let stats = server.sync_dirs(true)?;
-        assert_eq!(stats.successed, 1);
-        assert!(d.exists());
+        info!("result {:?}", stats);
         Ok(())
     }
+
+
 }

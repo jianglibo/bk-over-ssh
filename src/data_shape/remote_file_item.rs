@@ -1,12 +1,12 @@
+use super::server::Directory;
 use crate::actions::hash_file_sha1;
 use log::*;
 use serde::{Deserialize, Serialize};
+use std::io;
 use std::iter::Iterator;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
-use std::{io};
 use walkdir::WalkDir;
-use super::server::Directory;
 
 pub struct RemoteFileItemOwned {
     path: String,
@@ -21,28 +21,32 @@ impl RemoteFileItemOwned {
         let metadata_r = path.metadata();
         match metadata_r {
             Ok(metadata) => {
-                let sha1 = if !skip_sha1 { hash_file_sha1(&path) } else { Option::<String>::None };
+                let sha1 = if !skip_sha1 {
+                    hash_file_sha1(&path)
+                } else {
+                    Option::<String>::None
+                };
                 // if let Some(sha1) = hash_file_sha1(&path) {
-                    let relative_o = path.strip_prefix(&base_path).ok().and_then(|p| p.to_str());
-                    if let Some(relative) = relative_o {
-                        return Some(Self {
-                            path: relative.to_string(),
-                            sha1,
-                            len: metadata.len(),
-                            modified: metadata
-                                .modified()
-                                .ok()
-                                .and_then(|st| st.duration_since(SystemTime::UNIX_EPOCH).ok())
-                                .map(|d| d.as_secs()),
-                            created: metadata
-                                .created()
-                                .ok()
-                                .and_then(|st| st.duration_since(SystemTime::UNIX_EPOCH).ok())
-                                .map(|d| d.as_secs()),
-                        });
-                    } else {
-                        error!("RemoteFileItem path name to_str() failed. {:?}", path);
-                    }
+                let relative_o = path.strip_prefix(&base_path).ok().and_then(|p| p.to_str());
+                if let Some(relative) = relative_o {
+                    return Some(Self {
+                        path: relative.to_string(),
+                        sha1,
+                        len: metadata.len(),
+                        modified: metadata
+                            .modified()
+                            .ok()
+                            .and_then(|st| st.duration_since(SystemTime::UNIX_EPOCH).ok())
+                            .map(|d| d.as_secs()),
+                        created: metadata
+                            .created()
+                            .ok()
+                            .and_then(|st| st.duration_since(SystemTime::UNIX_EPOCH).ok())
+                            .map(|d| d.as_secs()),
+                    });
+                } else {
+                    error!("RemoteFileItem path name to_str() failed. {:?}", path);
+                }
                 // }
             }
             Err(err) => {
@@ -103,7 +107,11 @@ impl<'a> RemoteFileItem<'a> {
     }
 }
 
-pub fn load_remote_item_owned<O: io::Write>(directory: &Directory, out: &mut O, skip_sha1: bool) -> Result<(), failure::Error> {
+pub fn load_remote_item_owned<O: io::Write>(
+    directory: &Directory,
+    out: &mut O,
+    skip_sha1: bool,
+) -> Result<(), failure::Error> {
     let bp = Path::new(directory.remote_dir.as_str()).canonicalize();
     match bp {
         Ok(base_path) => {
@@ -118,9 +126,7 @@ pub fn load_remote_item_owned<O: io::Write>(directory: &Directory, out: &mut O, 
                 .filter_map(|e| e.ok())
                 .filter(|d| d.file_type().is_file())
                 .filter_map(|d| d.path().canonicalize().ok())
-                .filter_map(|d| {
-                    directory.match_path(d)
-                })
+                .filter_map(|d| directory.match_path(d))
                 .filter_map(|d| RemoteFileItemOwned::from_path(&base_path, d, skip_sha1))
                 .for_each(|owned| {
                     let it = RemoteFileItem::from(&owned);
@@ -162,8 +168,8 @@ pub fn load_dirs<'a, O: io::Write>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::log_util;
     use crate::develope::tutil;
+    use crate::log_util;
     use failure;
 
     #[test]
@@ -172,7 +178,7 @@ mod tests {
         let dirs = vec!["fixtures/adir"].into_iter();
         let mut cur = tutil::get_a_cursor_writer();
         load_dirs(dirs, &mut cur, true)?;
-        let num =tutil::count_cursor_lines(cur);
+        let num = tutil::count_cursor_lines(cur);
         assert_eq!(num, 7);
         Ok(())
     }
@@ -185,6 +191,61 @@ mod tests {
         load_dirs(dirs, &mut cur, true)?;
         let num = tutil::count_cursor_lines(cur);
         assert_eq!(num, 58380);
+        Ok(())
+    }
+
+    #[test]
+    fn t_deserialize_item() -> Result<(), failure::Error> {
+        log_util::setup_logger_detail(true, "output.log", vec!["data_shape::remote_file_item"], Some(vec!["ssh2"]))?;
+        let item_owned = RemoteFileItemOwned {
+            path: "b b\\b b.txt".to_string(),
+            sha1: None,
+            len: 5,
+            modified: Some(554),
+            created: Some(666),
+        };
+
+        let item: RemoteFileItem = RemoteFileItem::from(&item_owned);
+
+        info!("item: {:?}", item);
+
+        let s = serde_json::to_string(&item)?;
+        info!("item str: {}", s);
+
+        // let item: RemoteFileItem = serde_json::from_str(&s)?;
+        // assert_eq!(item.get_len(), 5);
+
+        let s = r##"{"path":"qrcode.png","sha1":null,"len":6044,"created":1567834936,"modified":1567834936}"##;
+        let fi: RemoteFileItem = serde_json::from_str(s)?;
+        assert_eq!(fi.get_len(), 6044);
+        let s = r##"{"path":"b b\b b.txt","sha1":null,"len":5,"created":1565607566,"modified":1565607566}"##;
+        let fi_r = serde_json::from_str::<RemoteFileItem>(s);
+        assert!(fi_r.is_err());
+
+        let s = r##"{"path":"b b\\b b.txt","sha1":null,"len":5,"created":1565607566,"modified":1565607566}"##;
+        let fi_r = serde_json::from_str::<RemoteFileItem>(s);
+        assert!(fi_r.is_err());
+
+        let s = r##"{"path":"b b\\\b b.txt","sha1":null,"len":5,"created":1565607566,"modified":1565607566}"##;
+        let fi_r = serde_json::from_str::<RemoteFileItem>(s);
+        assert!(fi_r.is_err());
+
+        let s = r##"{"path":"b b\\\\b b.txt","sha1":null,"len":5,"created":1565607566,"modified":1565607566}"##;
+        let fi_r = serde_json::from_str::<RemoteFileItem>(s);
+        assert!(fi_r.is_err());
+
+        let s = r##"{"path":"b b\\\\\\b b.txt","sha1":null,"len":5,"created":1565607566,"modified":1565607566}"##;
+        let fi_r = serde_json::from_str::<RemoteFileItem>(s);
+        assert!(fi_r.is_err());
+
+        let s = r##"{"path":"b b\\\\\\\\b b.txt","sha1":null,"len":5,"created":1565607566,"modified":1565607566}"##;
+        let fi_r = serde_json::from_str::<RemoteFileItem>(s);
+        assert!(fi_r.is_err());
+
+        let s = r##"{"path":"b b/b b.txt","sha1":null,"len":5,"created":1565607566,"modified":1565607566}"##;
+        let fi = serde_json::from_str::<RemoteFileItem>(s)?;
+        assert_eq!(fi.get_len(), 5);
+
         Ok(())
     }
 }

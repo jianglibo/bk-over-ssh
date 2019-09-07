@@ -11,6 +11,23 @@ fn is_windows_path_start(s: &str) -> bool {
     }
 }
 
+pub fn path_equal(win_or_linx_path_str_a: impl AsRef<str>, win_or_linx_path_str_b: impl AsRef<str>) -> bool {
+    let mut a = win_or_linx_path_str_a.as_ref();
+    let mut b = win_or_linx_path_str_b.as_ref();
+
+    if a.starts_with(VERBATIM_PREFIX) { // it's a windows path.
+        a = a.split_at(4).1;
+    }
+
+    if b.starts_with(VERBATIM_PREFIX) { // it's a windows path.
+        b = b.split_at(4).1;
+    }
+
+    let aa = a.replace('\\', "/");
+    let bb = b.replace('\\', "/");
+    aa == bb
+}
+
 pub fn join_path<P: AsRef<str> + fmt::Display>(path_parent: P, path_child: P) -> String {
     let pp = path_parent.as_ref();
     if pp.starts_with(VERBATIM_PREFIX) { // it's a windows path.
