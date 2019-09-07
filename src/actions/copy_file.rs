@@ -1,5 +1,6 @@
 use crate::data_shape::{FileItem, FileItemProcessResult, Server, SyncType};
 use crate::rustsync::{DeltaFileReader, DeltaReader, Signature};
+use filetime;
 use log::*;
 use sha1::{Digest, Sha1};
 use ssh2;
@@ -257,7 +258,7 @@ pub fn copy_a_file_item<'a>(
     file_item: FileItem<'a>,
 ) -> FileItemProcessResult {
     if let Some(local_file_path) = file_item.get_local_path_str() {
-        match file_item.sync_type {
+        let copy_result = match file_item.sync_type {
             SyncType::Sftp => copy_a_file_item_sftp(sftp, local_file_path, &file_item),
             SyncType::Rsync => {
                 if !Path::new(&local_file_path).exists() {
@@ -273,7 +274,17 @@ pub fn copy_a_file_item<'a>(
                     }
                 }
             }
+        };
+
+        if let FileItemProcessResult::Successed(_, _) = &copy_result {
+            if let Err(err) = file_item.set_modified_as_remote() {
+                warn!("set modified as remote failed: {:?}", err);
+            } else {
+                file_item.verify_modified_equal();
+            }
         }
+
+        copy_result
     } else {
         FileItemProcessResult::GetLocalPathFailed
     }

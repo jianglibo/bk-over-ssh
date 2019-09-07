@@ -7,7 +7,7 @@ use glob::Pattern;
 use log::*;
 use serde::Deserialize;
 use ssh2;
-use std::io::prelude::{BufRead, Read};
+use std::io::prelude::{BufRead, Read, Write};
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::{fs, io, io::Seek};
@@ -180,9 +180,29 @@ impl Server {
         app_conf: &AppConf,
         name: impl AsRef<str>,
     ) -> Result<Server, failure::Error> {
-        let server_yml_path = app_conf.get_servers_dir().join(name.as_ref());
-        info!("loading server configuration: {:?}", server_yml_path);
-        let mut f = fs::OpenOptions::new().read(true).open(server_yml_path)?;
+        trace!("got server yml name: {:?}", name.as_ref());
+        let mut server_yml_path = Path::new(name.as_ref()).to_path_buf();
+        if server_yml_path.is_absolute() && !server_yml_path.exists() {
+            bail!(
+                "server yml file does't exist, please create one: {:?}",
+                server_yml_path
+            );
+        } else {
+            server_yml_path = app_conf.get_servers_dir().join(name.as_ref());
+            if !server_yml_path.exists() {
+                let bytes = include_bytes!("../server_template.yaml");
+                let mut f = fs::OpenOptions::new()
+                    .create(true)
+                    .write(true)
+                    .open(&server_yml_path)?;
+                f.write_all(&bytes[..])?;
+                bail!(
+                    "server yml file does't exist and had created one for you: {:?}",
+                    server_yml_path
+                );
+            }
+        }
+        let mut f = fs::OpenOptions::new().read(true).open(&server_yml_path)?;
         let mut buf = String::new();
         f.read_to_string(&mut buf)?;
         let mut server: Server = serde_yaml::from_str(&buf)?;
@@ -213,7 +233,14 @@ impl Server {
                     .to_string();
             }
         });
-        trace!("loaded server: {:?}", server.directories.iter().map(|d|format!("{}, {}", d.local_dir, d.remote_dir)).collect::<Vec<String>>());
+        trace!(
+            "loaded server: {:?}",
+            server
+                .directories
+                .iter()
+                .map(|d| format!("{}, {}", d.local_dir, d.remote_dir))
+                .collect::<Vec<String>>()
+        );
         Ok(server)
     }
 

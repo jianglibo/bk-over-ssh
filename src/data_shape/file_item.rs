@@ -1,8 +1,10 @@
 use super::string_path;
 use super::RemoteFileItem;
 use crate::actions::hash_file_sha1;
+use filetime;
+use log::*;
 use std::path::{Path, PathBuf};
-
+use std::time::SystemTime;
 
 #[derive(Debug)]
 pub enum SyncType {
@@ -25,7 +27,6 @@ pub enum FileItemProcessResult {
     SftpOpenFailed,
     ReadLineFailed,
 }
-
 
 #[derive(Debug, Default)]
 pub struct FileItemProcessResultStats {
@@ -52,21 +53,6 @@ pub struct FileItem<'a> {
 }
 
 impl<'a> FileItem<'a> {
-    // #[allow(dead_code)]
-    // pub fn standalone(
-    //     file_path: &'a Path,
-    //     remote_base_dir: Option<&'a str>,
-    //     remote_item: &'a RemoteFileItem,
-    //     sync_type: SyncType,
-    // ) -> Self {
-    //     Self {
-    //         remote_item,
-    //         base_dir: file_path,
-    //         remote_base_dir,
-    //         sync_type,
-    //     }
-    // }
-
     pub fn new(
         base_dir: &'a Path,
         remote_base_dir: &'a str,
@@ -91,15 +77,15 @@ impl<'a> FileItem<'a> {
             if mt.len() != ri.get_len() {
                 return true;
             }
-            // if mt
-            //     .modified()
-            //     .ok()
-            //     .and_then(|st| st.duration_since(SystemTime::UNIX_EPOCH).ok())
-            //     .map(|d| d.as_secs())
-            //     != ri.get_modified()
-            // {
-            //     return true;
-            // }
+            if mt
+                .modified()
+                .ok()
+                .and_then(|st| st.duration_since(SystemTime::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs())
+                != ri.get_modified()
+            {
+                return true;
+            }
             if ri.get_sha1().is_some() {
                 let sha1 = hash_file_sha1(&lp);
                 if ri.get_sha1() != sha1.as_ref().map(String::as_str) {
@@ -113,7 +99,8 @@ impl<'a> FileItem<'a> {
     }
 
     pub fn is_sha1_not_equal(&self, local_sha1: impl AsRef<str>) -> bool {
-        Some(local_sha1.as_ref().to_ascii_uppercase()) != self.remote_item.get_sha1().map(str::to_ascii_uppercase)
+        Some(local_sha1.as_ref().to_ascii_uppercase())
+            != self.remote_item.get_sha1().map(str::to_ascii_uppercase)
     }
 
     pub fn get_remote_item(&self) -> &RemoteFileItem {
@@ -136,6 +123,43 @@ impl<'a> FileItem<'a> {
         } else {
             self.remote_item.get_path().to_string()
         }
+    }
+
+    pub fn modified_secs(&self) -> Result<u64, failure::Error> {
+        Ok(self
+            .get_local_path()
+            .metadata()?
+            .modified()?
+            .duration_since(SystemTime::UNIX_EPOCH)?
+            .as_secs())
+    }
+
+    pub fn verify_modified_equal(&self) {
+        if let Some(rmd) = self.remote_item.get_modified() {
+            if let Ok(md) = self.modified_secs() {
+                if rmd != md {
+                    warn!("modified not equal, local: {:?}, remote: {:?}", md, rmd);
+                    return;
+                } else {
+                    return;
+                }
+            } else {
+                warn!(
+                    "can't verify modified time. {:?}",
+                    self.set_modified_as_remote()
+                );
+            }
+        }
+    }
+
+    pub fn set_modified_as_remote(&self) -> Result<(), failure::Error> {
+        if let Some(md) = self.remote_item.get_modified() {
+            let ft = filetime::FileTime::from_unix_time(md as i64, 0);
+            filetime::set_file_mtime(self.get_local_path(), ft)?;
+        } else {
+            bail!("remote_item has no midified value.");
+        }
+        Ok(())
     }
 }
 

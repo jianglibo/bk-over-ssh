@@ -19,7 +19,6 @@ rustyline = "5.0.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.8"
 serde_json = "1.0"
-sha2 = "0.8.0"
 sha-1 = "0.8.1"
 derive_builder =  "0.7.2"
 walkdir = "2"
@@ -30,12 +29,18 @@ tempfile = "3"
 adler32 = "1.0.3"
 blake2-rfc = "0.2.18"
 glob = "0.3.0"
+filetime = "0.2"
 
 # https://docs.rs/crate/rustsync/0.2.3
 [dependencies.clap]
 version = "~2.33"
 default-features = false
 features = ["suggestions", "color", "yaml"]
+
+
+[dev-dependencies]
+sha2 = "0.8.0"
+
 
 [[bin]]
 name = "bk-over-ssh"
