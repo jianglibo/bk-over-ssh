@@ -40,11 +40,17 @@ mod tests {
             println!("{:?}", pubkey);
         }
     }
+
+    fn load_server_yml() -> Server {
+        Server::load_from_yml("data/servers", "data", "localhost.yml").unwrap()
+    }
+
+
     #[test]
     fn t_scp_file() -> Result<(), failure::Error> {
         log_util::setup_logger_empty();
 
-        let mut server = Server::load_from_yml("servers", "localhost")?;
+        let mut server = load_server_yml();
         let sess = server.get_ssh_session();
         let test_dir = tutil::create_a_dir_and_a_file_with_len("xx.bin", 1024 * 1024 * 4)?;
         let file = test_dir.tmp_file_str();
@@ -58,19 +64,17 @@ mod tests {
 
     #[test]
     fn t_sftp_file() -> Result<(), failure::Error> {
-        log_util::setup_logger_empty();
-        let mut server = Server::load_from_yml("servers", "localhost")?;
+        log_util::setup_test_logger_only_self(vec!["develope::knowledge"]);
+        let mut server = load_server_yml();
         let sess = server.get_ssh_session();
-        let test_dir = tutil::create_a_dir_and_a_file_with_len("xx.bin", 1024 * 1024 * 4)?;
+        let test_dir = tutil::create_a_dir_and_a_file_with_len("xx.bin", 1024)?;
         let file = test_dir.tmp_file_str();
         let sftp = sess.sftp().expect("should got sfpt instance.");
 
         let mut file: ssh2::File = sftp.open(Path::new(&file))?;
-        let mut buf = String::new();
-        file.read_to_string(&mut buf)?;
-        assert_eq!(buf, "hello\nworld");
-        assert_eq!(buf.len(), 11);
-        info!("{:?}", buf);
+        let mut buf = Vec::<u8>::new();
+        file.read_to_end(&mut buf)?;
+        assert_eq!(buf.len(), 1024);
         Ok(())
     }
 
@@ -78,8 +82,8 @@ mod tests {
     fn t_sftp_resume_file() -> Result<(), failure::Error> {
         // log_util::setup_logger(vec![""], vec![]);
         // let (_tcp, mut sess, _dev_env) = develope_data::connect_to_ubuntu();
-        // let rdo = RemoteFileItemDirOwned::load_dir("fixtures/adir");
-        // let rd: RemoteFileItemDir = (&rdo).into();
+        // let rdo = RemoteFileItemOwnedDirOwned::load_dir("fixtures/adir");
+        // let rd: RemoteFileItemOwnedDir = (&rdo).into();
         // let remote_item = rd
         //     .get_items()
         //     .iter()
@@ -99,7 +103,7 @@ mod tests {
     fn t_channel_1() -> Result<(), failure::Error> {
         log_util::setup_logger_empty();
 
-        let mut server = Server::load_from_yml("servers", "localhost")?;
+        let mut server = load_server_yml();
         let sess = server.get_ssh_session();
         let mut channel: ssh2::Channel = sess.channel_session().unwrap();
         channel.exec("ls").unwrap();

@@ -98,6 +98,7 @@ impl AppConf {
         bail!("read app_conf failed.")
     }
 
+    /// default to "data" folder in the working directory.
     pub fn get_data_dir(&self) -> &str {
         &self.data_dir
     }

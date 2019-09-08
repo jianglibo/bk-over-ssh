@@ -1,7 +1,7 @@
 use crate::actions::copy_a_file_item;
 use crate::data_shape::{
     load_remote_item_owned, AppConf, FileItem, FileItemProcessResult, FileItemProcessResultStats,
-    RemoteFileItem, SyncType, string_path,
+    RemoteFileItemOwned, SyncType, string_path,
 };
 use glob::Pattern;
 use log::*;
@@ -169,29 +169,10 @@ impl Server {
 
     pub fn load_from_yml(
         servers_dir: impl AsRef<Path>,
+        data_dir: impl AsRef<str>,
         name: impl AsRef<str>,
     ) -> Result<Server, failure::Error> {
-        let server_path = servers_dir.as_ref().join(name.as_ref());
-        if !server_path.exists() {
-            bail!("configuration file does't exist: {:?}", server_path);
-        }
-        
-        let mut f = fs::OpenOptions::new().read(true).open(server_path)?;
-        let mut buf = String::new();
-        f.read_to_string(&mut buf)?;
-        let mut server: Server = serde_yaml::from_str(&buf)?;
-        server
-            .directories
-            .iter_mut()
-            .for_each(|d| d.compile_patterns().unwrap());
-        Ok(server)
-    }
-
-    pub fn load_from_yml_with_app_config(
-        app_conf: &AppConf,
-        name: impl AsRef<str>,
-    ) -> Result<Server, failure::Error> {
-        trace!("got server yml name: {:?}", name.as_ref());
+                trace!("got server yml name: {:?}", name.as_ref());
         let mut server_yml_path = Path::new(name.as_ref()).to_path_buf();
         if (server_yml_path.is_absolute() || name.as_ref().starts_with('/')) && !server_yml_path.exists() {
             bail!(
@@ -199,7 +180,7 @@ impl Server {
                 server_yml_path
             );
         } else {
-            server_yml_path = app_conf.get_servers_dir().join(name.as_ref());
+            server_yml_path = servers_dir.as_ref().join(name.as_ref());
             if !server_yml_path.exists() {
                 let bytes = include_bytes!("../server_template.yaml");
                 let mut f = fs::OpenOptions::new()
@@ -217,7 +198,7 @@ impl Server {
         let mut buf = String::new();
         f.read_to_string(&mut buf)?;
         let mut server: Server = serde_yaml::from_str(&buf)?;
-        let data_dir = app_conf.get_data_dir();
+        let data_dir = data_dir.as_ref();
         let maybe_local_server_base_dir = Path::new(data_dir).join(&server.host);
         server.directories.iter_mut().for_each(|d| {
             d.compile_patterns().unwrap();
@@ -255,6 +236,13 @@ impl Server {
         Ok(server)
     }
 
+    pub fn load_from_yml_with_app_config(
+        app_conf: &AppConf,
+        name: impl AsRef<str>,
+    ) -> Result<Server, failure::Error> {
+        Server::load_from_yml(app_conf.get_servers_dir(), app_conf.get_data_dir(), name)
+    }
+
     pub fn is_connected(&self) -> bool {
         // self._tcp_stream.is_some() && self.session.is_some()
         self.session.is_some()
@@ -270,10 +258,8 @@ impl Server {
         trace!("connecting to: {}", url);
         let tcp = TcpStream::connect(&url)?;
         if let Some(mut sess) = ssh2::Session::new() {
-            trace!("1111");
             // sess.set_tcp_stream(tcp);
             sess.handshake(&tcp)?;
-            trace!("www:");
             match self.auth_method {
                 AuthMethod::Agent => {
                     let mut agent = sess.agent()?;
@@ -420,7 +406,7 @@ impl Server {
                         if let (Some(rd), Some(ld)) =
                             (current_remote_dir.as_ref(), current_local_dir)
                         {
-                            match serde_json::from_str::<RemoteFileItem>(&line) {
+                            match serde_json::from_str::<RemoteFileItemOwned>(&line) {
                                 Ok(remote_item) => {
                                     let sync_type = if self.rsync_valve > 0 && remote_item.get_len() > self.rsync_valve {
                                         SyncType::Rsync
@@ -430,7 +416,7 @@ impl Server {
                                     let local_item = FileItem::new(
                                         ld,
                                         rd.as_str(),
-                                        &remote_item,
+                                        remote_item,
                                         sync_type,
                                     );
                                     if local_item.had_changed() {
@@ -525,7 +511,7 @@ mod tests {
     use crate::log_util;
 
     fn load_server_yml() -> Server {
-        Server::load_from_yml("data/servers", "localhost_1.yml").unwrap()
+        Server::load_from_yml("data/servers", "data", "localhost_1.yml").unwrap()
     }
 
     #[test]

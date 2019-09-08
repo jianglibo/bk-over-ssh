@@ -293,7 +293,7 @@ pub fn copy_a_file_item<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data_shape::{FileItem, FileItemProcessResult, RemoteFileItem, Server, SyncType};
+    use crate::data_shape::{FileItem, FileItemProcessResult, RemoteFileItemOwned, Server, SyncType};
     use crate::develope::tutil;
     use crate::log_util;
     use log::*;
@@ -308,10 +308,10 @@ mod tests {
         remote_file_len: u64,
         sync_type: SyncType,
     ) -> Result<FileItemProcessResult, failure::Error> {
-        let ri = RemoteFileItem::new(remote_relative_path, remote_file_len);
-        let fi = FileItem::new(local_base_dir, remote_base_dir, &ri, sync_type);
+        let ri = RemoteFileItemOwned::new(remote_relative_path, remote_file_len);
+        let fi = FileItem::new(local_base_dir, remote_base_dir, ri, sync_type);
         let sftp = session.sftp()?;
-        let mut server = Server::load_from_yml("servers", "localhost")?;
+        let mut server = Server::load_from_yml("servers", "data", "localhost.yml")?;
         server.connect()?;
         let r = copy_a_file_item(&server, &sftp, fi);
         Ok(r)
@@ -331,7 +331,7 @@ mod tests {
     fn t_copy_a_file() -> Result<(), failure::Error> {
         log_util::setup_test_logger_only_self(vec!["actions::copy_file"]);
 
-        let mut server = Server::load_from_yml("servers", "localhost")?;
+        let mut server = Server::load_from_yml("servers","data", "localhost")?;
         server.connect()?;
         server.rsync_valve = 4;
         let test_dir1 = tutil::create_a_dir_and_a_filename("xx.txt")?;
