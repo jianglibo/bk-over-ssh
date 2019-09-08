@@ -52,13 +52,14 @@ mod tests {
 
         let mut server = load_server_yml();
         let sess = server.get_ssh_session();
-        let test_dir = tutil::create_a_dir_and_a_file_with_len("xx.bin", 1024 * 1024 * 4)?;
+        let test_dir = tutil::create_a_dir_and_a_file_with_len("xx.bin", 1024)?;
         let file = test_dir.tmp_file_str();
         let (mut remote_file, stat) = sess.scp_recv(Path::new(&file)).unwrap();
         println!("remote file size: {}", stat.size());
         let mut contents = Vec::new();
         remote_file.read_to_end(&mut contents).unwrap();
-        info!("{:?}", contents);
+        assert_eq!(stat.size(), 1024);
+        assert_eq!(contents.len(), 1024);
         Ok(())
     }
 
