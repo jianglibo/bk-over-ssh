@@ -197,7 +197,10 @@ fn main() -> Result<(), failure::Error> {
                     match Server::load_from_yml_with_app_config(&app_conf, server_config_path) {
                         Ok(mut server) => {
                             match server.sync_dirs(skip_sha1) {
-                                Ok(result) => println!("{:?}", result),
+                                Ok(result) => {
+                                    actions::write_dir_sync_result(&server, &result);
+                                    println!("{:?}", result);
+                                },
                                 Err(err) => error!("sync-dirs failed: {:?}", err),
                             }
                         }

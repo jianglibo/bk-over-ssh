@@ -154,7 +154,7 @@ pub fn copy_a_file_item_sftp<'a>(
                             error!("sha1 didn't match: {:?}, local sha1: {:?}", file_item, sha1);
                             FileItemProcessResult::Sha1NotMatch(local_file_path)
                         } else {
-                            FileItemProcessResult::Successed(local_file_path, SyncType::Sftp)
+                            FileItemProcessResult::Successed(length, local_file_path, SyncType::Sftp)
                         }
                     }
                     Err(err) => {
@@ -168,7 +168,7 @@ pub fn copy_a_file_item_sftp<'a>(
                         if length != file_item.get_remote_item().get_len() {
                             FileItemProcessResult::LengthNotMatch(local_file_path)
                         } else {
-                            FileItemProcessResult::Successed(local_file_path, SyncType::Sftp)
+                            FileItemProcessResult::Successed(length, local_file_path, SyncType::Sftp)
                         }
                     }
                     Err(err) => {
@@ -229,6 +229,7 @@ pub fn copy_a_file_item_rsync<'a>(
         delta_file.restore_seekable(restore_path, old_file)?;
         update_local_file_from_restored(&local_file_path)?;
         Ok(FileItemProcessResult::Successed(
+            0,
             local_file_path,
             SyncType::Rsync,
         ))
@@ -276,7 +277,7 @@ pub fn copy_a_file_item<'a>(
             }
         };
 
-        if let FileItemProcessResult::Successed(_, _) = &copy_result {
+        if let FileItemProcessResult::Successed(_, _, _) = &copy_result {
             if let Err(err) = file_item.set_modified_as_remote() {
                 warn!("set modified as remote failed: {:?}", err);
             } else {
@@ -350,7 +351,7 @@ mod tests {
             SyncType::Sftp,
         )?;
         assert!(
-            if let FileItemProcessResult::Successed(_, SyncType::Sftp) = r {
+            if let FileItemProcessResult::Successed(_, _, SyncType::Sftp) = r {
                 true
             } else {
                 false
@@ -371,7 +372,7 @@ mod tests {
 
         tutil::change_file_content(&local_file_name)?;
         assert!(
-            if let FileItemProcessResult::Successed(_, SyncType::Rsync) = r {
+            if let FileItemProcessResult::Successed(_, _, SyncType::Rsync) = r {
                 true
             } else {
                 false

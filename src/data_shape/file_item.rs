@@ -5,6 +5,7 @@ use filetime;
 use log::*;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
+use serde::Serialize;
 
 #[derive(Debug)]
 pub enum SyncType {
@@ -22,13 +23,13 @@ pub enum FileItemProcessResult {
     Sha1NotMatch(String),
     CopyFailed(String),
     SkipBecauseNoBaseDir,
-    Successed(String, SyncType),
+    Successed(u64, String, SyncType),
     GetLocalPathFailed,
     SftpOpenFailed,
     ReadLineFailed,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Serialize)]
 pub struct FileItemProcessResultStats {
     pub deserialize_failed: u64,
     pub skipped: u64,
@@ -42,6 +43,7 @@ pub struct FileItemProcessResultStats {
     pub get_local_path_failed: u64,
     pub sftp_open_failed: u64,
     pub read_line_failed: u64,
+    pub bytes_transfered: u64,
 }
 
 #[derive(Debug)]

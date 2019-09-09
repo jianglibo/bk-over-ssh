@@ -1,7 +1,7 @@
-use crate::actions::copy_a_file_item;
+use crate::actions::{copy_a_file_item, SyncDirReport};
 use crate::data_shape::{
-    load_remote_item_owned, AppConf, FileItem, FileItemProcessResult, FileItemProcessResultStats,
-    RemoteFileItemOwned, SyncType, string_path,
+    load_remote_item_owned, string_path, AppConf, FileItem, FileItemProcessResult,
+    FileItemProcessResultStats, RemoteFileItemOwned, SyncType,
 };
 use glob::Pattern;
 use log::*;
@@ -10,6 +10,7 @@ use ssh2;
 use std::io::prelude::{BufRead, Read, Write};
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 use std::{fs, io, io::Seek};
 // use tempfile;
 
@@ -117,6 +118,8 @@ pub struct Server {
     _tcp_stream: Option<TcpStream>,
     #[serde(skip)]
     session: Option<ssh2::Session>,
+    #[serde(skip)]
+    report_dir: Option<PathBuf>,
 }
 
 impl Server {
@@ -141,40 +144,23 @@ impl Server {
         self.directories = directories;
     }
 
-    // pub fn guess_server_yml_file(name: impl AsRef<str>) -> Result<PathBuf, failure::Error> {
-    //     let name = name.as_ref();
-
-    //     let server_path = if name.contains('\\') || name.contains('/') {
-    //         Path::new(name).to_path_buf()
-    //     } else {
-    //         let name_only = if !name.ends_with(".yml") {
-    //             format!("{}.yml", name)
-    //         } else {
-    //             name.to_string()
-    //         };
-    //         let sp = std::env::current_exe()?
-    //             .parent()
-    //             .expect("executable's parent should exists.")
-    //             .join("servers")
-    //             .join(&name_only);
-
-    //         if sp.exists() {
-    //             sp
-    //         } else {
-    //             std::env::current_dir()?.join("servers").join(&name_only)
-    //         }
-    //     };
-    //     Ok(server_path)
-    // }
+    pub fn get_dir_sync_report_file(&self) -> PathBuf {
+        self.report_dir
+            .as_ref()
+            .expect("report_dir of server should always exists.")
+            .join("sync_dir_report.json")
+    }
 
     pub fn load_from_yml(
         servers_dir: impl AsRef<Path>,
         data_dir: impl AsRef<str>,
         name: impl AsRef<str>,
     ) -> Result<Server, failure::Error> {
-                trace!("got server yml name: {:?}", name.as_ref());
+        trace!("got server yml name: {:?}", name.as_ref());
         let mut server_yml_path = Path::new(name.as_ref()).to_path_buf();
-        if (server_yml_path.is_absolute() || name.as_ref().starts_with('/')) && !server_yml_path.exists() {
+        if (server_yml_path.is_absolute() || name.as_ref().starts_with('/'))
+            && !server_yml_path.exists()
+        {
             bail!(
                 "server yml file does't exist, please create one: {:?}",
                 server_yml_path
@@ -200,6 +186,12 @@ impl Server {
         let mut server: Server = serde_yaml::from_str(&buf)?;
         let data_dir = data_dir.as_ref();
         let maybe_local_server_base_dir = Path::new(data_dir).join(&server.host);
+        let report_dir = Path::new(data_dir).join("report").join(&server.host);
+        if !report_dir.exists() {
+            fs::create_dir_all(&report_dir)?;
+        }
+        server.report_dir = Some(report_dir);
+
         server.directories.iter_mut().for_each(|d| {
             d.compile_patterns().unwrap();
             trace!("origin directory: {:?}", d);
@@ -279,7 +271,7 @@ impl Server {
                             Err(err) => warn!("can't get key from ssh agent {:?}.", err),
                         }
                     }
-                },
+                }
                 AuthMethod::IdentityFile => {
                     trace!(
                         "about authenticate to {:?} with IdentityFile: {:?}",
@@ -292,10 +284,10 @@ impl Server {
                         Path::new(&self.id_rsa),
                         None,
                     )?;
-                },
+                }
                 AuthMethod::Password => {
                     bail!("password authentication not supported.");
-                },
+                }
             }
             // Ok((None, sess))
             Ok((Some(tcp), sess))
@@ -464,7 +456,10 @@ impl Server {
                 FileItemProcessResult::Sha1NotMatch(_) => accu.sha1_not_match += 1,
                 FileItemProcessResult::CopyFailed(_) => accu.copy_failed += 1,
                 FileItemProcessResult::SkipBecauseNoBaseDir => accu.skip_because_no_base_dir += 1,
-                FileItemProcessResult::Successed(_,_) => accu.successed += 1,
+                FileItemProcessResult::Successed(fl, _,_) => {
+                    accu.bytes_transfered += fl;
+                    accu.successed += 1;
+                   },
                 FileItemProcessResult::GetLocalPathFailed => accu.get_local_path_failed += 1,
                 FileItemProcessResult::SftpOpenFailed => accu.sftp_open_failed += 1,
                 FileItemProcessResult::ReadLineFailed => accu.read_line_failed += 1,
@@ -474,12 +469,11 @@ impl Server {
         Ok(result)
     }
 
-    pub fn sync_dirs(
-        &mut self,
-        skip_sha1: bool,
-    ) -> Result<FileItemProcessResultStats, failure::Error> {
+    pub fn sync_dirs(&mut self, skip_sha1: bool) -> Result<SyncDirReport, failure::Error> {
+        let start = Instant::now();
         self.connect()?;
-        self.start_sync(skip_sha1, Option::<fs::File>::None)
+        let rs = self.start_sync(skip_sha1, Option::<fs::File>::None)?;
+        Ok(SyncDirReport::new(start.elapsed(), rs))
     }
 
     #[allow(dead_code)]
@@ -511,7 +505,7 @@ mod tests {
     use crate::log_util;
 
     fn load_server_yml() -> Server {
-        Server::load_from_yml("data/servers", "data", "localhost_1.yml").unwrap()
+        Server::load_from_yml("data/servers", "data", "localhost.yml").unwrap()
     }
 
     #[test]
@@ -544,7 +538,12 @@ mod tests {
     #[test]
     fn t_connect_server() -> Result<(), failure::Error> {
         // log_util::setup_test_logger_only_self(vec!["data_shape::server"]);
-        log_util::setup_logger_detail(true, "output.log", vec!["data_shape::server"], Some(vec!["ssh2"]))?;
+        log_util::setup_logger_detail(
+            true,
+            "output.log",
+            vec!["data_shape::server"],
+            Some(vec!["ssh2"]),
+        )?;
         let mut server = load_server_yml();
         info!("start connecting...");
         server.connect()?;
@@ -573,12 +572,16 @@ mod tests {
 
     #[test]
     fn t_sync_dirs() -> Result<(), failure::Error> {
-        log_util::setup_logger_detail(true, "output.log", vec!["data_shape::server"], Some(vec!["ssh2"]))?;
+        log_util::setup_logger_detail(
+            true,
+            "output.log",
+            vec!["data_shape::server"],
+            Some(vec!["ssh2"]),
+        )?;
         let mut server = load_server_yml();
         let stats = server.sync_dirs(true)?;
         info!("result {:?}", stats);
         Ok(())
     }
-
 
 }
