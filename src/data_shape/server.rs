@@ -12,7 +12,8 @@ use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 use std::{fs, io, io::Seek};
-// use tempfile;
+use tar::{Archive, Builder};
+use walkdir::WalkDir;
 
 #[derive(Deserialize, Debug)]
 pub enum AuthMethod {
@@ -120,6 +121,8 @@ pub struct Server {
     session: Option<ssh2::Session>,
     #[serde(skip)]
     report_dir: Option<PathBuf>,
+    #[serde(skip)]
+    tar_dir: Option<PathBuf>,
 }
 
 impl Server {
@@ -187,12 +190,17 @@ impl Server {
         let data_dir = data_dir.as_ref();
         let maybe_local_server_base_dir = Path::new(data_dir).join(&server.host);
         let report_dir = Path::new(data_dir).join("report").join(&server.host);
+        let tar_dir = Path::new(data_dir).join("tar").join(&server.host);
         if !report_dir.exists() {
             fs::create_dir_all(&report_dir)?;
         }
+        if !tar_dir.exists() {
+            fs::create_dir_all(&tar_dir)?;
+        }
         server.report_dir = Some(report_dir);
+        server.tar_dir = Some(tar_dir);
 
-        server.directories.iter_mut().for_each(|d| {
+        server.directories.iter_mut().try_for_each(|d| {
             d.compile_patterns().unwrap();
             trace!("origin directory: {:?}", d);
             let ld = d.local_dir.trim();
@@ -209,14 +217,20 @@ impl Server {
             }
 
             let dpath = Path::new(&d.local_dir);
-            if !dpath.is_absolute() {
-                d.local_dir = maybe_local_server_base_dir
-                    .join(&d.local_dir)
+            if dpath.is_absolute() {
+                bail!("the local_dir of a server can't be absolute. {:?}", dpath);
+            } else {
+                let ld_path = maybe_local_server_base_dir.join(&d.local_dir);
+                d.local_dir = ld_path
                     .to_str()
                     .expect("local_dir to_str should success.")
                     .to_string();
+                if ld_path.exists() {
+                    fs::create_dir_all(ld_path)?;
+                }
+                Ok(())
             }
-        });
+        })?;
         trace!(
             "loaded server: {:?}",
             server
@@ -226,6 +240,26 @@ impl Server {
                 .collect::<Vec<String>>()
         );
         Ok(server)
+    }
+
+    fn tar_local(&self) -> Result<(), failure::Error> {
+        if let Some(tf) = self.tar_dir.as_ref() {
+            let file = fs::File::create("foo.tar").unwrap();
+            let mut a = Builder::new(file);
+            a.append_dir_all("bardir", ".").unwrap();
+
+            for dir in self.directories.iter() {
+                let d_path = Path::new(&dir.local_dir);
+                if let Some(d_path_name) = d_path.file_name() {
+                    a.append_dir_all(d_path_name, d_path).unwrap();
+                } else {
+                    error!("dir.local_dir get file_name failed: {:?}", d_path);
+                }
+            }
+        } else {
+            error!("empty tar_dir in the server.");
+        }
+        Ok(())
     }
 
     pub fn load_from_yml_with_app_config(
@@ -486,7 +520,7 @@ impl Server {
         self.start_sync(skip_sha1, Some(from))?;
         Ok(())
     }
-    #[allow(dead_code)]
+
     pub fn load_dirs<'a, O: io::Write>(
         &self,
         out: &'a mut O,
@@ -502,6 +536,7 @@ impl Server {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::develope::tutil;
     use crate::log_util;
 
     fn load_server_yml() -> Server {
@@ -584,4 +619,36 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn t_tar() -> Result<(), failure::Error> {
+        use tar::{Archive, Builder};
+        log_util::setup_logger_detail(
+            true,
+            "output.log",
+            vec!["data_shape::server"],
+            Some(vec!["ssh2"]),
+        )?;
+        let test_dir = tutil::create_a_dir_and_a_file_with_content("a", "cc")?;
+
+        let tar_dir = tutil::TestDir::new();
+        let tar_file_path = tar_dir.tmp_dir_path().join("aa.tar");
+        let tar_file = fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .open(&tar_file_path)?;
+        {
+            let mut a = Builder::new(tar_file);
+            let p = test_dir.tmp_file_str()?;
+            info!("file path: {:?}", p);
+            a.append_file("xx.xx", &mut fs::File::open(&p)?)?;
+        }
+
+        let file = fs::File::open(&tar_file_path)?;
+        let mut a = Archive::new(file);
+        let file = a.entries()?.next().expect("tar entry should have one.");
+        let file = file.unwrap();
+        info!("{:?}", file.header());
+        assert_eq!(file.header().path()?, Path::new("xx.xx"));
+        Ok(())
+    }
 }

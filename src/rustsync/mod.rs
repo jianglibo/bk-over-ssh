@@ -409,7 +409,7 @@ mod tests {
         log_util::setup_logger_empty();
         let start = Instant::now();
         let test_dir = tutil::create_a_dir_and_a_file_with_len("xx.bin", 1024*1024*4)?;
-        let demo_file = test_dir.tmp_file_str();
+        let demo_file = test_dir.tmp_file_str()?;
         let mut sig = Signature::signature_a_file(&demo_file, Some(4096))?;
 
         let sig_out = "target/cc.sig";

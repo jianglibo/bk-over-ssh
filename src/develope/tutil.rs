@@ -1,7 +1,7 @@
-use rand::{Rng};
-use std::path::{PathBuf, Path};
+use rand::Rng;
+use std::path::{Path, PathBuf};
 use std::{fs, io, io::BufRead, io::BufWriter, io::Seek, io::Write};
-use tempfile::{TempDir};
+use tempfile::TempDir;
 
 #[allow(dead_code)]
 pub fn get_a_cursor_writer() -> io::Cursor<Vec<u8>> {
@@ -18,12 +18,13 @@ pub fn count_cursor_lines(mut cursor: io::Cursor<Vec<u8>>) -> usize {
 #[allow(dead_code)]
 pub struct TestDir {
     pub tmp_dir: TempDir,
-    tmp_file: PathBuf,
 }
 
 impl TestDir {
-    pub fn new(tmp_dir: TempDir, tmp_file: PathBuf) -> Self {
-        Self { tmp_dir, tmp_file }
+    pub fn new() -> Self {
+        Self {
+            tmp_dir: TempDir::new().expect("TempDir::new should success."),
+        }
     }
 
     pub fn tmp_dir_path(&self) -> &Path {
@@ -34,27 +35,84 @@ impl TestDir {
         self.tmp_dir_path().to_str().unwrap()
     }
 
-    #[allow(dead_code)]
-    pub fn tmp_file_str(&self) -> &str {
-        self.tmp_file.to_str().unwrap()
+    pub fn tmp_file(&self) -> Result<PathBuf, failure::Error> {
+        Ok(self.tmp_dir.path().read_dir()?.next().unwrap()?.path())
     }
 
     #[allow(dead_code)]
-    pub fn tmp_file_name_only(&self) -> &str {
-        self.tmp_file.file_name().unwrap().to_str().unwrap()
+    pub fn tmp_file_str(&self) -> Result<String, failure::Error> {
+        let de = self.tmp_file()?.to_str().unwrap().to_string();
+        Ok(de)
     }
 
     #[allow(dead_code)]
-    pub fn tmp_file_len(&self) -> u64 {
-        self.tmp_file.metadata().unwrap().len()
+    pub fn tmp_file_name_only(&self) -> Result<String, failure::Error> {
+        Ok(self
+            .tmp_file()?
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string())
+    }
+
+    #[allow(dead_code)]
+    pub fn tmp_file_len(&self) -> Result<u64, failure::Error> {
+        Ok(self.tmp_file()?.metadata().unwrap().len())
+    }
+
+    pub fn make_a_file_with_content(
+        &self,
+        file_name: impl AsRef<str>,
+        content: impl AsRef<str>,
+    ) -> Result<(), failure::Error> {
+        let tmp_file = self.tmp_dir.path().join(file_name.as_ref());
+        let mut tmp_file_writer = BufWriter::new(
+            fs::OpenOptions::new()
+                .write(true)
+                .truncate(true)
+                .create(true)
+                .open(&tmp_file)?,
+        );
+        write!(tmp_file_writer, "{}", content.as_ref())?;
+        Ok(())
+    }
+
+    pub fn make_a_file_with_len(
+        &self,
+        file_name: impl AsRef<str>,
+        file_len: usize,
+    ) -> Result<(), failure::Error> {
+        let tmp_file = self.tmp_dir.path().join(file_name.as_ref());
+
+        let mut tmp_file_writer = BufWriter::new(
+            fs::OpenOptions::new()
+                .write(true)
+                .truncate(true)
+                .create(true)
+                .open(&tmp_file)?,
+        );
+
+        let mut rng = rand::thread_rng();
+        (0..)
+            .take(file_len)
+            .map(|_| rng.gen::<u8>())
+            .try_for_each(|c| {
+                let x: Result<(), failure::Error> = tmp_file_writer
+                    .write(&[c])
+                    .map(|_| ())
+                    .map_err(|e| e.into());
+                x
+            })?;
+        Ok(())
     }
 }
 
 #[allow(dead_code)]
 pub fn create_a_dir_and_a_filename(file_name: impl AsRef<str>) -> Result<TestDir, failure::Error> {
-    let tmp_dir = TempDir::new()?;
-    let tmp_file = tmp_dir.path().join(file_name.as_ref());
-    Ok(TestDir::new(tmp_dir, tmp_file))
+    let td = TestDir::new();
+    td.make_a_file_with_content(file_name, "")?;
+    Ok(td)
 }
 
 #[allow(dead_code)]
@@ -62,17 +120,9 @@ pub fn create_a_dir_and_a_file_with_content(
     file_name: impl AsRef<str>,
     content: impl AsRef<str>,
 ) -> Result<TestDir, failure::Error> {
-    let tmp_dir = TempDir::new()?;
-    let tmp_file = tmp_dir.path().join(file_name.as_ref());
-    let mut tmp_file_writer = BufWriter::new(
-        fs::OpenOptions::new()
-            .write(true)
-            .truncate(true)
-            .create(true)
-            .open(&tmp_file)?,
-    );
-    write!(tmp_file_writer, "{}", content.as_ref())?;
-    Ok(TestDir::new(tmp_dir, tmp_file))
+    let td = TestDir::new();
+    td.make_a_file_with_content(file_name, content)?;
+    Ok(td)
 }
 
 #[allow(dead_code)]
@@ -80,33 +130,16 @@ pub fn create_a_dir_and_a_file_with_len(
     file_name: impl AsRef<str>,
     file_len: usize,
 ) -> Result<TestDir, failure::Error> {
-    let tmp_dir = TempDir::new()?;
-    let tmp_file = tmp_dir.path().join(file_name.as_ref());
-
-    let mut tmp_file_writer = BufWriter::new(
-        fs::OpenOptions::new()
-            .write(true)
-            .truncate(true)
-            .create(true)
-            .open(&tmp_file)?,
-    );
-
-    let mut rng = rand::thread_rng();
-    (0..)
-        .take(file_len)
-        .map(|_| rng.gen::<u8>())
-        .try_for_each(|c| {
-            let x: Result<(), failure::Error> = tmp_file_writer
-                .write(&[c])
-                .map(|_| ())
-                .map_err(|e| e.into());
-            x
-        })?;
-    Ok(TestDir::new(tmp_dir, tmp_file))
+    let td = TestDir::new();
+    td.make_a_file_with_len(file_name, file_len)?;
+    Ok(td)
 }
 
+#[allow(dead_code)]
 pub fn change_file_content(file_path: impl AsRef<Path>) -> Result<(), failure::Error> {
-    let mut f = fs::OpenOptions::new().append(true).open(file_path.as_ref())?;
+    let mut f = fs::OpenOptions::new()
+        .append(true)
+        .open(file_path.as_ref())?;
     write!(f, "hello")?;
     Ok(())
 }

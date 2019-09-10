@@ -338,7 +338,7 @@ mod tests {
         let test_dir1 = tutil::create_a_dir_and_a_filename("xx.txt")?;
         let local_file_name = test_dir1.tmp_dir.path().join("yy.txt");
         let test_dir2 = tutil::create_a_dir_and_a_file_with_content("yy.txt", "hello")?;
-        let remote_file_name = test_dir2.tmp_file_name_only();
+        let remote_file_name = test_dir2.tmp_file_name_only()?;
 
         info!("{:?}, local: {:?}", remote_file_name, local_file_name);
         // let result = panic::catch_unwind(|| {
@@ -346,8 +346,8 @@ mod tests {
             server.get_ssh_session(),
             test_dir1.tmp_dir_path(),
             test_dir2.tmp_dir_str(),
-            remote_file_name,
-            test_dir2.tmp_file_len(),
+            remote_file_name.as_str(),
+            test_dir2.tmp_file_len()?,
             SyncType::Sftp,
         )?;
         assert!(
@@ -365,8 +365,8 @@ mod tests {
             server.get_ssh_session(),
             test_dir1.tmp_dir_path(),
             test_dir2.tmp_dir_str(),
-            test_dir2.tmp_file_name_only(),
-            test_dir2.tmp_file_len(),
+            test_dir2.tmp_file_name_only()?.as_str(),
+            test_dir2.tmp_file_len()?,
             SyncType::Rsync,
         )?;
 
@@ -384,8 +384,8 @@ mod tests {
             server.get_ssh_session(),
             test_dir1.tmp_dir_path(),
             test_dir2.tmp_dir_str(),
-            test_dir2.tmp_file_name_only(),
-            test_dir2.tmp_file_len(),
+            test_dir2.tmp_file_name_only()?.as_str(),
+            test_dir2.tmp_file_len()?,
             SyncType::Rsync,
         )?;
         Ok(())

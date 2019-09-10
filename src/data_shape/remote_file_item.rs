@@ -131,7 +131,6 @@ pub fn load_remote_item_owned<O: io::Write>(
                 .filter_map(|d| directory.match_path(d))
                 .filter_map(|d| RemoteFileItemOwned::from_path(&base_path, d, skip_sha1))
                 .for_each(|owned| {
-                    // let it = RemoteFileItemOwned::from(&owned);
                     match serde_json::to_string(&owned) {
                         Ok(line) => {
                             if let Err(err) = writeln!(out, "{}", line) {
