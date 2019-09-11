@@ -1,6 +1,8 @@
+use crate::data_shape::PruneStrategy;
 use chrono::{DateTime, Datelike, FixedOffset, TimeZone, Timelike, Utc};
 use log::*;
 use std::collections::HashMap;
+use std::convert::TryInto;
 use std::path::{Component, Path, PathBuf};
 use std::{fs, io};
 
@@ -129,8 +131,8 @@ fn get_file_copy_vec(
 fn group_file_copies(
     dir_entrys: Vec<FileCopy>,
     group_period: GroupPeriod,
-) -> Result<HashMap<i32, Vec<FileCopy>>, failure::Error> {
-    Ok(dir_entrys
+) -> HashMap<i32, Vec<FileCopy>> {
+    dir_entrys
         .into_iter()
         .fold(HashMap::<i32, Vec<FileCopy>>::new(), |mut mp, fc| {
             let s = match &group_period {
@@ -151,7 +153,101 @@ fn group_file_copies(
             };
             mp.entry(s).or_insert_with(Vec::new).push(fc);
             mp
-        }))
+        })
+}
+
+fn prune_period(
+    mut mp: HashMap<i32, Vec<FileCopy>>,
+    keep_num: usize,
+) -> (Vec<FileCopy>, Vec<FileCopy>) {
+    let mut keys = mp.keys().cloned().collect::<Vec<i32>>();
+    keys.sort_unstable(); // 2012, 2013, 2014
+    keys.reverse(); // [2014, 2013, 2012]
+
+    let mut file_copies_to_delete: Vec<FileCopy> = Vec::new();
+    let mut file_copies_to_remain: Vec<FileCopy> = Vec::new();
+
+    if keys.len() > keep_num {
+        // delete yearly copy more than specified number.
+        let (remains, about_delete) = keys.split_at(keep_num);
+        for it in about_delete {
+            if let Some(mut cfs) = mp.remove(it) {
+                file_copies_to_delete.append(&mut cfs);
+            }
+        }
+        if let Some((latest, others)) = remains.split_first() {
+            for it in others {
+                // except latest year all others years keep the last file copy.
+                if let Some(mut cfs) = mp.remove(it) {
+                    if !cfs.is_empty() {
+                        cfs.remove(0);
+                        file_copies_to_delete.append(&mut cfs);
+                    }
+                }
+            }
+
+            if let Some(last_year_copies) = mp.remove(latest) {
+                file_copies_to_remain = last_year_copies;
+            }
+        }
+    }
+
+    (file_copies_to_remain, file_copies_to_delete)
+}
+
+#[allow(dead_code)]
+fn prune_dir_result(
+    prune_strategy: &PruneStrategy,
+    dir: impl AsRef<Path>,
+    name_stem: impl AsRef<str>,
+    name_ext_with_dot: impl AsRef<str>,
+) -> Result<(Vec<FileCopy>, Vec<FileCopy>), failure::Error> {
+    let mv = get_file_copy_vec(dir, name_stem, name_ext_with_dot)?;
+    let mut all_to_delete: Vec<FileCopy> = Vec::new();
+
+    let mp = group_file_copies(mv, GroupPeriod::Yearly); // yearly
+    let keep_num: usize = prune_strategy.yearly.try_into().unwrap();
+    let (to_remain, mut to_delete) = prune_period(mp, keep_num);
+    all_to_delete.append(&mut to_delete);
+
+    let to_remain = if prune_strategy.weekly > 0 {
+        let keep_num: usize = prune_strategy.weekly.try_into().unwrap();
+        let mp = group_file_copies(to_remain, GroupPeriod::Weekly); // yearly
+        let (to_remain, mut to_delete) = prune_period(mp, keep_num);
+        all_to_delete.append(&mut to_delete);
+        to_remain
+    } else {
+        let keep_num: usize = prune_strategy.monthly.try_into().unwrap();
+        let mp = group_file_copies(to_remain, GroupPeriod::Monthly); // yearly
+        let (to_remain, mut to_delete) = prune_period(mp, keep_num);
+        all_to_delete.append(&mut to_delete);
+        to_remain
+    };
+
+    let keep_num: usize = prune_strategy.daily.try_into().unwrap();
+    let mp = group_file_copies(to_remain, GroupPeriod::Daily); // yearly
+    let (to_remain, mut to_delete) = prune_period(mp, keep_num);
+    all_to_delete.append(&mut to_delete);
+    Ok((to_remain, all_to_delete))
+}
+
+fn do_prune_dir(
+    prune_strategy: &PruneStrategy,
+    dir: impl AsRef<Path>,
+    name_stem: impl AsRef<str>,
+    name_ext_with_dot: impl AsRef<str>,
+) -> Result<(), failure::Error> {
+    let (_to_remain, mut to_delete) =
+        prune_dir_result(prune_strategy, dir, name_stem, name_ext_with_dot)?;
+    for d in to_delete {
+        let p = d.dir_entry.path();
+        if d.dir_entry.metadata()?.file_type().is_file() {
+            fs::remove_file(p)?;
+        } else {
+            fs::remove_dir_all(p)?;
+        }
+    }
+    Ok(())
 }
 
 // fn group_file_copies(
@@ -171,7 +267,7 @@ fn group_file_copies(
 
 /// monthly, weekly, daily, hourly, minutely,
 /// The file name pattern is yyyyMMddHHmmss 14 chars.
-#[allow(dead_code)]
+
 pub fn get_next_file_name(
     dir: impl AsRef<Path>,
     name_stem: impl AsRef<str>,
@@ -211,7 +307,7 @@ mod tests {
 
         let t_name = t_dir.tmp_dir_path();
         let mv = get_file_copy_vec(t_name, "abc_", ".tar")?;
-        let mp = group_file_copies(mv, GroupPeriod::Weekly)?; // yearly result.
+        let mp = group_file_copies(mv, GroupPeriod::Weekly); // yearly result.
 
         let dt = Utc.ymd(2013, 1, 1).and_hms(1, 1, 55);
         assert_eq!(dt.iso_week().year(), 2013);
@@ -328,15 +424,15 @@ mod tests {
 
         let t_name = t_dir.tmp_dir_path();
         let mv = get_file_copy_vec(t_name, "abc_", ".tar")?;
-        let mp = group_file_copies(mv, GroupPeriod::Yearly)?; // yearly result.
+        let mp = group_file_copies(mv, GroupPeriod::Yearly); // yearly result.
         info!("{:?}", mp);
         assert_eq!(mp.keys().len(), 3);
 
-        assert!(mp.keys().collect::<Vec<&i32>>().contains(&&2013));
+        assert!(mp.keys().any(|&x| x == 2013));
 
-        assert!(mp.keys().collect::<Vec<&i32>>().contains(&&2014));
+        assert!(mp.keys().any(|&x| x == 2014));
 
-        assert!(mp.keys().collect::<Vec<&i32>>().contains(&&2015));
+        assert!(mp.keys().any(|&x| x == 2015));
 
         let v2013 = mp
             .get(&2013)
@@ -367,8 +463,8 @@ mod tests {
 
         assert_eq!(keys, [&2013, &2014, &2015]); // keep last copy of the 2013s and 2014s.
 
-        let mv = mp.get(&2013).map(|v| {
-            if let Some((last, elements)) = v.split_last() {
+        let _mv = mp.get(&2013).map(|v| {
+            if let Some((_last, elements)) = v.split_last() {
                 elements.iter().for_each(|vv| info!("{:?}", vv.dir_entry));
             }
             Option::<u8>::None
