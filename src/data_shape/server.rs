@@ -103,6 +103,16 @@ impl Directory {
 }
 
 #[derive(Deserialize)]
+pub struct PruneStrategy {
+    pub yearly: u8,
+    pub monthly: u8,
+    pub weekly: u8,
+    pub daily: u8,
+    pub hourly: u8,
+    pub minutely: u8,
+}
+
+#[derive(Deserialize)]
 pub struct Server {
     pub id_rsa: String,
     pub id_rsa_pub: String,
@@ -115,6 +125,7 @@ pub struct Server {
     pub username: String,
     pub rsync_valve: u64,
     pub directories: Vec<Directory>,
+    pub prune_strategy: PruneStrategy,
     #[serde(skip)]
     _tcp_stream: Option<TcpStream>,
     #[serde(skip)]
@@ -539,6 +550,15 @@ mod tests {
     use crate::develope::tutil;
     use crate::log_util;
 
+    fn log() {
+        log_util::setup_logger_detail(
+            true,
+            "output.log",
+            vec!["data_shape::server"],
+            Some(vec!["ssh2"]),
+        ).expect("init log should success.");
+    }
+
     fn load_server_yml() -> Server {
         Server::load_from_yml("data/servers", "data", "localhost.yml").unwrap()
     }
@@ -572,13 +592,7 @@ mod tests {
 
     #[test]
     fn t_connect_server() -> Result<(), failure::Error> {
-        // log_util::setup_test_logger_only_self(vec!["data_shape::server"]);
-        log_util::setup_logger_detail(
-            true,
-            "output.log",
-            vec!["data_shape::server"],
-            Some(vec!["ssh2"]),
-        )?;
+        log();
         let mut server = load_server_yml();
         info!("start connecting...");
         server.connect()?;
@@ -607,12 +621,7 @@ mod tests {
 
     #[test]
     fn t_sync_dirs() -> Result<(), failure::Error> {
-        log_util::setup_logger_detail(
-            true,
-            "output.log",
-            vec!["data_shape::server"],
-            Some(vec!["ssh2"]),
-        )?;
+        log();
         let mut server = load_server_yml();
         let stats = server.sync_dirs(true)?;
         info!("result {:?}", stats);

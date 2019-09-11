@@ -17,3 +17,10 @@ directories:
     excludes:
       - "*.log"
       - "*.bak"
+prune_strategy:
+  yearly: 1
+  monthly: 1
+  weekly: 1
+  daily: 3
+  hourly: 1
+  minutely: 1

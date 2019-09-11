@@ -1,12 +1,53 @@
+use chrono::{DateTime, Datelike, FixedOffset, TimeZone, Timelike, Utc};
 use log::*;
 use std::collections::HashMap;
-use std::path::{Component, Path};
+use std::path::{Component, Path, PathBuf};
 use std::{fs, io};
 
 #[derive(Debug)]
 struct FileCopy {
     pub dir_entry: fs::DirEntry,
-    pub copy_trait: String,
+    pub copy_trait: DateTime<Utc>,
+}
+
+enum GroupPeriod {
+    Yearly,
+    Monthly,
+    Weekly,
+    Daily,
+    Hourly,
+    Minutely,
+}
+
+fn format_dt(
+    dt: DateTime<Utc>,
+    name_stem: impl AsRef<str>,
+    name_ext_with_dot: impl AsRef<str>,
+) -> String {
+    let s = format!(
+        "{}%Y%m%d%H%M%S{}",
+        name_stem.as_ref(),
+        name_ext_with_dot.as_ref()
+    );
+    dt.format(&s).to_string()
+}
+
+fn parse_date_time(ss: impl AsRef<str>) -> Result<DateTime<FixedOffset>, failure::Error> {
+    let ss = ss.as_ref();
+    if ss.len() != 14 {
+        bail!("not a 14 digitals string.");
+    }
+    let s = format!(
+        "{}-{}-{}T{}:{}:{}Z",
+        &ss[0..4],
+        &ss[4..6],
+        &ss[6..8],
+        &ss[8..10],
+        &ss[10..12],
+        &ss[12..14]
+    );
+    DateTime::parse_from_rfc3339(&s)
+        .map_err(|e| failure::format_err!("parse_from_rfc3339 failed.{:?}", e))
 }
 
 fn dir_entry_matches(
@@ -32,11 +73,15 @@ fn dir_entry_matches(
                         .next()
                         .expect("strip name_ext_with_dot should success")
                         .to_string();
-                    let fc = FileCopy {
-                        dir_entry,
-                        copy_trait,
-                    };
-                    return Ok(Some(fc));
+                    if let Ok(copy_trait) = parse_date_time(&copy_trait) {
+                        let fc = FileCopy {
+                            dir_entry,
+                            copy_trait: copy_trait.into(),
+                        };
+                        return Ok(Some(fc));
+                    } else {
+                        warn!("parse_date_time failed.");
+                    }
                 } else {
                     warn!(
                         "skip item in directory: {:?}, name_stem: {:?}, name_ext_with_dot: {:?}",
@@ -77,25 +122,52 @@ fn get_file_copy_vec(
             }
         })
         .collect::<Vec<FileCopy>>();
-
-    dir_entrys.sort_unstable_by_key(|k| k.copy_trait.clone());
+    dir_entrys.sort_unstable_by_key(|k| k.copy_trait);
     Ok(dir_entrys)
 }
 
 fn group_file_copies(
     dir_entrys: Vec<FileCopy>,
-    compare_char_len: usize,
-) -> Result<HashMap<String, Vec<FileCopy>>, failure::Error> {
+    group_period: GroupPeriod,
+) -> Result<HashMap<i32, Vec<FileCopy>>, failure::Error> {
     Ok(dir_entrys
         .into_iter()
-        .fold(HashMap::<String, Vec<FileCopy>>::new(), |mut mp, fc| {
-            let mut s = fc.copy_trait.clone();
-            s.replace_range(compare_char_len.., "");
-
+        .fold(HashMap::<i32, Vec<FileCopy>>::new(), |mut mp, fc| {
+            let s = match &group_period {
+                GroupPeriod::Yearly => fc.copy_trait.year(),
+                GroupPeriod::Monthly => fc.copy_trait.month() as i32,
+                GroupPeriod::Weekly => {
+                    let isow = fc.copy_trait.iso_week();
+                    let y = fc.copy_trait.year();
+                    if y != isow.year() {
+                        (isow.week() - 53) as i32
+                    } else {
+                        isow.week() as i32
+                    }
+                }
+                GroupPeriod::Daily => fc.copy_trait.day() as i32,
+                GroupPeriod::Hourly => fc.copy_trait.hour() as i32,
+                GroupPeriod::Minutely => fc.copy_trait.minute() as i32,
+            };
             mp.entry(s).or_insert_with(Vec::new).push(fc);
             mp
         }))
 }
+
+// fn group_file_copies(
+//     dir_entrys: Vec<FileCopy>,
+//     compare_char_len: usize,
+// ) -> Result<HashMap<String, Vec<FileCopy>>, failure::Error> {
+//     Ok(dir_entrys
+//         .into_iter()
+//         .fold(HashMap::<String, Vec<FileCopy>>::new(), |mut mp, fc| {
+//             let mut s = fc.copy_trait.clone();
+//             s.replace_range(compare_char_len.., "");
+
+//             mp.entry(s).or_insert_with(Vec::new).push(fc);
+//             mp
+//         }))
+// }
 
 /// monthly, weekly, daily, hourly, minutely,
 /// The file name pattern is yyyyMMddHHmmss 14 chars.
@@ -104,15 +176,13 @@ pub fn get_next_file_name(
     dir: impl AsRef<Path>,
     name_stem: impl AsRef<str>,
     name_ext_with_dot: impl AsRef<str>,
-) -> Result<String, failure::Error> {
+) -> PathBuf {
     let dir = dir.as_ref();
     let name_stem = name_stem.as_ref();
     let name_ext_with_dot = name_ext_with_dot.as_ref();
 
-    let mv = get_file_copy_vec(dir, name_stem, name_ext_with_dot)?;
-    let mp = group_file_copies(mv, 1);
-    info!("dir_entry: {:?}", mp);
-    Ok("".to_string())
+    let s = format_dt(Utc::now(), name_stem, name_ext_with_dot);
+    dir.join(&s)
 }
 
 #[cfg(test)]
@@ -120,25 +190,90 @@ mod tests {
     use super::*;
     use crate::develope::tutil;
     use crate::log_util;
-    use chrono::{DateTime, TimeZone, Utc};
+    use chrono::{DateTime, Datelike, TimeZone, Timelike, Utc};
 
-    #[test]
-    fn t_chrono() {
-        // let dt = Utc.now();
-        let dt = Utc.ymd(2014, 11, 28).and_hms(12, 0, 9);
-        assert_eq!(dt.format("%Y%m%d%H%M%S").to_string(), "20141128120009");
-    }
-
-    #[test]
-    fn t_rolling_file_1() -> Result<(), failure::Error> {
+    fn log() {
         log_util::setup_logger_detail(
             true,
             "output.log",
             vec!["data_shape::rolling_files"],
             Some(vec!["ssh2"]),
-        )?;
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn t_weekly() -> Result<(), failure::Error> {
+        log();
+        let t_dir = tutil::create_a_dir_and_a_file_with_content("abc_20130101010155.tar", "abc")?;
+        t_dir.make_a_file_with_content("abc_20130110120009.tar", "abc")?;
+        t_dir.make_a_file_with_content("abc_20130117120009.tar", "abc")?;
+
+        let t_name = t_dir.tmp_dir_path();
+        let mv = get_file_copy_vec(t_name, "abc_", ".tar")?;
+        let mp = group_file_copies(mv, GroupPeriod::Weekly)?; // yearly result.
+
+        let dt = Utc.ymd(2013, 1, 1).and_hms(1, 1, 55);
+        assert_eq!(dt.iso_week().year(), 2013);
+        assert_eq!(dt.iso_week().week(), 1);
+
+        let dt = Utc.ymd(2014, 1, 1).and_hms(1, 1, 55);
+        assert_eq!(dt.iso_week().year(), 2014);
+        assert_eq!(dt.iso_week().week(), 1);
+
+        let dt = Utc.ymd(2015, 12, 31).and_hms(23, 1, 55);
+        assert_eq!(dt.iso_week().year(), 2015);
+        assert_eq!(dt.iso_week().week(), 53);
+
+        let mut keys = mp.keys().collect::<Vec<&i32>>();
+        keys.sort_unstable();
+        assert_eq!(keys, [&1, &2, &3]); // weekly.
+        Ok(())
+    }
+
+    #[test]
+    fn t_chrono() -> Result<(), failure::Error> {
+        log();
         let dt = Utc.ymd(2014, 11, 28).and_hms(12, 0, 9);
-        let file_name = dt.format("abc_%Y%m%d%H%M%S.tar").to_string();
+        info!("{:?}", dt); // 2014-11-28T12:00:09Z
+
+        let dt_parsed = DateTime::parse_from_rfc3339("2014-11-28T12:00:09Z")?;
+        assert_eq!(dt, dt_parsed);
+
+        assert_eq!(format_dt(dt, "", "").to_string(), "20141128120009");
+        let ss = "20141128120009";
+        assert_eq!(ss.len(), 14);
+        let s = format!(
+            "{}-{}-{}T{}:{}:{}Z",
+            &ss[0..4],
+            &ss[4..6],
+            &ss[6..8],
+            &ss[8..10],
+            &ss[10..12],
+            &ss[12..14]
+        );
+        assert_eq!(s, "2014-11-28T12:00:09Z");
+
+        assert_eq!(dt.year(), 2014);
+        assert_eq!(dt.month(), 11);
+        assert_eq!(dt.day(), 28);
+        assert_eq!(dt.hour(), 12);
+        assert_eq!(dt.minute(), 0);
+        assert_eq!(dt.second(), 9);
+        assert_eq!(dt.iso_week().week(), 48);
+
+        // let dt1 = DateTime::parse_from_str("20141128120009UTC", "%Y%m%d%H%M%S")?;
+        // info!("origin: {:?}, parsed: {:?}", dt, dt1);
+        // assert_eq!(dt, dt1);
+
+        Ok(())
+    }
+
+    #[test]
+    fn t_rolling_file_1() -> Result<(), failure::Error> {
+        log();
+        let dt = Utc.ymd(2014, 11, 28).and_hms(12, 0, 9);
+        let file_name = format_dt(dt, "abc_", ".tar");
         let t_dir = tutil::create_a_dir_and_a_file_with_content(&file_name, "abc")?;
         let t_name = t_dir.tmp_dir_path();
         let de = dir_entry_matches(
@@ -148,25 +283,23 @@ mod tests {
             ".tar",
         )?
         .expect("result has some.");
-        assert_eq!(de.copy_trait.as_str(), "20141128120009");
+        assert_eq!(de.copy_trait, dt);
 
         let de = dir_entry_matches(
             t_name,
             t_name.read_dir()?.next().expect("at least has one."),
             "abc_",
             "",
-        )?
-        .expect("result has some.");
-        assert_eq!(de.copy_trait.as_str(), "20141128120009.tar");
+        )?;
+        assert!(de.is_none());
 
         let de = dir_entry_matches(
             t_name,
             t_name.read_dir()?.next().expect("at least has one."),
             "",
             "",
-        )?
-        .expect("result has some.");
-        assert_eq!(de.copy_trait.as_str(), file_name.as_str());
+        )?;
+        assert!(de.is_none());
 
         let de = dir_entry_matches(
             t_name,
@@ -180,13 +313,7 @@ mod tests {
 
     #[test]
     fn t_rolling_file_2() -> Result<(), failure::Error> {
-        log_util::setup_logger_detail(
-            true,
-            "output.log",
-            vec!["data_shape::rolling_files"],
-            Some(vec!["ssh2"]),
-        )?;
-
+        log();
         let t_dir = tutil::create_a_dir_and_a_file_with_content("abc_20131128120009.tar", "abc")?;
         t_dir.make_a_file_with_content("abc_20131028120009.tar", "abc")?;
         t_dir.make_a_file_with_content("abc_20130928120009.tar", "abc")?;
@@ -201,73 +328,51 @@ mod tests {
 
         let t_name = t_dir.tmp_dir_path();
         let mv = get_file_copy_vec(t_name, "abc_", ".tar")?;
-        let mp = group_file_copies(mv, 3)?;
-        info!("{:?}", mp);
-        assert_eq!(mp.keys().len(), 1);
-        assert_eq!(mp.keys().next().expect("at least one key."), "201");
-
-        let mv = get_file_copy_vec(t_name, "abc_", ".tar")?;
-        let mp = group_file_copies(mv, 4)?; // yearly result.
+        let mp = group_file_copies(mv, GroupPeriod::Yearly)?; // yearly result.
         info!("{:?}", mp);
         assert_eq!(mp.keys().len(), 3);
-        assert!(mp
-            .keys()
-            .collect::<Vec<&String>>()
-            .contains(&&"2013".to_string()));
-        assert!(mp
-            .keys()
-            .collect::<Vec<&String>>()
-            .contains(&&"2014".to_string()));
-        assert!(mp
-            .keys()
-            .collect::<Vec<&String>>()
-            .contains(&&"2015".to_string()));
+
+        assert!(mp.keys().collect::<Vec<&i32>>().contains(&&2013));
+
+        assert!(mp.keys().collect::<Vec<&i32>>().contains(&&2014));
+
+        assert!(mp.keys().collect::<Vec<&i32>>().contains(&&2015));
 
         let v2013 = mp
-            .get("2013")
+            .get(&2013)
             .expect("has value.")
             .iter()
-            .map(|fc| fc.copy_trait.clone())
-            .collect::<Vec<String>>();
-        assert_eq!(
-            v2013,
-            ["20130928120009", "20131028120009", "20131128120009"]
-        );
+            .map(|fc| fc.copy_trait.month())
+            .collect::<Vec<u32>>();
+        assert_eq!(v2013, [9, 10, 11]);
 
         let v2014 = mp
-            .get("2014")
+            .get(&2014)
             .expect("has value.")
             .iter()
-            .map(|fc| fc.copy_trait.clone())
-            .collect::<Vec<String>>();
-        assert_eq!(
-            v2014,
-            ["20140128120009", "20140228120009", "20140328120009"]
-        );
+            .map(|fc| fc.copy_trait.month())
+            .collect::<Vec<u32>>();
+        assert_eq!(v2014, [1, 2, 3]);
 
         let v2015 = mp
-            .get("2015")
+            .get(&2015)
             .expect("has value.")
             .iter()
-            .map(|fc| fc.copy_trait.clone())
-            .collect::<Vec<String>>();
-        assert_eq!(
-            v2015,
-            ["20150101120009", "20150102120009", "20150103120009"]
-        );
+            .map(|fc| fc.copy_trait.day())
+            .collect::<Vec<u32>>();
+        assert_eq!(v2015, [1, 2, 3]);
 
-        let mut keys = mp.keys().map(String::as_str).collect::<Vec<&str>>();
+        let mut keys = mp.keys().collect::<Vec<&i32>>();
         keys.sort_unstable();
 
-        assert_eq!(keys, ["2013", "2014", "2015"]); // keep last copy of the 2013s and 2014s.
+        assert_eq!(keys, [&2013, &2014, &2015]); // keep last copy of the 2013s and 2014s.
 
-        let mv = mp.get("2013").map(|v| {
+        let mv = mp.get(&2013).map(|v| {
             if let Some((last, elements)) = v.split_last() {
                 elements.iter().for_each(|vv| info!("{:?}", vv.dir_entry));
             }
             Option::<u8>::None
         });
-
         Ok(())
     }
 
