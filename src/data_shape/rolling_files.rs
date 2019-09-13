@@ -12,6 +12,35 @@ struct FileCopy {
     pub copy_trait: DateTime<Utc>,
 }
 
+#[derive(Debug)]
+struct FileCopies {
+    inner: HashMap<i32, Vec<FileCopy>>,
+}
+
+impl FileCopies {
+    pub fn take_latest(&mut self) -> Option<Vec<FileCopy>> {
+        let mut keys = self.inner.keys().cloned().collect::<Vec<i32>>();
+        keys.sort_unstable(); // 2012, 2013, 2014
+        if let Some(i) = keys.last() {
+            self.inner.remove(i)
+        } else {
+            None
+        }
+    }
+
+    pub fn set_mp(&mut self, mp: HashMap<i32, Vec<FileCopy>>) {
+        self.inner = mp;
+    }
+
+    pub fn count_fcs(&self) -> usize {
+        self.inner.values().map(|v| v.len()).sum()
+    }
+
+    pub fn take_remains(&mut self) -> Vec<FileCopy> {
+        self.inner.values_mut().flat_map(|v| v.drain(..)).collect()
+    }
+}
+
 enum GroupPeriod {
     Yearly,
     Monthly,
@@ -22,7 +51,7 @@ enum GroupPeriod {
 }
 
 fn format_dt(
-    dt: DateTime<Utc>,
+    dt: &DateTime<Utc>,
     name_stem: impl AsRef<str>,
     name_ext_with_dot: impl AsRef<str>,
 ) -> String {
@@ -128,6 +157,7 @@ fn get_file_copy_vec(
     Ok(dir_entrys)
 }
 
+/// dir_entrys were orderby time asc.
 fn group_file_copies(
     dir_entrys: Vec<FileCopy>,
     group_period: GroupPeriod,
@@ -159,40 +189,35 @@ fn group_file_copies(
 fn prune_period(
     mut mp: HashMap<i32, Vec<FileCopy>>,
     keep_num: usize,
-) -> (Vec<FileCopy>, Vec<FileCopy>) {
+) -> (FileCopies, Vec<FileCopy>) {
     let mut keys = mp.keys().cloned().collect::<Vec<i32>>();
     keys.sort_unstable(); // 2012, 2013, 2014
     keys.reverse(); // [2014, 2013, 2012]
 
     let mut file_copies_to_delete: Vec<FileCopy> = Vec::new();
-    let mut file_copies_to_remain: Vec<FileCopy> = Vec::new();
-
+    // let mut file_copies_to_remain: Vec<FileCopy> = Vec::new();
     if keys.len() > keep_num {
-        // delete yearly copy more than specified number.
+        // delete copy more than specified number.
         let (remains, about_delete) = keys.split_at(keep_num);
         for it in about_delete {
             if let Some(mut cfs) = mp.remove(it) {
                 file_copies_to_delete.append(&mut cfs);
             }
         }
-        if let Some((latest, others)) = remains.split_first() {
+        if let Some((_latest, others)) = remains.split_first() {
             for it in others {
                 // except latest year all others years keep the last file copy.
-                if let Some(mut cfs) = mp.remove(it) {
+                if let Some(cfs) = mp.get_mut(it) {
                     if !cfs.is_empty() {
-                        cfs.remove(0);
-                        file_copies_to_delete.append(&mut cfs);
+                        file_copies_to_delete.append(&mut cfs.drain(0..cfs.len() - 1).collect());
+                    } else {
+                        warn!("file copy items can't be empty.");
                     }
                 }
             }
-
-            if let Some(last_year_copies) = mp.remove(latest) {
-                file_copies_to_remain = last_year_copies;
-            }
         }
     }
-
-    (file_copies_to_remain, file_copies_to_delete)
+    (FileCopies { inner: mp }, file_copies_to_delete)
 }
 
 #[allow(dead_code)]
@@ -202,33 +227,98 @@ fn prune_dir_result(
     name_stem: impl AsRef<str>,
     name_ext_with_dot: impl AsRef<str>,
 ) -> Result<(Vec<FileCopy>, Vec<FileCopy>), failure::Error> {
+    // order by created time asc.
     let mv = get_file_copy_vec(dir, name_stem, name_ext_with_dot)?;
+
     let mut all_to_delete: Vec<FileCopy> = Vec::new();
+    let mut all_remains: Vec<FileCopy> = Vec::new();
 
     let mp = group_file_copies(mv, GroupPeriod::Yearly); // yearly
     let keep_num: usize = prune_strategy.yearly.try_into().unwrap();
-    let (to_remain, mut to_delete) = prune_period(mp, keep_num);
-    all_to_delete.append(&mut to_delete);
+    // to_remain may contains another years' data. how to identify this problem.
 
-    let to_remain = if prune_strategy.weekly > 0 {
+    let (mut file_copies, mut to_delete) = prune_period(mp, keep_num);
+    let lastest_remain = file_copies
+        .take_latest()
+        .expect("yearly latest remains should't empty.");
+    all_remains.append(&mut file_copies.take_remains());
+    all_to_delete.append(&mut to_delete);
+    trace!(
+        "yearly keep_num: {:?}, to_remain: {:?}, to_delete: {:?}",
+        keep_num,
+        all_remains.len() + lastest_remain.len(),
+        all_to_delete.len()
+    );
+
+    let lastest_remain = if prune_strategy.weekly > 0 {
         let keep_num: usize = prune_strategy.weekly.try_into().unwrap();
-        let mp = group_file_copies(to_remain, GroupPeriod::Weekly); // yearly
-        let (to_remain, mut to_delete) = prune_period(mp, keep_num);
+
+        let mp = group_file_copies(lastest_remain, GroupPeriod::Weekly); // weekly
+        let (mut file_copies, mut to_delete) = prune_period(mp, keep_num);
+
+        let lastest_remain = file_copies
+            .take_latest()
+            .expect("weekly latest remains should't empty.");
+        all_remains.append(&mut file_copies.take_remains());
         all_to_delete.append(&mut to_delete);
-        to_remain
+        trace!(
+            "weekly keep_num: {:?}, to_remain: {:?}, to_delete: {:?}",
+            keep_num,
+            all_remains.len() + lastest_remain.len(),
+            all_to_delete.len()
+        );
+        lastest_remain
     } else {
         let keep_num: usize = prune_strategy.monthly.try_into().unwrap();
-        let mp = group_file_copies(to_remain, GroupPeriod::Monthly); // yearly
-        let (to_remain, mut to_delete) = prune_period(mp, keep_num);
+        let mp = group_file_copies(lastest_remain, GroupPeriod::Monthly); //monthly
+        let (mut file_copies, mut to_delete) = prune_period(mp, keep_num);
+        let lastest_remain = file_copies
+            .take_latest()
+            .expect("monthly latest remains should't empty.");
+        all_remains.append(&mut file_copies.take_remains());
         all_to_delete.append(&mut to_delete);
-        to_remain
+        trace!(
+            "monthly keep_num: {:?}, to_remain {:?}, to_delete: {:?}",
+            keep_num,
+            all_remains.len() + lastest_remain.len(),
+            all_to_delete.len()
+        );
+        lastest_remain
     };
 
     let keep_num: usize = prune_strategy.daily.try_into().unwrap();
-    let mp = group_file_copies(to_remain, GroupPeriod::Daily); // yearly
-    let (to_remain, mut to_delete) = prune_period(mp, keep_num);
+    let mp = group_file_copies(lastest_remain, GroupPeriod::Daily); // daily
+    let (mut file_copies, mut to_delete) = prune_period(mp, keep_num);
+    let lastest_remain = file_copies
+        .take_latest()
+        .expect("daily latest remains should't empty.");
+    all_remains.append(&mut file_copies.take_remains());
     all_to_delete.append(&mut to_delete);
-    Ok((to_remain, all_to_delete))
+    trace!(
+        "daily keep_num: {:?}, to_remain: {:?}, to_delete: {:?}",
+        keep_num,
+        all_remains.len() + lastest_remain.len(),
+        all_to_delete.len()
+    );
+
+    let keep_num: usize = prune_strategy.hourly.try_into().unwrap();
+    let mp = group_file_copies(lastest_remain, GroupPeriod::Hourly); // hourly
+    let (mut file_copies, mut to_delete) = prune_period(mp, keep_num);
+    let mut lastest_remain = file_copies
+        .take_latest()
+        .expect("hourly latest remains should't empty.");
+    all_remains.append(&mut file_copies.take_remains());
+    all_to_delete.append(&mut to_delete);
+    trace!(
+        "hourly keep_num: {:?}, to_remain: {:?}, to_delete: {:?}",
+        keep_num,
+        all_remains.len() + lastest_remain.len(),
+        all_to_delete.len()
+    );
+
+    all_remains.append(&mut lastest_remain);
+    all_remains.sort_unstable_by_key(|it| it.copy_trait);
+    Ok((all_remains, all_to_delete))
 }
 
 fn do_prune_dir(
@@ -237,7 +327,7 @@ fn do_prune_dir(
     name_stem: impl AsRef<str>,
     name_ext_with_dot: impl AsRef<str>,
 ) -> Result<(), failure::Error> {
-    let (_to_remain, mut to_delete) =
+    let (_to_remain, to_delete) =
         prune_dir_result(prune_strategy, dir, name_stem, name_ext_with_dot)?;
     for d in to_delete {
         let p = d.dir_entry.path();
@@ -277,16 +367,17 @@ pub fn get_next_file_name(
     let name_stem = name_stem.as_ref();
     let name_ext_with_dot = name_ext_with_dot.as_ref();
 
-    let s = format_dt(Utc::now(), name_stem, name_ext_with_dot);
+    let s = format_dt(&Utc::now(), name_stem, name_ext_with_dot);
     dir.join(&s)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::data_shape::PruneStrategyBuilder;
     use crate::develope::tutil;
     use crate::log_util;
-    use chrono::{DateTime, Datelike, TimeZone, Timelike, Utc};
+    use chrono::{DateTime, Datelike, TimeZone, Timelike, Utc, Weekday};
 
     fn log() {
         log_util::setup_logger_detail(
@@ -336,7 +427,7 @@ mod tests {
         let dt_parsed = DateTime::parse_from_rfc3339("2014-11-28T12:00:09Z")?;
         assert_eq!(dt, dt_parsed);
 
-        assert_eq!(format_dt(dt, "", "").to_string(), "20141128120009");
+        assert_eq!(format_dt(&dt, "", "").to_string(), "20141128120009");
         let ss = "20141128120009";
         assert_eq!(ss.len(), 14);
         let s = format!(
@@ -357,11 +448,6 @@ mod tests {
         assert_eq!(dt.minute(), 0);
         assert_eq!(dt.second(), 9);
         assert_eq!(dt.iso_week().week(), 48);
-
-        // let dt1 = DateTime::parse_from_str("20141128120009UTC", "%Y%m%d%H%M%S")?;
-        // info!("origin: {:?}, parsed: {:?}", dt, dt1);
-        // assert_eq!(dt, dt1);
-
         Ok(())
     }
 
@@ -369,7 +455,7 @@ mod tests {
     fn t_rolling_file_1() -> Result<(), failure::Error> {
         log();
         let dt = Utc.ymd(2014, 11, 28).and_hms(12, 0, 9);
-        let file_name = format_dt(dt, "abc_", ".tar");
+        let file_name = format_dt(&dt, "abc_", ".tar");
         let t_dir = tutil::create_a_dir_and_a_file_with_content(&file_name, "abc")?;
         let t_name = t_dir.tmp_dir_path();
         let de = dir_entry_matches(
@@ -472,4 +558,288 @@ mod tests {
         Ok(())
     }
 
+    #[derive(Builder, Debug)]
+    #[builder(setter(into))]
+    struct FileCopyGenerator {
+        #[builder(setter(skip))]
+        pub t_dir: tutil::TestDir,
+        #[builder(default = "2015")]
+        start_year: u32,
+        #[builder(default = "1")]
+        start_month: u32,
+        #[builder(default = "1")]
+        start_day: u32,
+        #[builder(default = "1")]
+        start_week: u32,
+        #[builder(default = "1")]
+        start_hour: u32,
+        #[builder(default = "1")]
+        years: u32,
+        #[builder(default = "1")]
+        months: u32,
+        #[builder(default = "1")]
+        days: u32,
+        #[builder(default = "0")]
+        weeks: u32,
+        #[builder(default = "1")]
+        hours: u32,
+        #[builder(default = "\"a_\".to_string()")]
+        pub prefix: String,
+        #[builder(default = "\".txt\".to_string()")]
+        pub postfix: String,
+    }
+
+    fn week_day_from_u32(d: u32) -> Option<Weekday> {
+        match d {
+            1 => Some(Weekday::Mon),
+            2 => Some(Weekday::Tue),
+            3 => Some(Weekday::Wed),
+            4 => Some(Weekday::Thu),
+            5 => Some(Weekday::Fri),
+            6 => Some(Weekday::Sat),
+            7 => Some(Weekday::Sun),
+            _ => None,
+        }
+    }
+
+    fn get_weekly_days(fc: &FileCopyGenerator) -> Vec<DateTime<Utc>> {
+        (fc.start_year..fc.start_year + fc.years)
+            .flat_map(|y| {
+                (fc.start_week..fc.start_week + fc.weeks).flat_map(move |w| {
+                    (fc.start_day..fc.start_day + fc.days).flat_map(move |d| {
+                        (fc.start_hour..fc.start_hour + fc.hours).map(move |h| {
+                            Utc.isoywd(
+                                y as i32,
+                                w,
+                                week_day_from_u32(d).expect("week day should be between 1-7."),
+                            )
+                            .and_hms(h, 10, 11)
+                        })
+                    })
+                })
+            })
+            .collect()
+    }
+
+    fn get_monthly_days(fc: &FileCopyGenerator) -> Vec<DateTime<Utc>> {
+        (fc.start_year..fc.start_year + fc.years)
+            .flat_map(|y| {
+                (fc.start_month..fc.start_month + fc.months).flat_map(move |m| {
+                    (fc.start_day..fc.start_day + fc.days).flat_map(move |d| {
+                        (fc.start_hour..fc.start_hour + fc.hours)
+                            .map(move |h| Utc.ymd(y as i32, m, d).and_hms(h, 10, 11))
+                    })
+                })
+            })
+            .collect()
+    }
+
+    impl FileCopyGenerator {
+        pub fn init(&self) -> Result<(), failure::Error> {
+            let days = if self.weeks > 0 {
+                get_weekly_days(self)
+            } else {
+                get_monthly_days(self)
+            };
+
+            days.iter().for_each(|dt| {
+                let s = format_dt(dt, &self.prefix, &self.postfix);
+                self.t_dir
+                    .make_a_file_with_content(&s, "a")
+                    .expect("make_a_file_with_content should success.");
+            });
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn t_rolling_file_3() -> Result<(), failure::Error> {
+        log();
+        let fcg = FileCopyGeneratorBuilder::default()
+            .build()
+            .map_err(failure::err_msg)?;
+        fcg.init()?;
+        assert_eq!(fcg.t_dir.count_files(), 1);
+        info!("{:?}", fcg);
+
+        // test weekly.
+        let fcg = FileCopyGeneratorBuilder::default()
+            .prefix("a")
+            .postfix("b")
+            .weeks(3_u32)
+            .build()
+            .map_err(failure::err_msg)?;
+        fcg.init()?;
+        assert_eq!(fcg.t_dir.count_files(), 3);
+
+        let p = PruneStrategyBuilder::default()
+            .build()
+            .map_err(failure::err_msg)?;
+
+        let (to_remain, to_delete) =
+            prune_dir_result(&p, fcg.t_dir.tmp_dir_path(), fcg.prefix, fcg.postfix)?;
+        info!("to_remain: {:?}, to_delete: {:?}", to_remain, to_delete);
+        assert_eq!(to_remain.len(), 1);
+        assert_eq!(to_delete.len(), 2);
+        let fc = to_remain.get(0).expect("remain one.");
+        assert_eq!(fc.copy_trait.year(), 2015);
+        assert_eq!(fc.copy_trait.iso_week().week(), 3); // the week 1 of year may span to previous year.
+
+        // test monthly.
+        let fcg = FileCopyGeneratorBuilder::default()
+            .prefix("a")
+            .postfix("b")
+            .months(3_u32)
+            .build()
+            .map_err(failure::err_msg)?;
+        fcg.init()?;
+        assert_eq!(fcg.t_dir.count_files(), 3);
+
+        let p = PruneStrategyBuilder::default()
+            .build()
+            .map_err(failure::err_msg)?;
+
+        let (to_remain, to_delete) =
+            prune_dir_result(&p, fcg.t_dir.tmp_dir_path(), fcg.prefix, fcg.postfix)?;
+        info!("to_remain: {:?}, to_delete: {:?}", to_remain, to_delete);
+        assert_eq!(to_remain.len(), 1);
+        assert_eq!(to_delete.len(), 2);
+        let fc = to_remain.get(0).expect("remain one.");
+        assert_eq!(fc.copy_trait.year(), 2015);
+        assert_eq!(fc.copy_trait.month(), 3);
+
+        Ok(())
+    }
+
+    #[test]
+    fn t_rolling_file_4() -> Result<(), failure::Error> {
+        log();
+        let fcg = FileCopyGeneratorBuilder::default()
+            .prefix("a")
+            .postfix("b")
+            .months(3_u32)
+            .days(7_u32)
+            .build()
+            .map_err(failure::err_msg)?;
+        fcg.init()?;
+        assert_eq!(fcg.t_dir.count_files(), 21);
+
+        let mut a = vec!["a"];
+        a.drain(0..0);
+        assert_eq!(a.len(), 1);
+        // should remain 3 daily and 1 monthly = 4.
+        let p = PruneStrategyBuilder::default()
+            .monthly(2)
+            .daily(3)
+            .build()
+            .map_err(failure::err_msg)?;
+        info!("prune_strategy: {:?}", p);
+
+        let (to_remain, to_delete) =
+            prune_dir_result(&p, fcg.t_dir.tmp_dir_path(), fcg.prefix, fcg.postfix)?;
+        info!("to_remain:");
+        for tr in &to_remain {
+            info!("{:?}", tr);
+        }
+
+        info!("to_delete:");
+        for tr in &to_delete {
+            info!("{:?}", tr);
+        }
+        assert_eq!(to_remain.len(), 4);
+        assert_eq!(to_delete.len(), 17);
+        let fc = to_remain.last().expect("remain one.");
+        assert_eq!(fc.copy_trait.year(), 2015);
+        assert_eq!(fc.copy_trait.month(), 3);
+        assert_eq!(fc.copy_trait.day(), 7);
+
+        let fc = to_remain.first().expect("remain one.");
+        assert_eq!(fc.copy_trait.year(), 2015);
+        assert_eq!(fc.copy_trait.month(), 2);
+        assert_eq!(fc.copy_trait.day(), 7);
+        Ok(())
+    }
+
+    #[test]
+    fn t_rolling_file_5() -> Result<(), failure::Error> {
+        log();
+        let fcg = FileCopyGeneratorBuilder::default()
+            .prefix("a")
+            .postfix("b")
+            .months(3_u32)
+            .days(7_u32)
+            .hours(3_u32)
+            .build()
+            .map_err(failure::err_msg)?;
+        fcg.init()?;
+        assert_eq!(fcg.t_dir.count_files(), 63);
+
+        let mut a = vec!["a"];
+        a.drain(0..0);
+        assert_eq!(a.len(), 1);
+        // should remain 3 daily and 1 monthly = 4.
+        let p = PruneStrategyBuilder::default()
+            .monthly(2)
+            .daily(3)
+            .hourly(2)
+            .build()
+            .map_err(failure::err_msg)?;
+        info!("prune_strategy: {:?}", p);
+
+        let (to_remain, to_delete) =
+            prune_dir_result(&p, fcg.t_dir.tmp_dir_path(), fcg.prefix, fcg.postfix)?;
+        info!("to_remain:");
+        for tr in &to_remain {
+            info!("{:?}", tr);
+        }
+
+        info!("to_delete:");
+        for tr in &to_delete {
+            info!("{:?}", tr);
+        }
+        assert_eq!(to_remain.len(), 5); // because we don't touch the content of the latest day.
+        assert_eq!(to_delete.len(), 58);
+        let fc = to_remain.last().expect("remain one.");
+        assert_eq!(fc.copy_trait.year(), 2015);
+        assert_eq!(fc.copy_trait.month(), 3);
+        assert_eq!(fc.copy_trait.day(), 7);
+        assert_eq!(fc.copy_trait.hour(), 3);
+
+        let fc = to_remain.first().expect("remain one.");
+        assert_eq!(fc.copy_trait.year(), 2015);
+        assert_eq!(fc.copy_trait.month(), 2);
+        assert_eq!(fc.copy_trait.day(), 7);
+        assert_eq!(fc.copy_trait.hour(), 3);
+        Ok(())
+    }
+
+        #[test]
+    fn t_rolling_file_6() -> Result<(), failure::Error> {
+        log();
+        let fcg = FileCopyGeneratorBuilder::default()
+            .prefix("a")
+            .postfix("b")
+            .months(3_u32)
+            .days(7_u32)
+            .hours(3_u32)
+            .build()
+            .map_err(failure::err_msg)?;
+        fcg.init()?;
+        assert_eq!(fcg.t_dir.count_files(), 63);
+
+        let mut a = vec!["a"];
+        a.drain(0..0);
+        assert_eq!(a.len(), 1);
+        // should remain 3 daily and 1 monthly = 4.
+        let p = PruneStrategyBuilder::default()
+            .monthly(2)
+            .daily(3)
+            .hourly(2)
+            .build()
+            .map_err(failure::err_msg)?;
+        info!("prune_strategy: {:?}", p);
+        do_prune_dir(&p, fcg.t_dir.tmp_dir_path(), &fcg.prefix, &fcg.postfix)?;
+        assert_eq!(fcg.t_dir.count_files(), 5);
+        Ok(())
+    }
 }

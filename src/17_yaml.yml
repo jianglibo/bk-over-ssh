@@ -116,6 +116,12 @@ subcommands:
                         long: server-yml
                         required: true
                         takes_value: true
+            - archive-local:
+                args:
+                    - server-yml:
+                        long: server-yml
+                        required: true
+                        takes_value: true
             - deploy-to-server:
                 about: copy the local server yml to the target server, the target location is in the local yml file.
                 args:

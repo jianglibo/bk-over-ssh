@@ -16,6 +16,7 @@ pub fn count_cursor_lines(mut cursor: io::Cursor<Vec<u8>>) -> usize {
 }
 
 #[allow(dead_code)]
+#[derive(Debug)]
 pub struct TestDir {
     pub tmp_dir: TempDir,
 }
@@ -25,6 +26,10 @@ impl TestDir {
         Self {
             tmp_dir: TempDir::new().expect("TempDir::new should success."),
         }
+    }
+
+    pub fn count_files(&self) -> usize {
+        self.tmp_dir.path().read_dir().expect("tmp_dir read_dir should success.").count()
     }
 
     pub fn tmp_dir_path(&self) -> &Path {
@@ -105,6 +110,12 @@ impl TestDir {
                 x
             })?;
         Ok(())
+    }
+}
+
+impl std::default::Default for TestDir {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

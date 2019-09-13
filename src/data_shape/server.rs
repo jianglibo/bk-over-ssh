@@ -1,7 +1,7 @@
 use crate::actions::{copy_a_file_item, SyncDirReport};
 use crate::data_shape::{
     load_remote_item_owned, string_path, AppConf, FileItem, FileItemProcessResult,
-    FileItemProcessResultStats, RemoteFileItemOwned, SyncType,
+    FileItemProcessResultStats, RemoteFileItemOwned, SyncType, rolling_files,
 };
 use glob::Pattern;
 use log::*;
@@ -14,6 +14,14 @@ use std::time::Instant;
 use std::{fs, io, io::Seek};
 use tar::{Archive, Builder};
 use walkdir::WalkDir;
+
+
+#[derive(Deserialize, Debug)]
+#[serde(rename_all(deserialize = "snake_case"))]
+pub enum ServerRole {
+    PureClient,
+    PureServer,
+}
 
 #[derive(Deserialize, Debug)]
 pub enum AuthMethod {
@@ -102,13 +110,20 @@ impl Directory {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Builder, Deserialize, Debug)]
+#[builder(setter(into))]
 pub struct PruneStrategy {
+    #[builder(default = "1")]
     pub yearly: u8,
+    #[builder(default = "1")]
     pub monthly: u8,
+    #[builder(default = "0")]
     pub weekly: u8,
+    #[builder(default = "1")]
     pub daily: u8,
+    #[builder(default = "1")]
     pub hourly: u8,
+    #[builder(default = "1")]
     pub minutely: u8,
 }
 
@@ -125,7 +140,10 @@ pub struct Server {
     pub username: String,
     pub rsync_valve: u64,
     pub directories: Vec<Directory>,
+    pub role: ServerRole,
     pub prune_strategy: PruneStrategy,
+    pub archive_prefix: String,
+    pub archive_postfix: String,
     #[serde(skip)]
     _tcp_stream: Option<TcpStream>,
     #[serde(skip)]
@@ -253,11 +271,11 @@ impl Server {
         Ok(server)
     }
 
-    fn tar_local(&self) -> Result<(), failure::Error> {
+    pub fn tar_local(&self) -> Result<(), failure::Error> {
         if let Some(tf) = self.tar_dir.as_ref() {
-            let file = fs::File::create("foo.tar").unwrap();
+            let next_fn = rolling_files::get_next_file_name(tf, &self.archive_prefix, &self.archive_postfix);
+            let file = fs::File::create(next_fn).unwrap();
             let mut a = Builder::new(file);
-            a.append_dir_all("bardir", ".").unwrap();
 
             for dir in self.directories.iter() {
                 let d_path = Path::new(&dir.local_dir);
@@ -267,6 +285,7 @@ impl Server {
                     error!("dir.local_dir get file_name failed: {:?}", d_path);
                 }
             }
+            a.finish()?;
         } else {
             error!("empty tar_dir in the server.");
         }

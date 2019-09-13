@@ -209,6 +209,18 @@ fn main() -> Result<(), failure::Error> {
                         }
                     }
                 }
+                ("archive-local", Some(sub_sub_matches)) => {
+                    let server_config_path = sub_sub_matches.value_of("server-yml").unwrap();
+                    match Server::load_from_yml_with_app_config(&app_conf, server_config_path) {
+                        Ok(server) => {
+                            server.tar_local()?;
+                        }
+                        Err(err) => {
+                            error!("load_from_yml failed: {:?}", err);
+                        }
+                    }
+                }
+                //TODO verify server-yml.
                 ("deploy-to-server", Some(sub_sub_matches)) => {
                     let server_config_path = sub_sub_matches.value_of("server-yml").unwrap();
                     match Server::load_from_yml_with_app_config(&app_conf, server_config_path) {

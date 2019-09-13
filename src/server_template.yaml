@@ -3,6 +3,7 @@ id_rsa_pub: /home/jianglibo/.ssh/id_rsa.pub
 host: 127.0.0.1
 port: 2222
 username: jianglibo
+role: pure_client
 auth_method: IdentityFile # Password, Agent, IdentityFile.
 remote_exec: /home/osboxes/ws/ssh-client-demo/target/debug/bk-over-ssh
 remote_server_yml: /home/osboxes/ws/ssh-client-demo/data/servers/localhost.yml
@@ -17,6 +18,8 @@ directories:
     excludes:
       - "*.log"
       - "*.bak"
+archive_prefix: backup
+archive_postfix: .tar
 prune_strategy:
   yearly: 1
   monthly: 1
