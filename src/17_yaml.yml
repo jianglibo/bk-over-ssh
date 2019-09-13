@@ -101,7 +101,7 @@ subcommands:
                 required: false
                 global: true
                 conflicts_with:
-                    - deploy-to-server
+                    - verify-server-yml
         # args:
         #     - server-yml:
         #         help: the path to server configuration file.
@@ -122,7 +122,7 @@ subcommands:
                         long: server-yml
                         required: true
                         takes_value: true
-            - deploy-to-server:
+            - verify-server-yml:
                 about: copy the local server yml to the target server, the target location is in the local yml file.
                 args:
                     - server-yml:

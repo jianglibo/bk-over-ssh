@@ -143,7 +143,6 @@ fn main_client() {
 }
 
 fn main() -> Result<(), failure::Error> {
-
     let yml = load_yaml!("17_yaml.yml");
     let app = App::from_yaml(yml);
     let m: ArgMatches = app.get_matches();
@@ -173,7 +172,11 @@ fn main() -> Result<(), failure::Error> {
     };
 
     app_conf.validate_conf()?;
-    log_util::setup_logger_for_this_app(true, app_conf.get_log_file().as_str(), &app_conf.get_log_conf().verbose_modules)?;
+    log_util::setup_logger_for_this_app(
+        true,
+        app_conf.get_log_file().as_str(),
+        &app_conf.get_log_conf().verbose_modules,
+    )?;
 
     if m.is_present("print-conf") {
         println!("{:?}", app_conf);
@@ -195,15 +198,13 @@ fn main() -> Result<(), failure::Error> {
                     let server_config_path = sub_sub_matches.value_of("server-yml").unwrap();
                     let skip_sha1 = sub_sub_matches.is_present("skip-sha1");
                     match Server::load_from_yml_with_app_config(&app_conf, server_config_path) {
-                        Ok(mut server) => {
-                            match server.sync_dirs(skip_sha1) {
-                                Ok(result) => {
-                                    actions::write_dir_sync_result(&server, &result);
-                                    println!("{:?}", result);
-                                },
-                                Err(err) => error!("sync-dirs failed: {:?}", err),
+                        Ok(mut server) => match server.sync_dirs(skip_sha1) {
+                            Ok(result) => {
+                                actions::write_dir_sync_result(&server, &result);
+                                println!("{:?}", result);
                             }
-                        }
+                            Err(err) => error!("sync-dirs failed: {:?}", err),
+                        },
                         Err(err) => {
                             error!("load_from_yml failed: {:?}", err);
                         }
@@ -221,33 +222,31 @@ fn main() -> Result<(), failure::Error> {
                     }
                 }
                 //TODO verify server-yml.
-                ("deploy-to-server", Some(sub_sub_matches)) => {
+                ("verify-server-yml", Some(sub_sub_matches)) => {
                     let server_config_path = sub_sub_matches.value_of("server-yml").unwrap();
                     match Server::load_from_yml_with_app_config(&app_conf, server_config_path) {
-                        Ok(server) => {
-                            if ["127.0.0.1", "localhost"]
-                                .iter()
-                                .any(|&s| s == server.host.as_str())
-                            {
-                                bail!("no need to copy to self.");
+                        Ok(mut server) => {
+                            if let Err(err) = server.stats_remote_exec() {
+                                println!("CAN'T FIND SERVER SIDE EXEC. {:?}\n{:?}", server.remote_exec, err);
+                                return Ok(());
                             }
-                            // let rp = server.remote_server_yml.clone();
-                            // let lpb = app_conf.get_servers_dir()
-                            // let lp = lpb.to_str().expect("server yml should exists.");
-                            // if let Err(err) = server.copy_a_file(lp, rp) {
-                            //     bail!("copy_a_file failed: {:?}", err);
-                            // }
-                            // It's useless because of different of platform.
-                            // if let Ok(current_exe) = env::current_exe() {
-                            //     let rp = server.remote_exec.clone();
-                            //     let lp = current_exe.to_str().expect("current_exe PathBuf to_str should success.");
-                            //     server.copy_a_file(lp, rp)?;
-                            // }
+                            let rp = server.remote_server_yml.clone();
+                            match server.get_remote_file_content(&rp) {
+                                Ok(content) => {
+                                    let ss: Server = serde_yaml::from_str(content.as_str())?;
+                                    if !server.dir_equals(&ss) {
+                                        println!("SERVER DIRS DIDN'T EQUAL TO.\nlocal: {:?} vs remote: {:?}",
+                                        server.directories, ss.directories);
+                                    }
+                                },
+                                Err(err) => println!("got error: {:?}", err),
+                            }
                         }
                         Err(err) => {
                             error!("load_from_yml failed: {:?}", err);
                         }
                     }
+                    println!("SERVER SIDE CONFIGURATION IS OK!");
                 }
                 ("restore-a-file", Some(sub_sub_matches)) => {
                     let old_file = sub_sub_matches.value_of("old-file").unwrap();
@@ -321,7 +320,8 @@ fn main() -> Result<(), failure::Error> {
                         .expect("should load sever yml.");
                     let skip_sha1 = sub_sub_matches.is_present("skip-sha1");
                     let start = Instant::now();
-                    let mut server = Server::load_from_yml_with_app_config(&app_conf, server_config_path)?;
+                    let mut server =
+                        Server::load_from_yml_with_app_config(&app_conf, server_config_path)?;
 
                     if let Some(out) = sub_sub_matches.value_of("out") {
                         let mut out = fs::OpenOptions::new()
@@ -342,7 +342,8 @@ fn main() -> Result<(), failure::Error> {
                         .expect("should load server yml.");
                     let skip_sha1 = sub_sub_matches.is_present("skip-sha1");
 
-                    let server = Server::load_from_yml_with_app_config(&app_conf, server_config_path)?;
+                    let server =
+                        Server::load_from_yml_with_app_config(&app_conf, server_config_path)?;
 
                     if let Some(out) = sub_sub_matches.value_of("out") {
                         let mut out = fs::OpenOptions::new()

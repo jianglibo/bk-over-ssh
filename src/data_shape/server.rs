@@ -170,6 +170,49 @@ impl Server {
         io::copy(&mut l_file, &mut r_file)?;
         Ok(())
     }
+
+    pub fn dir_equals(&self, another: &Server) -> bool {
+        let ss: Vec<&String> = self.directories.iter().map(|d|&d.remote_dir).collect();
+        let ass: Vec<&String> = another.directories.iter().map(|d|&d.remote_dir).collect();
+        ss == ass
+    }
+
+    pub fn stats_remote_exec(&mut self) -> Result<ssh2::FileStat, failure::Error> {
+        let re = &self.remote_exec.clone();
+        self.get_server_file_stats(&re)
+    }
+
+    fn get_server_file_stats(&mut self, remote: impl AsRef<Path>) -> Result<ssh2::FileStat, failure::Error> {
+        self.connect()?;
+        
+        let sftp: ssh2::Sftp = self.session.as_ref().unwrap().sftp()?;
+        let stat = match sftp.stat(remote.as_ref()) {
+            Ok(stat) => {
+                stat
+            }
+            Err(err) => {
+                bail!("stat sftp file {:?} failed, {:?}", remote.as_ref(), err);
+            }
+        };
+        Ok(stat)
+    }
+
+    pub fn get_remote_file_content(&mut self, remote: impl AsRef<Path>) -> Result<String, failure::Error> {
+        self.connect()?;
+        
+        let sftp: ssh2::Sftp = self.session.as_ref().unwrap().sftp()?;
+        let content = match sftp.open(remote.as_ref()) {
+            Ok(mut r_file) => {
+                let mut content = String::new();
+                r_file.read_to_string(&mut content)?;
+                content
+            }
+            Err(err) => {
+                bail!("open sftp file {:?} failed, {:?}", remote.as_ref(), err);
+            }
+        };
+        Ok(content)
+    }
     /// Test purpose.
     #[allow(dead_code)]
     pub fn replace_directories(&mut self, directories: Vec<Directory>) {
