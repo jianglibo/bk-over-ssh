@@ -1,7 +1,7 @@
 use crate::actions::{copy_a_file_item, SyncDirReport};
 use crate::data_shape::{
-    load_remote_item_owned, string_path, AppConf, FileItem, FileItemProcessResult,
-    FileItemProcessResultStats, RemoteFileItemOwned, SyncType, rolling_files,
+    load_remote_item_owned, rolling_files, string_path, AppConf, FileItem, FileItemProcessResult,
+    FileItemProcessResultStats, RemoteFileItemOwned, SyncType,
 };
 use glob::Pattern;
 use log::*;
@@ -14,7 +14,6 @@ use std::time::Instant;
 use std::{fs, io, io::Seek};
 use tar::{Archive, Builder};
 use walkdir::WalkDir;
-
 
 #[derive(Deserialize, Debug)]
 #[serde(rename_all(deserialize = "snake_case"))]
@@ -172,8 +171,8 @@ impl Server {
     }
 
     pub fn dir_equals(&self, another: &Server) -> bool {
-        let ss: Vec<&String> = self.directories.iter().map(|d|&d.remote_dir).collect();
-        let ass: Vec<&String> = another.directories.iter().map(|d|&d.remote_dir).collect();
+        let ss: Vec<&String> = self.directories.iter().map(|d| &d.remote_dir).collect();
+        let ass: Vec<&String> = another.directories.iter().map(|d| &d.remote_dir).collect();
         ss == ass
     }
 
@@ -182,14 +181,14 @@ impl Server {
         self.get_server_file_stats(&re)
     }
 
-    fn get_server_file_stats(&mut self, remote: impl AsRef<Path>) -> Result<ssh2::FileStat, failure::Error> {
+    fn get_server_file_stats(
+        &mut self,
+        remote: impl AsRef<Path>,
+    ) -> Result<ssh2::FileStat, failure::Error> {
         self.connect()?;
-        
         let sftp: ssh2::Sftp = self.session.as_ref().unwrap().sftp()?;
         let stat = match sftp.stat(remote.as_ref()) {
-            Ok(stat) => {
-                stat
-            }
+            Ok(stat) => stat,
             Err(err) => {
                 bail!("stat sftp file {:?} failed, {:?}", remote.as_ref(), err);
             }
@@ -197,9 +196,11 @@ impl Server {
         Ok(stat)
     }
 
-    pub fn get_remote_file_content(&mut self, remote: impl AsRef<Path>) -> Result<String, failure::Error> {
+    pub fn get_remote_file_content(
+        &mut self,
+        remote: impl AsRef<Path>,
+    ) -> Result<String, failure::Error> {
         self.connect()?;
-        
         let sftp: ssh2::Sftp = self.session.as_ref().unwrap().sftp()?;
         let content = match sftp.open(remote.as_ref()) {
             Ok(mut r_file) => {
@@ -316,7 +317,8 @@ impl Server {
 
     pub fn tar_local(&self) -> Result<(), failure::Error> {
         if let Some(tf) = self.tar_dir.as_ref() {
-            let next_fn = rolling_files::get_next_file_name(tf, &self.archive_prefix, &self.archive_postfix);
+            let next_fn =
+                rolling_files::get_next_file_name(tf, &self.archive_prefix, &self.archive_postfix);
             let file = fs::File::create(next_fn).unwrap();
             let mut a = Builder::new(file);
 
@@ -611,6 +613,9 @@ mod tests {
     use super::*;
     use crate::develope::tutil;
     use crate::log_util;
+    use bzip2::write::BzEncoder;
+    use bzip2::Compression;
+    use std::io::prelude::*;
 
     fn log() {
         log_util::setup_logger_detail(
@@ -618,7 +623,8 @@ mod tests {
             "output.log",
             vec!["data_shape::server"],
             Some(vec!["ssh2"]),
-        ).expect("init log should success.");
+        )
+        .expect("init log should success.");
     }
 
     fn load_server_yml() -> Server {
@@ -637,13 +643,11 @@ mod tests {
 
         let s = "a/b/c\\d\\c0\\";
         assert!(s.ends_with(&['/', '\\'][..]));
-        // assert_eq!(s.rsplitn(2, &['/', '\\'][..]).next(), Some("c0"));
-        // assert_eq!(s.rsplitn(20, &['/', '\\'][..]).next(), Some("c0"));
     }
 
     #[test]
     fn t_load_server() -> Result<(), failure::Error> {
-        log_util::setup_logger_empty();
+        log();
         let server = load_server_yml();
         assert_eq!(
             server.directories[0].excludes,
@@ -664,7 +668,7 @@ mod tests {
 
     #[test]
     fn t_download_dirs() -> Result<(), failure::Error> {
-        log_util::setup_logger_empty();
+        log();
         let d = Path::new("target/adir");
         if d.exists() {
             fs::remove_dir_all(d)?;
@@ -691,14 +695,30 @@ mod tests {
     }
 
     #[test]
+    fn t_bzip2() -> Result<(), failure::Error> {
+        log();
+        let vc = ['c'; 10000];
+        let s: String = vc.iter().collect();
+        let test_dir = tutil::create_a_dir_and_a_file_with_content("a", &s)?;
+
+        let out = test_dir.open_an_empty_file_for_write("xx.bzip2")?;
+
+        let mut encoder = BzEncoder::new(out, Compression::Best);
+
+        let mut read_in = test_dir.open_a_file_for_read("a")?;
+
+        io::copy(&mut read_in, &mut encoder)?;
+        encoder.try_finish()?;
+        test_dir.assert_file_exists("xx.bzip2");
+        let of = test_dir.get_file_path("xx.bzip2");
+        info!("len: {}, ratio: {:?}", of.metadata().expect("sg").len(), (encoder.total_out() as f64 / encoder.total_in() as f64) * 100_f64);
+        Ok(())
+    }
+
+    #[test]
     fn t_tar() -> Result<(), failure::Error> {
         use tar::{Archive, Builder};
-        log_util::setup_logger_detail(
-            true,
-            "output.log",
-            vec!["data_shape::server"],
-            Some(vec!["ssh2"]),
-        )?;
+        log();
         let test_dir = tutil::create_a_dir_and_a_file_with_content("a", "cc")?;
 
         let tar_dir = tutil::TestDir::new();

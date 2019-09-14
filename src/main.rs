@@ -178,16 +178,12 @@ fn main() -> Result<(), failure::Error> {
         &app_conf.get_log_conf().verbose_modules,
     )?;
 
-    if m.is_present("print-conf") {
-        println!("{:?}", app_conf);
-        return Ok(());
-    }
 
     match m.subcommand() {
         ("completions", Some(sub_matches)) => {
             let shell = sub_matches.value_of("shell_name").unwrap();
             app1.gen_completions_to(
-                "ssh-client-demo",
+                "bk-over-ssh",
                 shell.parse::<Shell>().unwrap(),
                 &mut io::stdout(),
             );
@@ -227,7 +223,10 @@ fn main() -> Result<(), failure::Error> {
                     match Server::load_from_yml_with_app_config(&app_conf, server_config_path) {
                         Ok(mut server) => {
                             if let Err(err) = server.stats_remote_exec() {
-                                println!("CAN'T FIND SERVER SIDE EXEC. {:?}\n{:?}", server.remote_exec, err);
+                                println!(
+                                    "CAN'T FIND SERVER SIDE EXEC. {:?}\n{:?}",
+                                    server.remote_exec, err
+                                );
                                 return Ok(());
                             }
                             let rp = server.remote_server_yml.clone();
@@ -238,7 +237,7 @@ fn main() -> Result<(), failure::Error> {
                                         println!("SERVER DIRS DIDN'T EQUAL TO.\nlocal: {:?} vs remote: {:?}",
                                         server.directories, ss.directories);
                                     }
-                                },
+                                }
                                 Err(err) => println!("got error: {:?}", err),
                             }
                         }
@@ -363,6 +362,15 @@ fn main() -> Result<(), failure::Error> {
         }
         ("repl", Some(_)) => {
             main_client();
+        }
+        ("print-env", Some(_)) => {
+            for (key, value) in env::vars_os() {
+                println!("{:?}: {:?}", key, value);
+            }
+            println!("current exec: {:?}", env::current_exe());
+        }
+        ("print-conf", Some(_)) => {
+            println!("{:?}", app_conf);
         }
         (_, _) => unimplemented!(), // for brevity
     }

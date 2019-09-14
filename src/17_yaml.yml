@@ -1,7 +1,7 @@
 name: bk-over-ssh
 version: "0.1.0"
 about: backup files over ssh.
-author: jianglibo <jianglibo@gmail.com>
+author: hmkj <hmkj@gmail.com>
 
 # AppSettings can be defined as a list and are **not** ascii case sensitive
 settings:
@@ -25,10 +25,6 @@ args:
     #     possible_values:
     #         - generate-bash-completions
     #         - generate-zsh-completions
-    - print-conf:
-        help: print out the current configuration of application.
-        long: print-conf
-        required: false
     - conf:
         help: the path of app configuration file, if not present the app will try to guess one.
         long: conf
@@ -91,6 +87,10 @@ subcommands:
     #         - scpos1:
     #             help: example subcommand positional
     #             index: 1
+    - print-conf:
+        help: print out the current configuration of application.
+    - print-env:
+        about: print out environment variables.
     - repl:
         about: enter repl mode.
     - rsync:
@@ -192,13 +192,13 @@ subcommands:
                         required: false
                         takes_value: true
     - completions:
-        about: completions from yaml
+        about: for example, bk-over-ssh completions bash > ~/.local/share/bash-completion/completions/bk-over-ssh
         version: "0.1"
         author: Kevin K. <kbknapp@gmail.com>
         # Subcommand args are exactly like App args
         args:
             - shell_name:
-                help: The shell to generate the script for
+                help: The shell to generate the script for. 
                 index: 1
                 required: true
                 possible_values:

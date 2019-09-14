@@ -66,6 +66,25 @@ impl TestDir {
         Ok(self.tmp_file()?.metadata().unwrap().len())
     }
 
+    pub fn get_file_path(&self, file_name: impl AsRef<str>) -> PathBuf {
+        self.tmp_dir_path().join(file_name.as_ref())
+    }
+
+    pub fn assert_file_exists(&self, file_name: impl AsRef<str>) {
+        let f = self.tmp_dir_path().join(file_name.as_ref());
+        assert!(f.exists() && f.is_file());
+    }
+
+    pub fn open_a_file_for_read(&self, file_name: impl AsRef<str>) -> Result<impl io::Read, failure::Error> {
+        let f = self.tmp_dir_path().join(file_name.as_ref());
+        Ok(fs::OpenOptions::new().read(true).open(f)?)
+    }
+
+    pub fn open_an_empty_file_for_write(&self, file_name: impl AsRef<str>,) -> Result<impl io::Write, failure::Error> {
+        let f = self.tmp_dir_path().join(file_name.as_ref());
+        Ok(fs::OpenOptions::new().create(true).write(true).open(f)?)
+    }
+
     pub fn make_a_file_with_content(
         &self,
         file_name: impl AsRef<str>,
