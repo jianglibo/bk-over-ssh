@@ -123,7 +123,7 @@ subcommands:
                         required: true
                         takes_value: true
             - verify-server-yml:
-                about: copy the local server yml to the target server, the target location is in the local yml file.
+                about: verify if remote executable exists and remote server yml configuration file exists.
                 args:
                     - server-yml:
                         long: server-yml

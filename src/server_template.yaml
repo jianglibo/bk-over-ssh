@@ -20,6 +20,7 @@ directories:
       - "*.bak"
 archive_prefix: backup
 archive_postfix: .tar
+compress_archive: bzip2
 prune_strategy:
   yearly: 1
   monthly: 1

@@ -45,7 +45,6 @@ mod tests {
         Server::load_from_yml("data/servers", "data", "localhost.yml").unwrap()
     }
 
-
     #[test]
     fn t_scp_file() -> Result<(), failure::Error> {
         log_util::setup_logger_empty();
@@ -152,5 +151,19 @@ mod tests {
         let e_path = env::current_exe()?;
         assert_eq!(c_path, e_path);
         Ok(())
+    }
+
+    #[test]
+    fn t_dereference_destructure() -> Result<(), failure::Error> {
+        let mut mut_value = 3;
+
+        match mut_value {
+            ref mut r => {
+                *r += 1;
+                println!("{}", r);
+            }
+        }
+        let x = Some("foo".to_string());
+        x.map(|_| ()).ok_or_else(|| failure::err_msg("abc"))
     }
 }

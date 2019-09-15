@@ -3,6 +3,8 @@ use crate::data_shape::{
     load_remote_item_owned, rolling_files, string_path, AppConf, FileItem, FileItemProcessResult,
     FileItemProcessResultStats, RemoteFileItemOwned, SyncType,
 };
+use bzip2::write::{BzEncoder};
+use bzip2::Compression;
 use glob::Pattern;
 use log::*;
 use serde::Deserialize;
@@ -12,8 +14,7 @@ use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 use std::{fs, io, io::Seek};
-use tar::{Archive, Builder};
-use walkdir::WalkDir;
+use tar::{Builder};
 
 #[derive(Deserialize, Debug)]
 #[serde(rename_all(deserialize = "snake_case"))]
@@ -126,6 +127,12 @@ pub struct PruneStrategy {
     pub minutely: u8,
 }
 
+#[derive(Deserialize, Debug)]
+#[serde(rename_all(deserialize = "snake_case"))]
+pub enum CompressionImpl {
+    Bzip2,
+}
+
 #[derive(Deserialize)]
 pub struct Server {
     pub id_rsa: String,
@@ -143,6 +150,7 @@ pub struct Server {
     pub prune_strategy: PruneStrategy,
     pub archive_prefix: String,
     pub archive_postfix: String,
+    pub compress_archive: Option<CompressionImpl>,
     #[serde(skip)]
     _tcp_stream: Option<TcpStream>,
     #[serde(skip)]
@@ -284,7 +292,7 @@ impl Server {
                     s = splited.next().expect("remote_dir should has dir name.");
                 }
                 d.local_dir = s.to_string();
-                info!("local_dir is empty. change to {}", s);
+                trace!("local_dir is empty. change to {}", s);
             } else {
                 d.local_dir = ld.to_string();
             }
@@ -315,22 +323,74 @@ impl Server {
         Ok(server)
     }
 
-    pub fn tar_local(&self) -> Result<(), failure::Error> {
-        if let Some(tf) = self.tar_dir.as_ref() {
-            let next_fn =
-                rolling_files::get_next_file_name(tf, &self.archive_prefix, &self.archive_postfix);
-            let file = fs::File::create(next_fn).unwrap();
-            let mut a = Builder::new(file);
+    fn next_tar_file(&self) -> PathBuf {
+        let tar_dir = self
+            .tar_dir
+            .as_ref()
+            .expect("when this method be called we assume tar_dir already exists.");
+        rolling_files::get_next_file_name(tar_dir, &self.archive_prefix, &self.archive_postfix)
+    }
 
-            for dir in self.directories.iter() {
-                let d_path = Path::new(&dir.local_dir);
-                if let Some(d_path_name) = d_path.file_name() {
-                    a.append_dir_all(d_path_name, d_path).unwrap();
-                } else {
-                    error!("dir.local_dir get file_name failed: {:?}", d_path);
+    fn get_archive_writer_file(&self) -> Result<impl io::Write, failure::Error> {
+        Ok(fs::File::create(self.next_tar_file())?)
+    }
+
+    fn get_archive_writer_bzip2(&self) -> Result<impl io::Write, failure::Error> {
+        let out = fs::File::create(self.next_tar_file())?;
+        Ok(BzEncoder::new(out, Compression::Best))
+    }
+    /// use dyn trait.
+    #[allow(dead_code)]
+    fn get_archive_writer(
+        &self,
+        tar_dir: impl AsRef<Path>,
+    ) -> Result<Box<dyn io::Write>, failure::Error> {
+        let next_fn = rolling_files::get_next_file_name(
+            tar_dir.as_ref(),
+            &self.archive_prefix,
+            &self.archive_postfix,
+        );
+        let file: Box<dyn io::Write> = if let Some(ref sm) = self.compress_archive {
+            match sm {
+                CompressionImpl::Bzip2 => {
+                    let out = fs::File::create(next_fn)?;
+                    Box::new(BzEncoder::new(out, Compression::Best))
                 }
             }
-            a.finish()?;
+        } else {
+            Box::new(fs::File::create(next_fn)?)
+        };
+        Ok(file)
+    }
+
+    fn do_tar_local(&self, writer: impl io::Write) -> Result<(), failure::Error> {
+        let mut archive = Builder::new(writer);
+
+        for dir in self.directories.iter() {
+            let d_path = Path::new(&dir.local_dir);
+            if let Some(d_path_name) = d_path.file_name() {
+                archive.append_dir_all(d_path_name, d_path)?;
+            } else {
+                error!("dir.local_dir get file_name failed: {:?}", d_path);
+            }
+        }
+        archive.finish()?;
+
+        Ok(())
+    }
+
+    /// tar xjf(bzip2) or tar xzf(gzip).
+    pub fn tar_local(&self) -> Result<(), failure::Error> {
+        if let Some(_tf) = self.tar_dir.as_ref() {
+            if let Some(ref zm) = self.compress_archive {
+                match zm {
+                    CompressionImpl::Bzip2 => {
+                        self.do_tar_local(self.get_archive_writer_bzip2()?)?
+                    }
+                };
+            } else {
+                self.do_tar_local(self.get_archive_writer_file()?)?;
+            }
         } else {
             error!("empty tar_dir in the server.");
         }
@@ -613,7 +673,7 @@ mod tests {
     use super::*;
     use crate::develope::tutil;
     use crate::log_util;
-    use bzip2::write::BzEncoder;
+    use bzip2::write::{BzDecoder, BzEncoder};
     use bzip2::Compression;
     use std::io::prelude::*;
 
@@ -711,7 +771,27 @@ mod tests {
         encoder.try_finish()?;
         test_dir.assert_file_exists("xx.bzip2");
         let of = test_dir.get_file_path("xx.bzip2");
-        info!("len: {}, ratio: {:?}", of.metadata().expect("sg").len(), (encoder.total_out() as f64 / encoder.total_in() as f64) * 100_f64);
+        info!(
+            "len: {}, ratio: {:?}",
+            of.metadata().expect("sg").len(),
+            (encoder.total_out() as f64 / encoder.total_in() as f64) * 100_f64
+        );
+
+        let out = test_dir.open_an_empty_file_for_write("b.txt")?;
+
+        let mut decoder = BzDecoder::new(out);
+
+        let mut read_in = test_dir.open_a_file_for_read("xx.bzip2")?;
+
+        io::copy(&mut read_in, &mut decoder)?;
+        decoder.try_finish()?;
+
+        assert_eq!(
+            test_dir.get_file_path("b.txt").metadata()?.len(),
+            10000,
+            "len should equal to file before compress."
+        );
+
         Ok(())
     }
 

@@ -1,6 +1,5 @@
 use crate::data_shape::{FileItem, FileItemProcessResult, Server, SyncType};
 use crate::rustsync::{DeltaFileReader, DeltaReader, Signature};
-use filetime;
 use log::*;
 use sha1::{Digest, Sha1};
 use ssh2;
