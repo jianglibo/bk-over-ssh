@@ -405,7 +405,7 @@ impl Server {
         app_conf: &AppConf,
         name: impl AsRef<str>,
     ) -> Result<Server, failure::Error> {
-        Server::load_from_yml(app_conf.get_servers_dir(), app_conf.get_data_dir(), name)
+        Server::load_from_yml(app_conf.get_servers_dir(), app_conf.get_data_dir_str(), name)
     }
 
     pub fn is_connected(&self) -> bool {

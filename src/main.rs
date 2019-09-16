@@ -179,6 +179,8 @@ fn main() -> Result<(), failure::Error> {
         }
     };
 
+    println!("using configuration file: {:?}", app_conf.config_file_path.as_ref().expect("configuration file should exist at this point."));
+
     app_conf.validate_conf()?;
     log_util::setup_logger_for_this_app(
         true,

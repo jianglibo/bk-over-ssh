@@ -23,36 +23,6 @@ pub struct AppConf {
     data_dir_full_path: Option<PathBuf>,
 }
 
-// fn guess_servers_dir() -> Result<PathBuf, failure::Error> {
-//     info!(
-//         "try to find servers_dir in current_exe: {:?}",
-//         env::current_exe()
-//     );
-//     if let Ok(current_exe) = env::current_exe() {
-//         if let Some(current_dir) = current_exe.parent() {
-//             let p = current_dir.join("servers");
-//             if p.exists() {
-//                 info!("found servers_dir: {:?}", p);
-//                 return Ok(p);
-//             }
-//         }
-//     }
-
-//     info!(
-//         "try to find servers_dir in current_dir: {:?}",
-//         env::current_dir()
-//     );
-//     if let Ok(current_dir) = env::current_dir() {
-//         let p = current_dir.join("servers");
-//         if p.exists() {
-//             info!("found servers_dir: {:?}", p);
-//             return Ok(p);
-//         }
-//     }
-
-//     bail!("cannot find servers_dir configuration item.");
-// }
-
 impl AppConf {
     fn read_app_conf(file: impl AsRef<Path>) -> Result<Option<AppConf>, failure::Error> {
         if !file.as_ref().exists() {
@@ -66,7 +36,7 @@ impl AppConf {
                     Ok(mut app_conf) => {
                         app_conf.config_file_path.replace(file.to_path_buf());
                         return Ok(Some(app_conf));
-                        },
+                    }
                     Err(err) => bail!("deserialize failed: {:?}, {:?}", file, err),
                 }
             } else {
@@ -76,7 +46,7 @@ impl AppConf {
             bail!("open conf file failed: {:?}", file);
         }
     }
-
+    #[allow(dead_code)]
     pub fn write_to_working_dir(&self) -> Result<(), failure::Error> {
         let ymld = serde_yaml::to_string(self)?;
         let path = env::current_dir()?.join(CONF_FILE_NAME);
@@ -92,9 +62,10 @@ impl AppConf {
         } else {
             if let Ok(current_exe) = env::current_exe() {
                 if let Some(pp) = current_exe.parent() {
-                    let cf =  pp.join(CONF_FILE_NAME);
+                    let cf = pp.join(CONF_FILE_NAME);
                     trace!("found configuration file: {:?}", &cf);
-                    if let Some(af) = AppConf::read_app_conf(&cf)? { // if it returned None, continue searching.
+                    if let Some(af) = AppConf::read_app_conf(&cf)? {
+                        // if it returned None, continue searching.
                         return Ok(Some(af));
                     }
                 }
@@ -109,9 +80,15 @@ impl AppConf {
         bail!("read app_conf failed.")
     }
 
-    /// default to "data" folder in the working directory.
-    pub fn get_data_dir(&self) -> &str {
+    pub fn get_data_dir_str(&self) -> &str {
         &self.data_dir
+    }
+
+    pub fn get_data_dir(&self) -> &Path {
+        self.data_dir_full_path
+            .as_ref()
+            .map(|pb| pb.as_path())
+            .expect("data_dir_full_path should always available.")
     }
 
     pub fn validate_conf(&mut self) -> Result<(), failure::Error> {
@@ -121,23 +98,34 @@ impl AppConf {
             self.data_dir = self.data_dir.trim().to_string();
         }
 
-        let path = Path::new(&self.data_dir);
-        if !path.exists() {
-            fs::create_dir_all(path)?;
+        let mut path_buf = Path::new(&self.data_dir).to_path_buf();
+        if !&path_buf.is_absolute() {
+            path_buf = env::current_exe()?
+                .parent()
+                .expect("current_exe parent should exists.")
+                .join(path_buf);
         }
-
-        self.data_dir_full_path.replace(path.canonicalize()?);
+        if !&path_buf.exists() {
+            if let Err(err) = fs::create_dir_all(&path_buf) {
+                bail!("create data_dir {:?}, failed: {:?}", &path_buf, err);
+            }
+        }
+        match path_buf.canonicalize() {
+            Ok(ab) => self.data_dir_full_path.replace(ab),
+            Err(err) => bail!("path_buf {:?} canonicalize failed: {:?}", &path_buf, err),
+        };
 
         let servers_dir = self.get_servers_dir();
         if !servers_dir.exists() {
-            fs::create_dir_all(servers_dir)?;
+            if let Err(err) = fs::create_dir_all(&servers_dir) {
+                bail!("create servers_dir {:?}, failed: {:?}", &servers_dir, err);
+            }
         }
-
         Ok(())
     }
 
     pub fn get_servers_dir(&self) -> PathBuf {
-        Path::new(&self.data_dir).join("servers")
+        self.get_data_dir().join("servers")
     }
 
     pub fn get_log_conf(&self) -> &LogConf {
@@ -149,7 +137,7 @@ impl AppConf {
         if path.is_absolute() {
             self.log_conf.log_file.clone()
         } else {
-            Path::new(&self.data_dir)
+            self.get_data_dir()
                 .join(path)
                 .to_str()
                 .expect("log_file should be a valid string.")
