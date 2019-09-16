@@ -239,7 +239,7 @@ impl Server {
 
     pub fn load_from_yml(
         servers_dir: impl AsRef<Path>,
-        data_dir: impl AsRef<str>,
+        data_dir: impl AsRef<Path>,
         name: impl AsRef<str>,
     ) -> Result<Server, failure::Error> {
         trace!("got server yml name: {:?}", name.as_ref());
@@ -271,9 +271,9 @@ impl Server {
         f.read_to_string(&mut buf)?;
         let mut server: Server = serde_yaml::from_str(&buf)?;
         let data_dir = data_dir.as_ref();
-        let maybe_local_server_base_dir = Path::new(data_dir).join(&server.host);
-        let report_dir = Path::new(data_dir).join("report").join(&server.host);
-        let tar_dir = Path::new(data_dir).join("tar").join(&server.host);
+        let maybe_local_server_base_dir = data_dir.join(&server.host);
+        let report_dir = data_dir.join("report").join(&server.host);
+        let tar_dir = data_dir.join("tar").join(&server.host);
         if !report_dir.exists() {
             fs::create_dir_all(&report_dir)?;
         }
@@ -405,7 +405,7 @@ impl Server {
         app_conf: &AppConf,
         name: impl AsRef<str>,
     ) -> Result<Server, failure::Error> {
-        Server::load_from_yml(app_conf.get_servers_dir(), app_conf.get_data_dir_str(), name)
+        Server::load_from_yml(app_conf.get_servers_dir(), app_conf.get_data_dir(), name)
     }
 
     pub fn is_connected(&self) -> bool {
@@ -824,6 +824,25 @@ mod tests {
         let file = file.unwrap();
         info!("{:?}", file.header());
         assert_eq!(file.header().path()?, Path::new("xx.xx"));
+        Ok(())
+    }
+
+        #[test]
+    fn t_glob() -> Result<(), failure::Error> {
+        log();
+        let ptn1 = Pattern::new("a/")?;
+        assert!(!ptn1.matches("xa/bc"));
+        let ptn1 = Pattern::new("?a/*")?;
+        assert!(ptn1.matches("xa/bc"));
+
+        let ptn1 = Pattern::new("**/a/b/**")?;
+        assert!(ptn1.matches("x/a/b/c"));
+
+        let ptn1 = Pattern::new("**/c/a/**")?;
+        let p1 = Path::new("xy/c/a/3.txt");
+
+        assert!(ptn1.matches_path(p1));
+
         Ok(())
     }
 }
