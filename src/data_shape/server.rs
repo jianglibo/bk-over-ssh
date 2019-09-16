@@ -159,6 +159,8 @@ pub struct Server {
     report_dir: Option<PathBuf>,
     #[serde(skip)]
     tar_dir: Option<PathBuf>,
+    #[serde(skip)]
+    pub yml_location: Option<PathBuf>,
 }
 
 impl Server {
@@ -278,8 +280,10 @@ impl Server {
         if !tar_dir.exists() {
             fs::create_dir_all(&tar_dir)?;
         }
-        server.report_dir = Some(report_dir);
-        server.tar_dir = Some(tar_dir);
+        server.report_dir.replace(report_dir);
+        server.tar_dir.replace(tar_dir);
+        let ab = server_yml_path.canonicalize()?;
+        server.yml_location.replace(ab);
 
         server.directories.iter_mut().try_for_each(|d| {
             d.compile_patterns().unwrap();

@@ -157,13 +157,19 @@ fn main() -> Result<(), failure::Error> {
                 cfg
             } else {
                 let bytes = include_bytes!("app_config_demo.yml");
-                let path = env::current_exe()?.parent().expect("current_exe's parent folder should exists.").join(CONF_FILE_NAME);
+                let path = env::current_exe()?
+                    .parent()
+                    .expect("current_exe's parent folder should exists.")
+                    .join(CONF_FILE_NAME);
                 let mut file = fs::OpenOptions::new()
                     .write(true)
                     .create(true)
                     .open(&path)?;
                 file.write_all(bytes)?;
-                println!("Cann't find app configuration file,  had created one for you: \n{:?}", path);
+                println!(
+                    "Cann't find app configuration file,  had created one for you: \n{:?}",
+                    path
+                );
                 return Ok(());
             }
         }
@@ -180,7 +186,6 @@ fn main() -> Result<(), failure::Error> {
         &app_conf.get_log_conf().verbose_modules,
     )?;
 
-
     match m.subcommand() {
         ("completions", Some(sub_matches)) => {
             let shell = sub_matches.value_of("shell_name").unwrap();
@@ -190,47 +195,45 @@ fn main() -> Result<(), failure::Error> {
                 &mut io::stdout(),
             );
         }
-        ("rsync", Some(sub_matches)) => {
-            match sub_matches.subcommand() {
-                ("sync-dirs", Some(sub_sub_matches)) => {
-                    let server_config_path = sub_sub_matches.value_of("server-yml").unwrap();
-                    let skip_sha1 = sub_sub_matches.is_present("skip-sha1");
-                    match Server::load_from_yml_with_app_config(&app_conf, server_config_path) {
-                        Ok(mut server) => match server.sync_dirs(skip_sha1) {
-                            Ok(result) => {
-                                actions::write_dir_sync_result(&server, &result);
-                                println!("{:?}", result);
-                            }
-                            Err(err) => error!("sync-dirs failed: {:?}", err),
-                        },
-                        Err(err) => {
-                            error!("load_from_yml failed: {:?}", err);
+        ("rsync", Some(sub_matches)) => match sub_matches.subcommand() {
+            ("sync-dirs", Some(sub_sub_matches)) => {
+                let server_config_path = sub_sub_matches.value_of("server-yml").unwrap();
+                let skip_sha1 = sub_sub_matches.is_present("skip-sha1");
+                match Server::load_from_yml_with_app_config(&app_conf, server_config_path) {
+                    Ok(mut server) => match server.sync_dirs(skip_sha1) {
+                        Ok(result) => {
+                            actions::write_dir_sync_result(&server, &result);
+                            println!("{:?}", result);
                         }
+                        Err(err) => error!("sync-dirs failed: {:?}", err),
+                    },
+                    Err(err) => {
+                        error!("load_from_yml failed: {:?}", err);
                     }
                 }
-                ("archive-local", Some(sub_sub_matches)) => {
-                    let server_config_path = sub_sub_matches.value_of("server-yml").unwrap();
-                    match Server::load_from_yml_with_app_config(&app_conf, server_config_path) {
-                        Ok(server) => {
-                            server.tar_local()?;
-                        }
-                        Err(err) => {
-                            error!("load_from_yml failed: {:?}", err);
-                        }
+            }
+            ("archive-local", Some(sub_sub_matches)) => {
+                let server_config_path = sub_sub_matches.value_of("server-yml").unwrap();
+                match Server::load_from_yml_with_app_config(&app_conf, server_config_path) {
+                    Ok(server) => {
+                        server.tar_local()?;
+                    }
+                    Err(err) => {
+                        error!("load_from_yml failed: {:?}", err);
                     }
                 }
-                //TODO verify server-yml.
-                ("verify-server-yml", Some(sub_sub_matches)) => {
-                    let server_config_path = sub_sub_matches.value_of("server-yml").unwrap();
-                    match Server::load_from_yml_with_app_config(&app_conf, server_config_path) {
-                        Ok(mut server) => {
-                            if let Err(err) = server.stats_remote_exec() {
-                                println!(
-                                    "CAN'T FIND SERVER SIDE EXEC. {:?}\n{:?}",
-                                    server.remote_exec, err
-                                );
-                                return Ok(());
-                            }
+            }
+            ("verify-server-yml", Some(sub_sub_matches)) => {
+                let server_config_path = sub_sub_matches.value_of("server-yml").unwrap();
+                match Server::load_from_yml_with_app_config(&app_conf, server_config_path) {
+                    Ok(mut server) => {
+                        println!("found server configuration yml at: {:?}", server.yml_location.as_ref().unwrap());
+                        if let Err(err) = server.stats_remote_exec() {
+                            println!(
+                                "CAN'T FIND SERVER SIDE EXEC. {:?}\n{:?}",
+                                server.remote_exec, err
+                            );
+                        } else {
                             let rp = server.remote_server_yml.clone();
                             match server.get_remote_file_content(&rp) {
                                 Ok(content) => {
@@ -238,131 +241,129 @@ fn main() -> Result<(), failure::Error> {
                                     if !server.dir_equals(&ss) {
                                         println!("SERVER DIRS DIDN'T EQUAL TO.\nlocal: {:?} vs remote: {:?}",
                                         server.directories, ss.directories);
+                                    } else {
+                                        println!("SERVER SIDE CONFIGURATION IS OK!");
                                     }
                                 }
                                 Err(err) => println!("got error: {:?}", err),
                             }
                         }
-                        Err(err) => {
-                            error!("load_from_yml failed: {}", err);
-                            return Ok(());
-                        }
                     }
-                    println!("SERVER SIDE CONFIGURATION IS OK!");
-                }
-                ("restore-a-file", Some(sub_sub_matches)) => {
-                    let old_file = sub_sub_matches.value_of("old-file").unwrap();
-                    let maybe_delta_file = sub_sub_matches.value_of("delta-file");
-                    let maybe_out_file = sub_sub_matches.value_of("out-file");
-                    let delta_file = if let Some(f) = maybe_delta_file {
-                        f.to_string()
-                    } else {
-                        format!("{}.delta", old_file)
-                    };
-
-                    let out_file = if let Some(f) = maybe_out_file {
-                        f.to_string()
-                    } else {
-                        format!("{}.restore", old_file)
-                    };
-
-                    let mut dr =
-                        rustsync::DeltaFileReader::<fs::File>::read_delta_file(delta_file)?;
-                    dr.restore_from_file_to_file(out_file, old_file)?;
-                }
-                ("delta-a-file", Some(sub_sub_matches)) => {
-                    let new_file = sub_sub_matches.value_of("new-file").unwrap();
-                    let maybe_sig_file = sub_sub_matches.value_of("sig-file");
-                    let maybe_out_file = sub_sub_matches.value_of("out-file");
-                    let sig_file = if let Some(f) = maybe_sig_file {
-                        f.to_string()
-                    } else {
-                        format!("{}.sig", new_file)
-                    };
-
-                    let out_file = if let Some(f) = maybe_out_file {
-                        f.to_string()
-                    } else {
-                        format!("{}.delta", new_file)
-                    };
-
-                    let sig = rustsync::Signature::load_signature_file(sig_file)?;
-
-                    let new_file_input = fs::OpenOptions::new().read(true).open(new_file)?;
-                    rustsync::DeltaFileWriter::<fs::File>::create_delta_file(
-                        out_file, sig.window, None,
-                    )?
-                    .compare(&sig, new_file_input)?;
-                }
-                ("signature", Some(sub_sub_matches)) => {
-                    let file = sub_sub_matches.value_of("file").unwrap();
-                    let block_size: Option<usize> = sub_sub_matches
-                        .value_of("block-size")
-                        .and_then(|s| s.parse().ok());
-                    let sig_file = format!("{}.sig", file);
-                    let out = sub_sub_matches
-                        .value_of("out")
-                        .unwrap_or_else(|| sig_file.as_str());
-                    let start = Instant::now();
-                    match rustsync::Signature::signature_a_file(file, block_size) {
-                        Ok(mut sig) => {
-                            if let Err(err) = sig.write_to_file(out) {
-                                error!("rsync signature write_to_file failed: {:?}", err);
-                            }
-                        }
-                        Err(err) => {
-                            error!("rsync signature failed: {:?}", err);
-                        }
+                    Err(err) => {
+                        error!("load_from_yml failed: {}", err);
                     }
-                    println!("time costs: {:?}", start.elapsed().as_secs());
-                }
-                ("list-remote-files", Some(sub_sub_matches)) => {
-                    let server_config_path = sub_sub_matches
-                        .value_of("server-yml")
-                        .expect("should load sever yml.");
-                    let skip_sha1 = sub_sub_matches.is_present("skip-sha1");
-                    let start = Instant::now();
-                    let mut server =
-                        Server::load_from_yml_with_app_config(&app_conf, server_config_path)?;
-
-                    if let Some(out) = sub_sub_matches.value_of("out") {
-                        let mut out = fs::OpenOptions::new()
-                            .create(true)
-                            .truncate(true)
-                            .write(true)
-                            .open(out)?;
-                        server.list_remote_file_exec(&mut out, skip_sha1)?;
-                    } else {
-                        server.list_remote_file_exec(&mut io::stdout(), skip_sha1)?;
-                    }
-
-                    println!("time costs: {:?}", start.elapsed().as_secs());
-                }
-                ("list-local-files", Some(sub_sub_matches)) => {
-                    let server_config_path = sub_sub_matches
-                        .value_of("server-yml")
-                        .expect("should load server yml.");
-                    let skip_sha1 = sub_sub_matches.is_present("skip-sha1");
-
-                    let server =
-                        Server::load_from_yml_with_app_config(&app_conf, server_config_path)?;
-
-                    if let Some(out) = sub_sub_matches.value_of("out") {
-                        let mut out = fs::OpenOptions::new()
-                            .create(true)
-                            .truncate(true)
-                            .write(true)
-                            .open(out)?;
-                        server.load_dirs(&mut out, skip_sha1)?;
-                    } else {
-                        server.load_dirs(&mut io::stdout(), skip_sha1)?;
-                    }
-                }
-                (_, _) => {
-                    println!("please add --help to view usage help.");
                 }
             }
-        }
+            ("restore-a-file", Some(sub_sub_matches)) => {
+                let old_file = sub_sub_matches.value_of("old-file").unwrap();
+                let maybe_delta_file = sub_sub_matches.value_of("delta-file");
+                let maybe_out_file = sub_sub_matches.value_of("out-file");
+                let delta_file = if let Some(f) = maybe_delta_file {
+                    f.to_string()
+                } else {
+                    format!("{}.delta", old_file)
+                };
+
+                let out_file = if let Some(f) = maybe_out_file {
+                    f.to_string()
+                } else {
+                    format!("{}.restore", old_file)
+                };
+
+                let mut dr = rustsync::DeltaFileReader::<fs::File>::read_delta_file(delta_file)?;
+                dr.restore_from_file_to_file(out_file, old_file)?;
+            }
+            ("delta-a-file", Some(sub_sub_matches)) => {
+                let new_file = sub_sub_matches.value_of("new-file").unwrap();
+                let maybe_sig_file = sub_sub_matches.value_of("sig-file");
+                let maybe_out_file = sub_sub_matches.value_of("out-file");
+                let sig_file = if let Some(f) = maybe_sig_file {
+                    f.to_string()
+                } else {
+                    format!("{}.sig", new_file)
+                };
+
+                let out_file = if let Some(f) = maybe_out_file {
+                    f.to_string()
+                } else {
+                    format!("{}.delta", new_file)
+                };
+
+                let sig = rustsync::Signature::load_signature_file(sig_file)?;
+
+                let new_file_input = fs::OpenOptions::new().read(true).open(new_file)?;
+                rustsync::DeltaFileWriter::<fs::File>::create_delta_file(
+                    out_file, sig.window, None,
+                )?
+                .compare(&sig, new_file_input)?;
+            }
+            ("signature", Some(sub_sub_matches)) => {
+                let file = sub_sub_matches.value_of("file").unwrap();
+                let block_size: Option<usize> = sub_sub_matches
+                    .value_of("block-size")
+                    .and_then(|s| s.parse().ok());
+                let sig_file = format!("{}.sig", file);
+                let out = sub_sub_matches
+                    .value_of("out")
+                    .unwrap_or_else(|| sig_file.as_str());
+                let start = Instant::now();
+                match rustsync::Signature::signature_a_file(file, block_size) {
+                    Ok(mut sig) => {
+                        if let Err(err) = sig.write_to_file(out) {
+                            error!("rsync signature write_to_file failed: {:?}", err);
+                        }
+                    }
+                    Err(err) => {
+                        error!("rsync signature failed: {:?}", err);
+                    }
+                }
+                println!("time costs: {:?}", start.elapsed().as_secs());
+            }
+            ("list-remote-files", Some(sub_sub_matches)) => {
+                let server_config_path = sub_sub_matches
+                    .value_of("server-yml")
+                    .expect("should load sever yml.");
+                let skip_sha1 = sub_sub_matches.is_present("skip-sha1");
+                let start = Instant::now();
+                let mut server =
+                    Server::load_from_yml_with_app_config(&app_conf, server_config_path)?;
+
+                if let Some(out) = sub_sub_matches.value_of("out") {
+                    let mut out = fs::OpenOptions::new()
+                        .create(true)
+                        .truncate(true)
+                        .write(true)
+                        .open(out)?;
+                    server.list_remote_file_exec(&mut out, skip_sha1)?;
+                } else {
+                    server.list_remote_file_exec(&mut io::stdout(), skip_sha1)?;
+                }
+
+                println!("time costs: {:?}", start.elapsed().as_secs());
+            }
+            ("list-local-files", Some(sub_sub_matches)) => {
+                let server_config_path = sub_sub_matches
+                    .value_of("server-yml")
+                    .expect("should load server yml.");
+                let skip_sha1 = sub_sub_matches.is_present("skip-sha1");
+
+                let server = Server::load_from_yml_with_app_config(&app_conf, server_config_path)?;
+
+                if let Some(out) = sub_sub_matches.value_of("out") {
+                    let mut out = fs::OpenOptions::new()
+                        .create(true)
+                        .truncate(true)
+                        .write(true)
+                        .open(out)?;
+                    server.load_dirs(&mut out, skip_sha1)?;
+                } else {
+                    server.load_dirs(&mut io::stdout(), skip_sha1)?;
+                }
+            }
+            (_, _) => {
+                println!("please add --help to view usage help.");
+            }
+        },
         ("repl", Some(_)) => {
             main_client();
         }
@@ -373,7 +374,11 @@ fn main() -> Result<(), failure::Error> {
             println!("current exec: {:?}", env::current_exe());
         }
         ("print-conf", Some(_)) => {
-            println!("{:?}", app_conf);
+            println!(
+                "The configuration file is located at: {:?}, content:\n{}",
+                app_conf.config_file_path.as_ref().unwrap(),
+                serde_yaml::to_string(&app_conf)?
+            );
         }
         (_, _) => unimplemented!(), // for brevity
     }

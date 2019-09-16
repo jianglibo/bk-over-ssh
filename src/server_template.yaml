@@ -19,7 +19,7 @@ directories:
       - "*.log"
       - "*.bak"
 archive_prefix: backup
-archive_postfix: .tar
+archive_postfix: .tar.bz2
 compress_archive: bzip2
 prune_strategy:
   yearly: 1

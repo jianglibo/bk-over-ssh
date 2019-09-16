@@ -17,8 +17,10 @@ pub struct LogConf {
 pub struct AppConf {
     data_dir: String,
     log_conf: LogConf,
-    #[serde(skip)]
-    config_file_path: Option<PathBuf>,
+    #[serde(skip_deserializing)]
+    pub config_file_path: Option<PathBuf>,
+    #[serde(skip_deserializing)]
+    data_dir_full_path: Option<PathBuf>,
 }
 
 // fn guess_servers_dir() -> Result<PathBuf, failure::Error> {
@@ -123,6 +125,8 @@ impl AppConf {
         if !path.exists() {
             fs::create_dir_all(path)?;
         }
+
+        self.data_dir_full_path.replace(path.canonicalize()?);
 
         let servers_dir = self.get_servers_dir();
         if !servers_dir.exists() {
