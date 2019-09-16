@@ -3,7 +3,7 @@ use crate::data_shape::{
     load_remote_item_owned, rolling_files, string_path, AppConf, FileItem, FileItemProcessResult,
     FileItemProcessResultStats, RemoteFileItemOwned, SyncType,
 };
-use bzip2::write::{BzEncoder};
+use bzip2::write::BzEncoder;
 use bzip2::Compression;
 use glob::Pattern;
 use log::*;
@@ -14,7 +14,7 @@ use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 use std::{fs, io, io::Seek};
-use tar::{Builder};
+use tar::Builder;
 
 #[derive(Deserialize, Debug)]
 #[serde(rename_all(deserialize = "snake_case"))]
@@ -171,12 +171,20 @@ impl Server {
         remote: impl AsRef<str>,
     ) -> Result<(), failure::Error> {
         self.connect()?;
+        let local = local.as_ref();
+        let remote = remote.as_ref();
         let sftp: ssh2::Sftp = self.session.as_ref().unwrap().sftp()?;
 
-        info!("copy from {:?} to {:?}", local.as_ref(), remote.as_ref());
-        let mut r_file = sftp.create(Path::new(remote.as_ref()))?;
-        let mut l_file = fs::File::open(local.as_ref())?;
-        io::copy(&mut l_file, &mut r_file)?;
+        if let Ok(mut r_file) = sftp.create(Path::new(remote)) {
+            let mut l_file = fs::File::open(local)?;
+            io::copy(&mut l_file, &mut r_file)?;
+        } else {
+            bail!(
+                "copy from {:?} to {:?} failed. maybe remote file's parent dir didn't exists.",
+                local,
+                remote
+            );
+        }
         Ok(())
     }
 
@@ -242,17 +250,18 @@ impl Server {
         data_dir: impl AsRef<Path>,
         name: impl AsRef<str>,
     ) -> Result<Server, failure::Error> {
-        trace!("got server yml name: {:?}", name.as_ref());
-        let mut server_yml_path = Path::new(name.as_ref()).to_path_buf();
-        if (server_yml_path.is_absolute() || name.as_ref().starts_with('/'))
-            && !server_yml_path.exists()
-        {
+        let name = name.as_ref();
+        trace!("got server yml name: {:?}", name);
+        let mut server_yml_path = Path::new(name).to_path_buf();
+        if (server_yml_path.is_absolute() || name.starts_with('/')) && !server_yml_path.exists() {
             bail!(
                 "server yml file does't exist, please create one: {:?}",
                 server_yml_path
             );
         } else {
-            server_yml_path = servers_dir.as_ref().join(name.as_ref());
+            if !name.contains('/') {
+                server_yml_path = servers_dir.as_ref().join(name);
+            }
             if !server_yml_path.exists() {
                 let bytes = include_bytes!("../server_template.yaml");
                 let mut f = fs::OpenOptions::new()
@@ -827,7 +836,7 @@ mod tests {
         Ok(())
     }
 
-        #[test]
+    #[test]
     fn t_glob() -> Result<(), failure::Error> {
         log();
         let ptn1 = Pattern::new("a/")?;

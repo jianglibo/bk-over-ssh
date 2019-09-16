@@ -88,11 +88,28 @@ subcommands:
     #             help: example subcommand positional
     #             index: 1
     - print-conf:
-        help: print out the current configuration of application.
+        about: print out the current configuration of application.
     - print-env:
         about: print out environment variables.
     - repl:
         about: enter repl mode.
+    - copy-executable:
+        about: copy a executable file to server, the directory to put is described in the server yml file.
+        args:
+            - server-yml:
+                long: server-yml
+                required: true
+                takes_value: true
+            - executable:
+                help: the executable file to copy.
+                required: true
+                index: 1
+    - copy-server-yml:
+        about: copy a server-yml file to server, the directory to put is described in the server yml file.
+        args:
+            - server-yml:
+                required: true
+                index: 1
     - rsync:
         about: sync relative functions.
         args:
