@@ -1,6 +1,6 @@
 name: bk-over-ssh
 version: "0.1.0"
-about: backup files over ssh.
+about: backup files over ssh.  Please try run print-conf and print-env subcommand first.
 author: hmkj <hmkj@gmail.com>
 
 # AppSettings can be defined as a list and are **not** ascii case sensitive

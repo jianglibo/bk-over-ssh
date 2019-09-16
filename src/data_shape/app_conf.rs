@@ -17,6 +17,8 @@ pub struct LogConf {
 pub struct AppConf {
     data_dir: String,
     log_conf: LogConf,
+    #[serde(skip)]
+    config_file_path: Option<PathBuf>,
 }
 
 // fn guess_servers_dir() -> Result<PathBuf, failure::Error> {
@@ -54,18 +56,22 @@ impl AppConf {
         if !file.as_ref().exists() {
             return Ok(None);
         }
-        if let Ok(mut f) = fs::OpenOptions::new().read(true).open(file.as_ref()) {
+        let file = file.as_ref();
+        if let Ok(mut f) = fs::OpenOptions::new().read(true).open(file) {
             let mut buf = String::new();
             if let Ok(_) = f.read_to_string(&mut buf) {
                 match serde_yaml::from_str::<AppConf>(&buf) {
-                    Ok(app_conf) => return Ok(Some(app_conf)),
-                    Err(err) => bail!("deserialize failed: {:?}, {:?}", file.as_ref(), err),
+                    Ok(mut app_conf) => {
+                        app_conf.config_file_path.replace(file.to_path_buf());
+                        return Ok(Some(app_conf));
+                        },
+                    Err(err) => bail!("deserialize failed: {:?}, {:?}", file, err),
                 }
             } else {
-                bail!("read_to_string failure: {:?}", file.as_ref());
+                bail!("read_to_string failure: {:?}", file);
             }
         } else {
-            bail!("open conf file failed: {:?}", file.as_ref());
+            bail!("open conf file failed: {:?}", file);
         }
     }
 
@@ -84,7 +90,9 @@ impl AppConf {
         } else {
             if let Ok(current_exe) = env::current_exe() {
                 if let Some(pp) = current_exe.parent() {
-                    if let Ok(Some(af)) = AppConf::read_app_conf(pp.join(CONF_FILE_NAME)) {
+                    let cf =  pp.join(CONF_FILE_NAME);
+                    trace!("found configuration file: {:?}", &cf);
+                    if let Some(af) = AppConf::read_app_conf(&cf)? { // if it returned None, continue searching.
                         return Ok(Some(af));
                     }
                 }
@@ -92,7 +100,8 @@ impl AppConf {
 
             if let Ok(current_dir) = env::current_dir() {
                 let cf = current_dir.join(CONF_FILE_NAME);
-                return AppConf::read_app_conf(cf);
+                trace!("found configuration file: {:?}", &cf);
+                return AppConf::read_app_conf(&cf);
             }
         }
         bail!("read app_conf failed.")

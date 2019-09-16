@@ -157,17 +157,19 @@ fn main() -> Result<(), failure::Error> {
                 cfg
             } else {
                 let bytes = include_bytes!("app_config_demo.yml");
-                let path = env::current_dir()?.join(CONF_FILE_NAME);
+                let path = env::current_exe()?.parent().expect("current_exe's parent folder should exists.").join(CONF_FILE_NAME);
                 let mut file = fs::OpenOptions::new()
                     .write(true)
                     .create(true)
                     .open(&path)?;
                 file.write_all(bytes)?;
-                bail!("cann't find app configuration file and had created one for you in the current directory. {:?}", path);
+                println!("Cann't find app configuration file,  had created one for you: \n{:?}", path);
+                return Ok(());
             }
         }
         Err(err) => {
-            bail!("read app configuration file failed: {:?}", err);
+            println!("Read app configuration file failed: {:?}", err);
+            return Ok(());
         }
     };
 
@@ -242,7 +244,8 @@ fn main() -> Result<(), failure::Error> {
                             }
                         }
                         Err(err) => {
-                            error!("load_from_yml failed: {:?}", err);
+                            error!("load_from_yml failed: {}", err);
+                            return Ok(());
                         }
                     }
                     println!("SERVER SIDE CONFIGURATION IS OK!");
