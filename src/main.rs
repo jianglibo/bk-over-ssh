@@ -197,7 +197,7 @@ fn main() -> Result<(), failure::Error> {
 
     app_conf.validate_conf()?;
     log_util::setup_logger_for_this_app(
-        true,
+        app_conf.get_log_conf().console,
         app_conf.get_log_file().as_str(),
         &app_conf.get_log_conf().verbose_modules,
     )?;

@@ -1,6 +1,6 @@
 data_dir: data
 log_conf:
-  console: true
+  console: false
   log_file: output.log
   verbose_modules: []
     # - data_shape::server
