@@ -8,7 +8,6 @@ pub const CONF_FILE_NAME: &str = "bk_over_ssh.yml";
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct LogConf {
-    pub console: bool,
     pub log_file: String,
     pub verbose_modules: Vec<String>,
 }

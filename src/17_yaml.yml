@@ -30,6 +30,10 @@ args:
         long: conf
         takes_value: true
         required: false
+    - console-log:
+        help: enable console log output.
+        long: console-log
+        required: false
     # - flag:
     #     help: demo flag argument
     #     short: F

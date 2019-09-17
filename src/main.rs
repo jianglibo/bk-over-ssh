@@ -172,6 +172,7 @@ fn main() -> Result<(), failure::Error> {
     let mut app1 = App::from_yaml(yml);
 
     let conf = m.value_of("conf");
+    let console_log = m.is_present("console-log");
 
     let mut app_conf = match AppConf::guess_conf_file(conf) {
         Ok(cfg) => {
@@ -211,7 +212,7 @@ fn main() -> Result<(), failure::Error> {
 
     app_conf.validate_conf()?;
     log_util::setup_logger_for_this_app(
-        app_conf.get_log_conf().console,
+        console_log,
         app_conf.get_log_file().as_str(),
         &app_conf.get_log_conf().verbose_modules,
     )?;
