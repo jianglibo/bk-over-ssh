@@ -1,3 +1,4 @@
+use crate::data_shape::Server;
 use log::*;
 use serde::{Deserialize, Serialize};
 use std::env;
@@ -126,6 +127,44 @@ impl AppConf {
 
     pub fn get_servers_dir(&self) -> PathBuf {
         self.get_data_dir().join("servers")
+    }
+
+    pub fn load_server_yml(
+        &self,
+        yml_file_name: impl AsRef<str>,
+    ) -> Result<Server, failure::Error> {
+        Server::load_from_yml_with_app_config(&self, yml_file_name.as_ref())
+    }
+
+    pub fn load_all_server_yml(&self) -> Vec<Server> {
+        if let Ok(rd) = self.get_servers_dir().read_dir() {
+            rd.filter_map(|ery| match ery {
+                Err(err) => {
+                    warn!("read_dir entry return error: {:?}", err);
+                    None
+                }
+                Ok(entry) => Some(entry.file_name().into_string()),
+            })
+            .filter_map(|ossr| match ossr {
+                Err(err) => {
+                    warn!("osstring to_string failed: {:?}", err);
+                    None
+                }
+                Ok(astr) => Some(astr),
+            })
+            .map(|astr| self.load_server_yml(astr))
+            .filter_map(|rr| match rr {
+                Err(err) => {
+                    warn!("load_server_yml failed: {:?}", err);
+                    None
+                }
+                Ok(server) => Some(server),
+            })
+            .collect()
+        } else {
+            warn!("read_dir failed: {:?}", self.get_servers_dir());
+            Vec::new()
+        }
     }
 
     pub fn get_log_conf(&self) -> &LogConf {

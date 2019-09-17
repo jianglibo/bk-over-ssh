@@ -8,6 +8,7 @@ use bzip2::Compression;
 use glob::Pattern;
 use log::*;
 use pbr::{ProgressBar, Units};
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use ssh2;
 use std::io::prelude::{BufRead, Read, Write};
@@ -255,6 +256,12 @@ impl Server {
             .join("file_list_working.txt")
     }
 
+    pub fn load_from_yml_with_app_config(
+        app_conf: &AppConf,
+        name: impl AsRef<str>,
+    ) -> Result<Server, failure::Error> {
+        Server::load_from_yml(app_conf.get_servers_dir(), app_conf.get_data_dir(), name)
+    }
     pub fn load_from_yml(
         servers_dir: impl AsRef<Path>,
         data_dir: impl AsRef<Path>,
@@ -430,13 +437,6 @@ impl Server {
             error!("empty tar_dir in the server.");
         }
         Ok(())
-    }
-
-    pub fn load_from_yml_with_app_config(
-        app_conf: &AppConf,
-        name: impl AsRef<str>,
-    ) -> Result<Server, failure::Error> {
-        Server::load_from_yml(app_conf.get_servers_dir(), app_conf.get_data_dir(), name)
     }
 
     pub fn is_connected(&self) -> bool {
@@ -671,90 +671,103 @@ impl Server {
             pb.show_message = true;
             pb
         });
-        let result = file_item_lines.lines().map(|line_r|{
-            match line_r {
-                Ok(line) => {
-                    if line.starts_with('{') {
-                        trace!("got item line {}", line);
-                        if let (Some(rd), Some(ld)) =
-                            (current_remote_dir.as_ref(), current_local_dir)
-                        {
-                            match serde_json::from_str::<RemoteFileItemOwned>(&line) {
-                                Ok(remote_item) => {
-                                    let l = remote_item.get_len();
-                                    let sync_type = if self.rsync_valve > 0 && remote_item.get_len() > self.rsync_valve {
-                                        SyncType::Rsync
-                                    } else {
-                                        SyncType::Sftp
-                                    };
-                                    let local_item = FileItem::new(
-                                        ld,
-                                        rd.as_str(),
-                                        remote_item,
-                                        sync_type,
-                                    );
-                                    consume_count += 1;
-                                    let r = if local_item.had_changed() {
-                                        copy_a_file_item(&self, &sftp, local_item)
-                                    } else {
-                                        FileItemProcessResult::Skipped(local_item.get_local_path_str().expect("get_local_path_str should has some at thia point."))
-                                    };
-                                    if let Some(pb) = pb_op.as_mut() {
-                                        let s = format!("{} / {} , ", consume_count, total_count);
-                                        pb.message(s.as_str());
-                                        pb.add(l);
-                                    }
-                                    r
-                                }
-                                Err(err) => {
-                                    error!("deserialize line failed: {}, {:?}", line, err);
-                                    FileItemProcessResult::DeserializeFailed(line)
-                                }
-                            }
-                        } else {
-                            FileItemProcessResult::SkipBecauseNoBaseDir
-                        }
-                    } else {
-                        // it's a directory line.
-                        trace!("got directory line, it's a remote represent of path, be careful: {:?}", line);
-                        if let Some(rd) = self.directories.iter().find(|d| string_path::path_equal(&d.remote_dir, &line)) {
-                            current_remote_dir = Some(line.clone());
-                            current_local_dir = Some(Path::new(rd.local_dir.as_str()));
-                            FileItemProcessResult::Directory(line)
-                        } else {
-                            // cannot find corepsonding local_dir, skipping following lines.
-                            error!("can't find corepsonding local_dir: {:?}", line);
-                            current_remote_dir = None;
-                            current_local_dir = None;
-                            FileItemProcessResult::NoCorresponedLocalDir(line)
-                        }
-                    }
-                }
+        let result = file_item_lines
+            .lines()
+            .filter_map(|li| match li {
                 Err(err) => {
                     error!("read line failed: {:?}", err);
-                    FileItemProcessResult::ReadLineFailed
+                    None
                 }
-            }
-        }).fold(FileItemProcessResultStats::default(), |mut accu, item|{
-            match item {
-                FileItemProcessResult::DeserializeFailed(_) => accu.deserialize_failed += 1,
-                FileItemProcessResult::Skipped(_) => accu.skipped += 1,
-                FileItemProcessResult::NoCorresponedLocalDir(_) => accu.no_corresponed_local_dir += 1,
-                FileItemProcessResult::Directory(_) => accu.directory += 1,
-                FileItemProcessResult::LengthNotMatch(_) => accu.length_not_match += 1,
-                FileItemProcessResult::Sha1NotMatch(_) => accu.sha1_not_match += 1,
-                FileItemProcessResult::CopyFailed(_) => accu.copy_failed += 1,
-                FileItemProcessResult::SkipBecauseNoBaseDir => accu.skip_because_no_base_dir += 1,
-                FileItemProcessResult::Successed(fl, _,_) => {
-                    accu.bytes_transfered += fl;
-                    accu.successed += 1;
-                   },
-                FileItemProcessResult::GetLocalPathFailed => accu.get_local_path_failed += 1,
-                FileItemProcessResult::SftpOpenFailed => accu.sftp_open_failed += 1,
-                FileItemProcessResult::ReadLineFailed => accu.read_line_failed += 1,
-            };
-            accu
-        });
+                Ok(line) => Some(line),
+            }) /*.collect::<Vec<String>>().into_par_iter()*/
+            .map(|line| {
+                if line.starts_with('{') {
+                    trace!("got item line {}", line);
+                    if let (Some(rd), Some(ld)) = (current_remote_dir.as_ref(), current_local_dir) {
+                        match serde_json::from_str::<RemoteFileItemOwned>(&line) {
+                            Ok(remote_item) => {
+                                let l = remote_item.get_len();
+                                let sync_type = if self.rsync_valve > 0
+                                    && remote_item.get_len() > self.rsync_valve
+                                {
+                                    SyncType::Rsync
+                                } else {
+                                    SyncType::Sftp
+                                };
+                                let local_item =
+                                    FileItem::new(ld, rd.as_str(), remote_item, sync_type);
+                                consume_count += 1;
+                                let r = if local_item.had_changed() {
+                                    copy_a_file_item(&self, &sftp, local_item)
+                                } else {
+                                    FileItemProcessResult::Skipped(
+                                        local_item.get_local_path_str().expect(
+                                            "get_local_path_str should has some at thia point.",
+                                        ),
+                                    )
+                                };
+                                if let Some(pb) = pb_op.as_mut() {
+                                    let s = format!("{} / {} , ", consume_count, total_count);
+                                    pb.message(s.as_str());
+                                    pb.add(l);
+                                }
+                                r
+                            }
+                            Err(err) => {
+                                error!("deserialize line failed: {}, {:?}", line, err);
+                                FileItemProcessResult::DeserializeFailed(line)
+                            }
+                        }
+                    } else {
+                        FileItemProcessResult::SkipBecauseNoBaseDir
+                    }
+                } else {
+                    // it's a directory line.
+                    trace!(
+                        "got directory line, it's a remote represent of path, be careful: {:?}",
+                        line
+                    );
+                    if let Some(rd) = self
+                        .directories
+                        .iter()
+                        .find(|d| string_path::path_equal(&d.remote_dir, &line))
+                    {
+                        current_remote_dir = Some(line.clone());
+                        current_local_dir = Some(Path::new(rd.local_dir.as_str()));
+                        FileItemProcessResult::Directory(line)
+                    } else {
+                        // cannot find corepsonding local_dir, skipping following lines.
+                        error!("can't find corepsonding local_dir: {:?}", line);
+                        current_remote_dir = None;
+                        current_local_dir = None;
+                        FileItemProcessResult::NoCorresponedLocalDir(line)
+                    }
+                }
+            })
+            .fold(FileItemProcessResultStats::default(), |mut accu, item| {
+                match item {
+                    FileItemProcessResult::DeserializeFailed(_) => accu.deserialize_failed += 1,
+                    FileItemProcessResult::Skipped(_) => accu.skipped += 1,
+                    FileItemProcessResult::NoCorresponedLocalDir(_) => {
+                        accu.no_corresponed_local_dir += 1
+                    }
+                    FileItemProcessResult::Directory(_) => accu.directory += 1,
+                    FileItemProcessResult::LengthNotMatch(_) => accu.length_not_match += 1,
+                    FileItemProcessResult::Sha1NotMatch(_) => accu.sha1_not_match += 1,
+                    FileItemProcessResult::CopyFailed(_) => accu.copy_failed += 1,
+                    FileItemProcessResult::SkipBecauseNoBaseDir => {
+                        accu.skip_because_no_base_dir += 1
+                    }
+                    FileItemProcessResult::Successed(fl, _, _) => {
+                        accu.bytes_transfered += fl;
+                        accu.successed += 1;
+                    }
+                    FileItemProcessResult::GetLocalPathFailed => accu.get_local_path_failed += 1,
+                    FileItemProcessResult::SftpOpenFailed => accu.sftp_open_failed += 1,
+                    FileItemProcessResult::ReadLineFailed => accu.read_line_failed += 1,
+                };
+                accu
+            });
 
         // pb_op.map(|mut bp|bp.finish_println("done!"));
         Ok(result)

@@ -22,7 +22,7 @@ use clap::App;
 use clap::ArgMatches;
 use clap::Shell;
 use log::*;
-use pbr::ProgressBar;
+use pbr::{ProgressBar, MultiBar};
 use rustyline::completion::{Completer, FilenameCompleter, Pair};
 use rustyline::config::OutputStreamType;
 use rustyline::error::ReadlineError;
@@ -144,12 +144,8 @@ fn main_client() {
     rl.save_history("history.txt").unwrap();
 }
 
-fn load_server_yml<'a>(app_conf: &AppConf, sub_sub_matches: &ArgMatches<'a>) -> Server {
-    let server_config_path = sub_sub_matches.value_of("server-yml").unwrap();
-    match Server::load_from_yml_with_app_config(app_conf, server_config_path) {
-        Err(err) => panic!("load_from_yml failed: {:?}", err),
-        Ok(server) => server,
-    }
+fn parse_server_yml<'a>(sub_sub_matches: &'a clap::ArgMatches<'a>) -> &'a str {
+    sub_sub_matches.value_of("server-yml").unwrap()
 }
 
 fn demonstrate_pbr() -> Result<(), failure::Error> {
@@ -221,14 +217,45 @@ fn main() -> Result<(), failure::Error> {
         ("pbr", Some(_sub_matches)) => {
             demonstrate_pbr()?;
         }
+        ("sync-dirs", Some(sub_matches)) => {
+            let mut servers: Vec<Server> = Vec::new();
+            if sub_matches.value_of("server-yml").is_some() {
+                let server = app_conf.load_server_yml(parse_server_yml(sub_matches))?;
+                servers.push(server);
+            } else {
+                servers.append(&mut app_conf.load_all_server_yml());
+            }
+
+            let skip_sha1 = sub_matches.is_present("skip-sha1");
+            let no_pb = sub_matches.is_present("no-pb");
+
+            if servers.is_empty() {
+                println!("found no server yml!");
+            } else {
+                println!(
+                    "found {} server yml files. start processing...",
+                    servers.len()
+                );
+            }
+
+            for server in servers.iter_mut() {
+                match server.sync_dirs(skip_sha1, no_pb) {
+                    Ok(result) => {
+                        actions::write_dir_sync_result(&server, &result);
+                        println!("{:?}", result);
+                    }
+                    Err(err) => println!("sync-dirs failed: {:?}", err),
+                }
+            }
+        }
         ("copy-executable", Some(sub_matches)) => {
-            let mut server = load_server_yml(&app_conf, sub_matches);
+            let mut server = app_conf.load_server_yml(parse_server_yml(sub_matches))?;
             let executable = sub_matches.value_of("executable").unwrap();
             let remote = server.remote_exec.clone();
             server.copy_a_file(executable, &remote)?;
         }
         ("copy-server-yml", Some(sub_matches)) => {
-            let mut server = load_server_yml(&app_conf, sub_matches);
+            let mut server = app_conf.load_server_yml(parse_server_yml(sub_matches))?;
             let remote = server.remote_server_yml.clone();
             let local = server
                 .yml_location
@@ -252,12 +279,11 @@ fn main() -> Result<(), failure::Error> {
             }
         }
         ("archive-local", Some(sub_matches)) => {
-            let server = load_server_yml(&app_conf, sub_matches);
-            println!("1111");
+            let server = app_conf.load_server_yml(parse_server_yml(sub_matches))?;
             server.tar_local()?;
         }
         ("verify-server-yml", Some(sub_matches)) => {
-            let mut server = load_server_yml(&app_conf, sub_matches);
+            let mut server = app_conf.load_server_yml(parse_server_yml(sub_matches))?;
             println!(
                 "found server configuration yml at: {:?}",
                 server.yml_location.as_ref().unwrap()
@@ -295,19 +321,6 @@ fn main() -> Result<(), failure::Error> {
             );
         }
         ("rsync", Some(sub_matches)) => match sub_matches.subcommand() {
-            ("sync-dirs", Some(sub_sub_matches)) => {
-                let mut server = load_server_yml(&app_conf, sub_sub_matches);
-                let skip_sha1 = sub_sub_matches.is_present("skip-sha1");
-                let no_pb = sub_sub_matches.is_present("no-pb");
-
-                match server.sync_dirs(skip_sha1, no_pb) {
-                    Ok(result) => {
-                        actions::write_dir_sync_result(&server, &result);
-                        println!("{:?}", result);
-                    }
-                    Err(err) => error!("sync-dirs failed: {:?}", err),
-                }
-            }
             ("restore-a-file", Some(sub_sub_matches)) => {
                 let old_file = sub_sub_matches.value_of("old-file").unwrap();
                 let maybe_delta_file = sub_sub_matches.value_of("delta-file");
@@ -376,7 +389,7 @@ fn main() -> Result<(), failure::Error> {
             ("list-remote-files", Some(sub_sub_matches)) => {
                 let skip_sha1 = sub_sub_matches.is_present("skip-sha1");
                 let start = Instant::now();
-                let mut server = load_server_yml(&app_conf, sub_sub_matches);
+                let mut server = app_conf.load_server_yml(parse_server_yml(sub_sub_matches))?;
                 server.list_remote_file_exec(skip_sha1)?;
                 if let Some(out) = sub_sub_matches.value_of("out") {
                     let mut out = fs::OpenOptions::new()
@@ -399,7 +412,7 @@ fn main() -> Result<(), failure::Error> {
             }
             ("list-local-files", Some(sub_sub_matches)) => {
                 let skip_sha1 = sub_sub_matches.is_present("skip-sha1");
-                let server = load_server_yml(&app_conf, sub_sub_matches);
+                let mut server = &app_conf.load_server_yml(parse_server_yml(sub_sub_matches))?;
                 if let Some(out) = sub_sub_matches.value_of("out") {
                     let mut out = fs::OpenOptions::new()
                         .create(true)
@@ -434,15 +447,4 @@ fn main() -> Result<(), failure::Error> {
         (_, _) => unimplemented!(), // for brevity
     }
     Ok(())
-
-    // if let Some(mode) = m.value_of("mode") {
-    //     match mode {
-    //         "vi" => println!("You are using vi"),
-    //         "emacs" => println!("You are using emacs..."),
-    //         _      => unreachable!()
-    //     }
-    // } else {
-    //     println!("--mode <MODE> wasn't used...");
-    // }
-    // main_client();
 }
