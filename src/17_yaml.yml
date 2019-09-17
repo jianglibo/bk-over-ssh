@@ -123,6 +123,8 @@ subcommands:
             - server-yml:
                 required: true
                 index: 1
+    - list-server-yml:
+        about: list server yml in the configurated data dir.
     - rsync:
         about: sync relative functions.
         args:

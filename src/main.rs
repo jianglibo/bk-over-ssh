@@ -238,6 +238,16 @@ fn main() -> Result<(), failure::Error> {
                 .to_string();
             server.copy_a_file(local, &remote)?;
         }
+        ("list-server-yml", Some(_sub_matches)) => {
+            println!("list files name under directory: {:?}", app_conf.get_servers_dir());
+            for entry in app_conf.get_servers_dir().read_dir()? {
+                if let Ok(ery) = entry {
+                    println!("{:?}", ery.file_name());
+                } else {
+                    warn!("read servers_dir entry failed.");
+                }
+            }
+        }
         ("verify-server-yml", Some(sub_matches)) => {
             let mut server = load_server_yml(&app_conf, sub_matches);
             println!(

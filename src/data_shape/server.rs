@@ -586,7 +586,9 @@ impl Server {
             self._start_sync(r, None)
         } else {
             let mut cursor = io::Cursor::new(Vec::<u8>::new());
+            println!("start download file list....");
             self.list_remote_file_sftp(&mut cursor, skip_sha1)?;
+            println!("file list download done!");
             cursor.seek(io::SeekFrom::Start(0))?;
             if no_pb {
                 self._start_sync(cursor, None)
