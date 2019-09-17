@@ -22,6 +22,7 @@ use clap::App;
 use clap::ArgMatches;
 use clap::Shell;
 use log::*;
+use pbr::ProgressBar;
 use rustyline::completion::{Completer, FilenameCompleter, Pair};
 use rustyline::config::OutputStreamType;
 use rustyline::error::ReadlineError;
@@ -29,7 +30,8 @@ use rustyline::highlight::{Highlighter, MatchingBracketHighlighter};
 use rustyline::hint::{Hinter, HistoryHinter};
 use rustyline::{Cmd, CompletionType, Config, Context, EditMode, Editor, Helper, KeyPress};
 use std::env;
-use std::time::Instant;
+use std::thread;
+use std::time::{Duration, Instant};
 use std::{fs, io, io::Write};
 
 use data_shape::{AppConf, Server, CONF_FILE_NAME};
@@ -150,6 +152,18 @@ fn load_server_yml<'a>(app_conf: &AppConf, sub_sub_matches: &ArgMatches<'a>) -> 
     }
 }
 
+fn demonstrate_pbr() -> Result<(), failure::Error> {
+    let count = 1000;
+    let mut pb = ProgressBar::new(count);
+    pb.format("╢▌▌░╟");
+    for _ in 0..count {
+        pb.inc();
+        thread::sleep(Duration::from_millis(200));
+    }
+    pb.finish_print("done");
+    Ok(())
+}
+
 fn main() -> Result<(), failure::Error> {
     let yml = load_yaml!("17_yaml.yml");
     let app = App::from_yaml(yml);
@@ -203,6 +217,9 @@ fn main() -> Result<(), failure::Error> {
     )?;
 
     match m.subcommand() {
+        ("pbr", Some(_sub_matches)) => {
+            demonstrate_pbr()?;
+        }
         ("copy-executable", Some(sub_matches)) => {
             let mut server = load_server_yml(&app_conf, sub_matches);
             let executable = sub_matches.value_of("executable").unwrap();

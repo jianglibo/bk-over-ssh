@@ -91,6 +91,9 @@ subcommands:
         about: print out the current configuration of application.
     - print-env:
         about: print out environment variables.
+
+    - pbr:
+        about: demonstrate bpr usage.
     - repl:
         about: enter repl mode.
     - copy-executable:
