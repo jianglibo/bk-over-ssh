@@ -7,7 +7,7 @@ use bzip2::write::BzEncoder;
 use bzip2::Compression;
 use glob::Pattern;
 use log::*;
-use pbr::{ProgressBar, Units};
+use pbr::{MultiBar, Pipe, ProgressBar, Units};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use ssh2;
@@ -17,6 +17,11 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 use std::{fs, io, io::Seek};
 use tar::Builder;
+
+pub struct MyPb {
+    pub file_count: u64,
+    pub pb: ProgressBar<Pipe>,
+}
 
 #[derive(Deserialize, Serialize, Debug)]
 #[serde(rename_all(deserialize = "snake_case"))]
@@ -611,66 +616,40 @@ impl Server {
         count_and_len
     }
 
-    pub fn start_sync<R: BufRead + Seek>(
-        &mut self,
-        skip_sha1: bool,
-        no_pb: bool,
-        file_item_lines: Option<R>,
-    ) -> Result<FileItemProcessResultStats, failure::Error> {
-        self.connect()?;
-        if let Some(r) = file_item_lines {
-            self._start_sync(r, None)
+    pub fn prepare_file_list(&mut self, skip_sha1: bool) -> Result<(), failure::Error> {
+        if self.get_dir_sync_working_file_list().exists() {
+            println!("uncompleted list file exists, continue processing");
         } else {
-            if self.get_dir_sync_working_file_list().exists() {
-                println!("uncompleted list file exists, continue processing");
-            } else {
-                println!("start download file list....");
-                self.list_remote_file_sftp(skip_sha1)?;
-                println!("file list download done!");
-            }
-
-            let working_file = &self.get_dir_sync_working_file_list();
-            let wf = fs::File::open(working_file)?;
-            let r = {
-                let mut wf_buf = io::BufReader::new(wf);
-                if no_pb {
-                    self._start_sync(wf_buf, None)
-                } else {
-                    let cl = self.count_and_len(&mut wf_buf);
-                    wf_buf.seek(io::SeekFrom::Start(0))?;
-                    self._start_sync(wf_buf, Some(cl))
-                }
-            };
-            fs::remove_file(working_file)?;
-            r
+            println!("start download file list....");
+            self.list_remote_file_sftp(skip_sha1)?;
+            println!("file list download done!");
         }
+        Ok(())
+    }
+
+    pub fn get_pb_data(&self) -> Result<(u64, u64), failure::Error> {
+        let working_file = &self.get_dir_sync_working_file_list();
+        let mut wfb = io::BufReader::new(fs::File::open(working_file)?);
+        Ok(self.count_and_len(&mut wfb))
+    }
+
+    pub fn get_file_list_reader(&self) -> Result<impl io::BufRead, failure::Error> {
+        let working_file = &self.get_dir_sync_working_file_list();
+        Ok(io::BufReader::new(fs::File::open(working_file)?))
     }
 
     /// Do not try to return item stream from this function. consume it locally, pass in function to alter the behavior.
-    fn _start_sync<R: BufRead>(
+    fn start_sync<R: BufRead>(
         &self,
         file_item_lines: R,
-        count_and_len_op: Option<(u64, u64)>,
+        mut pb_op: Option<MyPb>,
     ) -> Result<FileItemProcessResultStats, failure::Error> {
         let mut current_remote_dir = Option::<String>::None;
         let mut current_local_dir = Option::<&Path>::None;
         let mut consume_count = 0u64;
-        let mut total_count = 0u64;
+        let total_count = pb_op.as_ref().map(|pb| pb.file_count).unwrap_or(0u64);
         let sftp = self.session.as_ref().unwrap().sftp()?;
-        let mut pb_op = count_and_len_op.map(|cl| {
-            total_count = cl.0;
-            let mut pb = ProgressBar::new(cl.1);
-            // pb.tick_format("\\|/-");
-            // pb.format("|#--|");
-            pb.set_units(Units::Bytes);
-            pb.show_tick = true;
-            pb.show_speed = true;
-            pb.show_percent = true;
-            pb.show_counter = true;
-            pb.show_time_left = true;
-            pb.show_message = true;
-            pb
-        });
+
         let result = file_item_lines
             .lines()
             .filter_map(|li| match li {
@@ -708,8 +687,8 @@ impl Server {
                                 };
                                 if let Some(pb) = pb_op.as_mut() {
                                     let s = format!("{} / {} , ", consume_count, total_count);
-                                    pb.message(s.as_str());
-                                    pb.add(l);
+                                    pb.pb.message(s.as_str());
+                                    pb.pb.add(l);
                                 }
                                 r
                             }
@@ -769,31 +748,35 @@ impl Server {
                 accu
             });
 
-        // pb_op.map(|mut bp|bp.finish_println("done!"));
+        if let Some(mut bp) = pb_op {
+            bp.pb.finish_println("done!")
+        }
         Ok(result)
     }
 
     pub fn sync_dirs(
         &mut self,
         skip_sha1: bool,
-        no_pb: bool,
+        pb_op: Option<MyPb>,
     ) -> Result<SyncDirReport, failure::Error> {
         let start = Instant::now();
         self.connect()?;
-        let rs = self.start_sync(skip_sha1, no_pb, Option::<io::Cursor<Vec<u8>>>::None)?;
+        self.prepare_file_list(skip_sha1)?;
+        let rd = self.get_file_list_reader()?;
+        let rs = self.start_sync(rd, pb_op)?;
         Ok(SyncDirReport::new(start.elapsed(), rs))
     }
 
-    #[allow(dead_code)]
-    pub fn sync_file_item_lines<R: BufRead + Seek>(
-        &mut self,
-        skip_sha1: bool,
-        from: R,
-    ) -> Result<(), failure::Error> {
-        self.connect()?;
-        self.start_sync(skip_sha1, true, Some(from))?;
-        Ok(())
-    }
+    // #[allow(dead_code)]
+    // pub fn sync_file_item_lines<R: BufRead + Seek>(
+    //     &mut self,
+    //     skip_sha1: bool,
+    //     from: R,
+    // ) -> Result<(), failure::Error> {
+    //     self.connect()?;
+    //     self.start_sync(skip_sha1, None, Some(from))?;
+    //     Ok(())
+    // }
 
     pub fn load_dirs<'a, O: io::Write>(
         &self,
@@ -814,6 +797,7 @@ mod tests {
     use crate::log_util;
     use bzip2::write::{BzDecoder, BzEncoder};
     use bzip2::Compression;
+    use std::thread;
 
     fn log() {
         log_util::setup_logger_detail(
@@ -864,32 +848,46 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn t_download_dirs() -> Result<(), failure::Error> {
-        log();
-        let d = Path::new("target/adir");
-        if d.exists() {
-            fs::remove_dir_all(d)?;
-        }
-        assert!(!d.exists());
-        let mut server = load_server_yml();
-        server.connect()?;
-        let f = io::BufReader::new(
-            fs::OpenOptions::new()
-                .read(true)
-                .open("fixtures/linux_remote_item_dir.txt")?,
-        );
-        server.start_sync(true, true, Some(f))?;
+    // #[test]
+    // fn t_download_dirs() -> Result<(), failure::Error> {
+    //     log();
+    //     let d = Path::new("target/adir");
+    //     if d.exists() {
+    //         fs::remove_dir_all(d)?;
+    //     }
+    //     assert!(!d.exists());
+    //     let mut server = load_server_yml();
+    //     server.connect()?;
+    //     let f = io::BufReader::new(
+    //         fs::OpenOptions::new()
+    //             .read(true)
+    //             .open("fixtures/linux_remote_item_dir.txt")?,
+    //     );
+    //     server.start_sync(true, None, Some(f))?;
 
-        assert!(d.exists());
-        Ok(())
-    }
+    //     assert!(d.exists());
+    //     Ok(())
+    // }
 
     #[test]
     fn t_sync_dirs() -> Result<(), failure::Error> {
         log();
         let mut server = load_server_yml();
-        let stats = server.sync_dirs(true, false)?;
+        let mut mb = MultiBar::new();
+        server.prepare_file_list(false)?;
+        let cl = server.get_pb_data()?;
+        let p1 = mb.create_bar(cl.1);
+
+        thread::spawn(move || {
+            mb.listen();
+            println!("all bars done!");
+        });
+
+        let mypb = MyPb {
+            file_count: cl.0,
+            pb: p1,
+        };
+        let stats = server.sync_dirs(true, Some(mypb))?;
         info!("result {:?}", stats);
         Ok(())
     }

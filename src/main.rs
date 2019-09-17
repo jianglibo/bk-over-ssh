@@ -12,6 +12,7 @@ extern crate rand;
 mod actions;
 mod data_shape;
 mod develope;
+mod ioutil;
 mod log_util;
 mod rustsync;
 
@@ -22,7 +23,7 @@ use clap::App;
 use clap::ArgMatches;
 use clap::Shell;
 use log::*;
-use pbr::{ProgressBar, MultiBar};
+use pbr::{MultiBar, ProgressBar};
 use rustyline::completion::{Completer, FilenameCompleter, Pair};
 use rustyline::config::OutputStreamType;
 use rustyline::error::ReadlineError;
@@ -34,7 +35,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 use std::{fs, io, io::Write};
 
-use data_shape::{AppConf, Server, CONF_FILE_NAME};
+use data_shape::{AppConf, MyPb, Server, CONF_FILE_NAME};
 
 struct MyHelper {
     completer: FilenameCompleter,
@@ -160,16 +161,7 @@ fn demonstrate_pbr() -> Result<(), failure::Error> {
     Ok(())
 }
 
-fn main() -> Result<(), failure::Error> {
-    let yml = load_yaml!("17_yaml.yml");
-    let app = App::from_yaml(yml);
-    let m: ArgMatches = app.get_matches();
-
-    let mut app1 = App::from_yaml(yml);
-
-    let conf = m.value_of("conf");
-    let console_log = m.is_present("console-log");
-
+fn process_app_config(conf: Option<&str>, console_log: bool) -> Result<AppConf, failure::Error> {
     let mut app_conf = match AppConf::guess_conf_file(conf) {
         Ok(cfg) => {
             if let Some(cfg) = cfg {
@@ -185,16 +177,14 @@ fn main() -> Result<(), failure::Error> {
                     .create(true)
                     .open(&path)?;
                 file.write_all(bytes)?;
-                println!(
+                bail!(
                     "Cann't find app configuration file,  had created one for you: \n{:?}",
                     path
                 );
-                return Ok(());
             }
         }
         Err(err) => {
-            println!("Read app configuration file failed: {:?}", err);
-            return Ok(());
+            bail!("Read app configuration file failed: {:?}", err);
         }
     };
 
@@ -213,33 +203,38 @@ fn main() -> Result<(), failure::Error> {
         &app_conf.get_log_conf().verbose_modules,
     )?;
 
-    match m.subcommand() {
-        ("pbr", Some(_sub_matches)) => {
-            demonstrate_pbr()?;
-        }
-        ("sync-dirs", Some(sub_matches)) => {
-            let mut servers: Vec<Server> = Vec::new();
-            if sub_matches.value_of("server-yml").is_some() {
-                let server = app_conf.load_server_yml(parse_server_yml(sub_matches))?;
-                servers.push(server);
+    Ok(app_conf)
+}
+
+fn sync_dirs<'a>(
+    app_conf: &AppConf,
+    sub_matches: &'a clap::ArgMatches<'a>,
+) -> Result<(), failure::Error> {
+    let mut servers: Vec<Server> = Vec::new();
+    if sub_matches.value_of("server-yml").is_some() {
+        let server = app_conf.load_server_yml(parse_server_yml(sub_matches))?;
+        servers.push(server);
+    } else {
+        servers.append(&mut app_conf.load_all_server_yml());
+    }
+
+    let skip_sha1 = sub_matches.is_present("skip-sha1");
+    let no_pb = sub_matches.is_present("no-pb");
+
+    if servers.is_empty() {
+        println!("found no server yml!");
+    } else {
+        println!(
+            "found {} server yml files. start processing...",
+            servers.len()
+        );
+    }
+    if no_pb {
+        for mut server in servers {
+            if let Err(err) = server.prepare_file_list(skip_sha1) {
+                warn!("prepare_file_list failed: {:?}", err);
             } else {
-                servers.append(&mut app_conf.load_all_server_yml());
-            }
-
-            let skip_sha1 = sub_matches.is_present("skip-sha1");
-            let no_pb = sub_matches.is_present("no-pb");
-
-            if servers.is_empty() {
-                println!("found no server yml!");
-            } else {
-                println!(
-                    "found {} server yml files. start processing...",
-                    servers.len()
-                );
-            }
-
-            for server in servers.iter_mut() {
-                match server.sync_dirs(skip_sha1, no_pb) {
+                match server.sync_dirs(skip_sha1, None) {
                     Ok(result) => {
                         actions::write_dir_sync_result(&server, &result);
                         println!("{:?}", result);
@@ -247,6 +242,71 @@ fn main() -> Result<(), failure::Error> {
                     Err(err) => println!("sync-dirs failed: {:?}", err),
                 }
             }
+        }
+    } else {
+        let mut mb = MultiBar::new();
+        let server_pbs: Vec<(Server, MyPb)> = servers
+            .into_iter()
+            .filter_map(|mut s| {
+                if let Err(err) = s.prepare_file_list(skip_sha1) {
+                    warn!("prepare_file_list failed: {:?}", err);
+                    None
+                } else {
+                    Some(s)
+                }
+            })
+            .filter_map(|s| match s.get_pb_data() {
+                Err(err) => {
+                    warn!("get_pb_data failed: {:?}", err);
+                    None
+                }
+                Ok(pb_data) => {
+                    let mypb = MyPb {
+                        file_count: pb_data.0,
+                        pb: mb.create_bar(pb_data.1),
+                    };
+                    Some((s, mypb))
+                }
+            })
+            .collect();
+
+        thread::spawn(move || {
+            mb.listen();
+            println!("all bars done!");
+        });
+
+        for server_pb in server_pbs {
+            let (mut server, pb) = server_pb;
+            match server.sync_dirs(skip_sha1, Some(pb)) {
+                Ok(result) => {
+                    actions::write_dir_sync_result(&server, &result);
+                    println!("{:?}", result);
+                }
+                Err(err) => println!("sync-dirs failed: {:?}", err),
+            }
+        }
+    }
+    Ok(())
+}
+
+fn main() -> Result<(), failure::Error> {
+    let yml = load_yaml!("17_yaml.yml");
+    let app = App::from_yaml(yml);
+    let m: ArgMatches = app.get_matches();
+
+    let mut app1 = App::from_yaml(yml);
+
+    let conf = m.value_of("conf");
+    let console_log = m.is_present("console-log");
+
+    let app_conf = process_app_config(conf, console_log)?;
+
+    match m.subcommand() {
+        ("pbr", Some(_sub_matches)) => {
+            demonstrate_pbr()?;
+        }
+        ("sync-dirs", Some(sub_matches)) => {
+            sync_dirs(&app_conf, sub_matches)?;
         }
         ("copy-executable", Some(sub_matches)) => {
             let mut server = app_conf.load_server_yml(parse_server_yml(sub_matches))?;
