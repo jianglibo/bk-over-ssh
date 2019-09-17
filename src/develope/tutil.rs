@@ -27,15 +27,17 @@ impl TestDir {
             tmp_dir: TempDir::new().expect("TempDir::new should success."),
         }
     }
-
+    #[allow(dead_code)]
     pub fn count_files(&self) -> usize {
         self.tmp_dir.path().read_dir().expect("tmp_dir read_dir should success.").count()
     }
 
+    #[allow(dead_code)]
     pub fn tmp_dir_path(&self) -> &Path {
         self.tmp_dir.path()
     }
 
+    #[allow(dead_code)]
     pub fn tmp_dir_str(&self) -> &str {
         self.tmp_dir_path().to_str().unwrap()
     }

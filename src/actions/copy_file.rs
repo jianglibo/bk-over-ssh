@@ -297,7 +297,6 @@ mod tests {
     use crate::data_shape::{FileItem, FileItemProcessResult, RemoteFileItemOwned, Server, SyncType};
     use crate::develope::tutil;
     use crate::log_util;
-    use log::*;
     use std::panic;
     use std::{fs, io};
 

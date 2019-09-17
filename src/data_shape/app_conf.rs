@@ -20,6 +20,8 @@ pub struct AppConf {
     pub config_file_path: Option<PathBuf>,
     #[serde(skip_deserializing)]
     data_dir_full_path: Option<PathBuf>,
+    #[serde(skip_deserializing)]
+    log_full_path: Option<PathBuf>,
 }
 
 impl AppConf {
@@ -30,11 +32,11 @@ impl AppConf {
         let file = file.as_ref();
         if let Ok(mut f) = fs::OpenOptions::new().read(true).open(file) {
             let mut buf = String::new();
-            if let Ok(_) = f.read_to_string(&mut buf) {
+            if f.read_to_string(&mut buf).is_ok() {
                 match serde_yaml::from_str::<AppConf>(&buf) {
                     Ok(mut app_conf) => {
                         app_conf.config_file_path.replace(file.to_path_buf());
-                        return Ok(Some(app_conf));
+                        Ok(Some(app_conf))
                     }
                     Err(err) => bail!("deserialize failed: {:?}, {:?}", file, err),
                 }
@@ -79,10 +81,6 @@ impl AppConf {
         bail!("read app_conf failed.")
     }
 
-    pub fn get_data_dir_str(&self) -> &str {
-        &self.data_dir
-    }
-
     pub fn get_data_dir(&self) -> &Path {
         self.data_dir_full_path
             .as_ref()
@@ -113,6 +111,9 @@ impl AppConf {
             Ok(ab) => self.data_dir_full_path.replace(ab),
             Err(err) => bail!("path_buf {:?} canonicalize failed: {:?}", &path_buf, err),
         };
+
+        self.log_full_path
+            .replace(Path::new(&self.get_log_file()).to_path_buf());
 
         let servers_dir = self.get_servers_dir();
         if !servers_dir.exists() {

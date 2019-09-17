@@ -251,6 +251,11 @@ fn main() -> Result<(), failure::Error> {
                 }
             }
         }
+        ("archive-local", Some(sub_matches)) => {
+            let server = load_server_yml(&app_conf, sub_matches);
+            println!("1111");
+            server.tar_local()?;
+        }
         ("verify-server-yml", Some(sub_matches)) => {
             let mut server = load_server_yml(&app_conf, sub_matches);
             println!(
@@ -302,10 +307,6 @@ fn main() -> Result<(), failure::Error> {
                     }
                     Err(err) => error!("sync-dirs failed: {:?}", err),
                 }
-            }
-            ("archive-local", Some(sub_sub_matches)) => {
-                let server = load_server_yml(&app_conf, sub_sub_matches);
-                server.tar_local()?;
             }
             ("restore-a-file", Some(sub_sub_matches)) => {
                 let old_file = sub_sub_matches.value_of("old-file").unwrap();

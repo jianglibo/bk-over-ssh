@@ -365,7 +365,9 @@ impl Server {
     }
 
     fn get_archive_writer_bzip2(&self) -> Result<impl io::Write, failure::Error> {
-        let out = fs::File::create(self.next_tar_file())?;
+        let nf = self.next_tar_file();
+        trace!("got next file: {:?}", nf);
+        let out = fs::File::create(nf)?;
         Ok(BzEncoder::new(out, Compression::Best))
     }
     /// use dyn trait.
@@ -398,7 +400,11 @@ impl Server {
         for dir in self.directories.iter() {
             let d_path = Path::new(&dir.local_dir);
             if let Some(d_path_name) = d_path.file_name() {
-                archive.append_dir_all(d_path_name, d_path)?;
+                if d_path.exists() {
+                    archive.append_dir_all(d_path_name, d_path)?;
+                } else {
+                    warn!("unexist directory: {:?}", d_path);
+                }
             } else {
                 error!("dir.local_dir get file_name failed: {:?}", d_path);
             }
@@ -795,7 +801,6 @@ mod tests {
     use crate::log_util;
     use bzip2::write::{BzDecoder, BzEncoder};
     use bzip2::Compression;
-    use std::io::prelude::*;
 
     fn log() {
         log_util::setup_logger_detail(

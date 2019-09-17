@@ -5,7 +5,6 @@ mod tests {
     use crate::data_shape::Server;
     use crate::develope::tutil;
     use failure;
-    use log::*;
     use ssh2::{self, Session};
     use std::io::prelude::*;
     use std::net::TcpStream;
@@ -15,8 +14,8 @@ mod tests {
     #[test]
     fn t_main_password() {
         // Connect to the local SSH server
-        let tcp = TcpStream::connect("127.0.0.1:22").unwrap();
-        let mut sess = Session::new().unwrap();
+        let _tcp = TcpStream::connect("127.0.0.1:22").unwrap();
+        let sess = Session::new().unwrap();
         // sess.handshake(&tcp).unwrap();
 
         sess.userauth_password("administrator", "apassword")

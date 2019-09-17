@@ -1,5 +1,5 @@
 use crate::data_shape::PruneStrategy;
-use chrono::{DateTime, Datelike, FixedOffset, TimeZone, Timelike, Utc};
+use chrono::{DateTime, Datelike, FixedOffset, Timelike, Utc};
 use log::*;
 use std::collections::HashMap;
 use std::convert::TryInto;
@@ -28,10 +28,12 @@ impl FileCopies {
         }
     }
 
+    #[allow(dead_code)]
     pub fn set_mp(&mut self, mp: HashMap<i32, Vec<FileCopy>>) {
         self.inner = mp;
     }
 
+    #[allow(dead_code)]
     pub fn count_fcs(&self) -> usize {
         self.inner.values().map(|v| v.len()).sum()
     }

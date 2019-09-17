@@ -125,6 +125,11 @@ subcommands:
                 index: 1
     - list-server-yml:
         about: list server yml in the configurated data dir.
+    - archive-local:
+        args:
+            - server-yml:
+                required: true
+                index: 1
     - rsync:
         about: sync relative functions.
         args:
@@ -147,12 +152,6 @@ subcommands:
         #         global: true       
         subcommands:
             - sync-dirs:
-                args:
-                    - server-yml:
-                        long: server-yml
-                        required: true
-                        takes_value: true
-            - archive-local:
                 args:
                     - server-yml:
                         long: server-yml
