@@ -249,8 +249,9 @@ fn main() -> Result<(), failure::Error> {
             ("sync-dirs", Some(sub_sub_matches)) => {
                 let mut server = load_server_yml(&app_conf, sub_sub_matches);
                 let skip_sha1 = sub_sub_matches.is_present("skip-sha1");
+                let no_pb = sub_sub_matches.is_present("no-pb");
 
-                match server.sync_dirs(skip_sha1) {
+                match server.sync_dirs(skip_sha1, no_pb) {
                     Ok(result) => {
                         actions::write_dir_sync_result(&server, &result);
                         println!("{:?}", result);

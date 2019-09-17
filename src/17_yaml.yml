@@ -122,6 +122,10 @@ subcommands:
                 global: true
                 conflicts_with:
                     - verify-server-yml
+            - no-pb:
+                long: no-pb
+                required: false
+                global: true
         # args:
         #     - server-yml:
         #         help: the path to server configuration file.

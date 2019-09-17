@@ -148,6 +148,7 @@ pub fn copy_a_file_item_sftp<'a>(
                 match copy_stream_to_file_return_sha1(&mut file, &local_file_path) {
                     Ok((length, sha1)) => {
                         if length != file_item.get_remote_item().get_len() {
+                            error!("length didn't match: {:?}", file_item);
                             FileItemProcessResult::LengthNotMatch(local_file_path)
                         } else if file_item.is_sha1_not_equal(&sha1) {
                             error!("sha1 didn't match: {:?}, local sha1: {:?}", file_item, sha1);
