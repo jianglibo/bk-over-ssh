@@ -8,7 +8,7 @@ use bzip2::Compression;
 use glob::Pattern;
 use log::*;
 use pbr::ProgressBar;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use ssh2;
 use std::io::prelude::{BufRead, Read, Write};
 use std::net::TcpStream;
@@ -17,21 +17,21 @@ use std::time::Instant;
 use std::{fs, io, io::Seek};
 use tar::Builder;
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Serialize, Debug)]
 #[serde(rename_all(deserialize = "snake_case"))]
 pub enum ServerRole {
     PureClient,
     PureServer,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Serialize, Debug)]
 pub enum AuthMethod {
     Password,
     Agent,
     IdentityFile,
 }
 
-#[derive(Deserialize, Default, Debug)]
+#[derive(Deserialize, Serialize, Default, Debug)]
 pub struct Directory {
     pub remote_dir: String,
     pub local_dir: String,
@@ -111,7 +111,7 @@ impl Directory {
     }
 }
 
-#[derive(Builder, Deserialize, Debug)]
+#[derive(Builder, Deserialize,Serialize, Debug)]
 #[builder(setter(into))]
 pub struct PruneStrategy {
     #[builder(default = "1")]
@@ -128,13 +128,13 @@ pub struct PruneStrategy {
     pub minutely: u8,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Serialize)]
 #[serde(rename_all(deserialize = "snake_case"))]
 pub enum CompressionImpl {
     Bzip2,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct Server {
     pub id_rsa: String,
     pub id_rsa_pub: String,

@@ -238,6 +238,36 @@ fn main() -> Result<(), failure::Error> {
                 .to_string();
             server.copy_a_file(local, &remote)?;
         }
+        ("verify-server-yml", Some(sub_matches)) => {
+            let mut server = load_server_yml(&app_conf, sub_matches);
+            println!(
+                "found server configuration yml at: {:?}",
+                server.yml_location.as_ref().unwrap()
+            );
+            println!("server content: {}", serde_yaml::to_string(&server)?);
+            if let Err(err) = server.stats_remote_exec() {
+                println!(
+                    "CAN'T FIND SERVER SIDE EXEC. {:?}\n{:?}",
+                    server.remote_exec, err
+                );
+            } else {
+                let rp = server.remote_server_yml.clone();
+                match server.get_remote_file_content(&rp) {
+                    Ok(content) => {
+                        let ss: Server = serde_yaml::from_str(content.as_str())?;
+                        if !server.dir_equals(&ss) {
+                            println!(
+                                "SERVER DIRS DIDN'T EQUAL TO.\nlocal: {:?} vs remote: {:?}",
+                                server.directories, ss.directories
+                            );
+                        } else {
+                            println!("SERVER SIDE CONFIGURATION IS OK!");
+                        }
+                    }
+                    Err(err) => println!("got error: {:?}", err),
+                }
+            }
+        }
         ("completions", Some(sub_matches)) => {
             let shell = sub_matches.value_of("shell_name").unwrap();
             app1.gen_completions_to(
@@ -263,35 +293,6 @@ fn main() -> Result<(), failure::Error> {
             ("archive-local", Some(sub_sub_matches)) => {
                 let server = load_server_yml(&app_conf, sub_sub_matches);
                 server.tar_local()?;
-            }
-            ("verify-server-yml", Some(sub_sub_matches)) => {
-                let mut server = load_server_yml(&app_conf, sub_sub_matches);
-                println!(
-                    "found server configuration yml at: {:?}",
-                    server.yml_location.as_ref().unwrap()
-                );
-                if let Err(err) = server.stats_remote_exec() {
-                    println!(
-                        "CAN'T FIND SERVER SIDE EXEC. {:?}\n{:?}",
-                        server.remote_exec, err
-                    );
-                } else {
-                    let rp = server.remote_server_yml.clone();
-                    match server.get_remote_file_content(&rp) {
-                        Ok(content) => {
-                            let ss: Server = serde_yaml::from_str(content.as_str())?;
-                            if !server.dir_equals(&ss) {
-                                println!(
-                                    "SERVER DIRS DIDN'T EQUAL TO.\nlocal: {:?} vs remote: {:?}",
-                                    server.directories, ss.directories
-                                );
-                            } else {
-                                println!("SERVER SIDE CONFIGURATION IS OK!");
-                            }
-                        }
-                        Err(err) => println!("got error: {:?}", err),
-                    }
-                }
             }
             ("restore-a-file", Some(sub_sub_matches)) => {
                 let old_file = sub_sub_matches.value_of("old-file").unwrap();
