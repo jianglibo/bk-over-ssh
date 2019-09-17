@@ -131,6 +131,34 @@ subcommands:
             - server-yml:
                 required: true
                 index: 1
+            - prune:
+                help: archive directories and prune backups.
+                long: prune
+                required: false
+            - prune-only:
+                help: don't archive directories, but only prune backups.
+                long: prune-only
+                required: false
+                conflicts_with:
+                    - prune
+    - list-remote-files:
+        args:
+            - server-yml:
+                required: true
+                index: 1
+            - out:
+                long: out
+                required: false
+                takes_value: true
+    - list-local-files:
+        args:
+            - server-yml:
+                required: true
+                index: 1
+            - out:
+                long: out
+                required: false
+                takes_value: true
     - sync-dirs:
         about: sync directories in the configuration file.
         args:
@@ -158,26 +186,7 @@ subcommands:
         #         takes_value: true
         #         global: true       
         subcommands:
-            - list-remote-files:
-                args:
-                    - server-yml:
-                        long: server-yml
-                        required: true
-                        takes_value: true
-                    - out:
-                        long: out
-                        required: false
-                        takes_value: true
-            - list-local-files:
-                args:
-                    - server-yml:
-                        long: server-yml
-                        required: true
-                        takes_value: true
-                    - out:
-                        long: out
-                        required: false
-                        takes_value: true
+
             - signature:
                 args:
                     - file:

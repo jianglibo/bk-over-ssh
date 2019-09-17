@@ -527,13 +527,12 @@ impl Server {
 
     pub fn list_remote_file_sftp(
         &mut self,
-        // out: &mut impl io::Write,
         skip_sha1: bool,
     ) -> Result<PathBuf, failure::Error> {
         self.connect()?;
         let mut channel: ssh2::Channel = self.create_channel()?;
         let cmd = format!(
-            "{} rsync list-local-files --server-yml {} --out {}{}",
+            "{} list-local-files {} --out {}{}",
             self.remote_exec,
             self.remote_server_yml,
             self.file_list_file,
@@ -565,13 +564,12 @@ impl Server {
 
     pub fn list_remote_file_exec(
         &mut self,
-        // out: &mut impl io::Write,
         skip_sha1: bool,
     ) -> Result<PathBuf, failure::Error> {
         self.connect()?;
         let mut channel: ssh2::Channel = self.create_channel()?;
         let cmd = format!(
-            "{} rsync list-local-files --server-yml {}{}",
+            "{} list-local-files {}{}",
             self.remote_exec,
             self.remote_server_yml,
             if skip_sha1 { " --skip-sha1" } else { "" }
@@ -620,9 +618,9 @@ impl Server {
         if self.get_dir_sync_working_file_list().exists() {
             println!("uncompleted list file exists, continue processing");
         } else {
-            println!("start download file list....");
+            println!("start download file list from {}....", self.host);
             self.list_remote_file_sftp(skip_sha1)?;
-            println!("file list download done!");
+            println!("{} file list download done!", self.host);
         }
         Ok(())
     }

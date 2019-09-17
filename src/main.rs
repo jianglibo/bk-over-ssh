@@ -189,11 +189,11 @@ fn process_app_config(conf: Option<&str>, console_log: bool) -> Result<AppConf, 
     };
 
     println!(
-        "using configuration file: {:?}",
+        "using configuration file: {}",
         app_conf
             .config_file_path
             .as_ref()
-            .expect("configuration file should exist at this point.")
+            .expect("configuration file should exist at this point.").to_str().unwrap_or("O")
     );
 
     app_conf.validate_conf()?;
@@ -270,7 +270,7 @@ fn sync_dirs<'a>(
             })
             .collect();
 
-        thread::spawn(move || {
+        let t = thread::spawn(move || {
             mb.listen();
             println!("all bars done!");
         });
@@ -285,6 +285,8 @@ fn sync_dirs<'a>(
                 Err(err) => println!("sync-dirs failed: {:?}", err),
             }
         }
+
+        t.join().unwrap();
     }
     Ok(())
 }
@@ -341,6 +343,44 @@ fn main() -> Result<(), failure::Error> {
         ("archive-local", Some(sub_matches)) => {
             let server = app_conf.load_server_yml(parse_server_yml(sub_matches))?;
             server.tar_local()?;
+        }
+        ("list-remote-files", Some(sub_matches)) => {
+            let skip_sha1 = sub_matches.is_present("skip-sha1");
+            let start = Instant::now();
+            let mut server = app_conf.load_server_yml(parse_server_yml(sub_matches))?;
+            server.list_remote_file_exec(skip_sha1)?;
+            if let Some(out) = sub_matches.value_of("out") {
+                let mut out = fs::OpenOptions::new()
+                    .create(true)
+                    .truncate(true)
+                    .write(true)
+                    .open(out)?;
+                let mut rf = fs::OpenOptions::new()
+                    .read(true)
+                    .open(&server.get_dir_sync_working_file_list())?;
+                io::copy(&mut rf, &mut out)?;
+            } else {
+                let mut rf = fs::OpenOptions::new()
+                    .read(true)
+                    .open(&server.get_dir_sync_working_file_list())?;
+                io::copy(&mut rf, &mut io::stdout())?;
+            }
+
+            println!("time costs: {:?}", start.elapsed().as_secs());
+        }
+        ("list-local-files", Some(sub_matches)) => {
+            let skip_sha1 = sub_matches.is_present("skip-sha1");
+            let server = &app_conf.load_server_yml(parse_server_yml(sub_matches))?;
+            if let Some(out) = sub_matches.value_of("out") {
+                let mut out = fs::OpenOptions::new()
+                    .create(true)
+                    .truncate(true)
+                    .write(true)
+                    .open(out)?;
+                server.load_dirs(&mut out, skip_sha1)?;
+            } else {
+                server.load_dirs(&mut io::stdout(), skip_sha1)?;
+            }
         }
         ("verify-server-yml", Some(sub_matches)) => {
             let mut server = app_conf.load_server_yml(parse_server_yml(sub_matches))?;
@@ -446,44 +486,7 @@ fn main() -> Result<(), failure::Error> {
                 }
                 println!("time costs: {:?}", start.elapsed().as_secs());
             }
-            ("list-remote-files", Some(sub_sub_matches)) => {
-                let skip_sha1 = sub_sub_matches.is_present("skip-sha1");
-                let start = Instant::now();
-                let mut server = app_conf.load_server_yml(parse_server_yml(sub_sub_matches))?;
-                server.list_remote_file_exec(skip_sha1)?;
-                if let Some(out) = sub_sub_matches.value_of("out") {
-                    let mut out = fs::OpenOptions::new()
-                        .create(true)
-                        .truncate(true)
-                        .write(true)
-                        .open(out)?;
-                    let mut rf = fs::OpenOptions::new()
-                        .read(true)
-                        .open(&server.get_dir_sync_working_file_list())?;
-                    io::copy(&mut rf, &mut out)?;
-                } else {
-                    let mut rf = fs::OpenOptions::new()
-                        .read(true)
-                        .open(&server.get_dir_sync_working_file_list())?;
-                    io::copy(&mut rf, &mut io::stdout())?;
-                }
 
-                println!("time costs: {:?}", start.elapsed().as_secs());
-            }
-            ("list-local-files", Some(sub_sub_matches)) => {
-                let skip_sha1 = sub_sub_matches.is_present("skip-sha1");
-                let mut server = &app_conf.load_server_yml(parse_server_yml(sub_sub_matches))?;
-                if let Some(out) = sub_sub_matches.value_of("out") {
-                    let mut out = fs::OpenOptions::new()
-                        .create(true)
-                        .truncate(true)
-                        .write(true)
-                        .open(out)?;
-                    server.load_dirs(&mut out, skip_sha1)?;
-                } else {
-                    server.load_dirs(&mut io::stdout(), skip_sha1)?;
-                }
-            }
             (_, _) => {
                 println!("please add --help to view usage help.");
             }

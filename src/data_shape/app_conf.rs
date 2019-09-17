@@ -133,7 +133,9 @@ impl AppConf {
         &self,
         yml_file_name: impl AsRef<str>,
     ) -> Result<Server, failure::Error> {
-        Server::load_from_yml_with_app_config(&self, yml_file_name.as_ref())
+        let server = Server::load_from_yml_with_app_config(&self, yml_file_name.as_ref())?;
+        println!("load server yml from: {}", server.yml_location.as_ref().map_or("O", |b|b.to_str().unwrap_or("O")));
+        Ok(server)
     }
 
     pub fn load_all_server_yml(&self) -> Vec<Server> {
