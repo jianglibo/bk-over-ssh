@@ -239,7 +239,10 @@ fn main() -> Result<(), failure::Error> {
             server.copy_a_file(local, &remote)?;
         }
         ("list-server-yml", Some(_sub_matches)) => {
-            println!("list files name under directory: {:?}", app_conf.get_servers_dir());
+            println!(
+                "list files name under directory: {:?}",
+                app_conf.get_servers_dir()
+            );
             for entry in app_conf.get_servers_dir().read_dir()? {
                 if let Ok(ery) = entry {
                     println!("{:?}", ery.file_name());
@@ -373,15 +376,22 @@ fn main() -> Result<(), failure::Error> {
                 let skip_sha1 = sub_sub_matches.is_present("skip-sha1");
                 let start = Instant::now();
                 let mut server = load_server_yml(&app_conf, sub_sub_matches);
+                server.list_remote_file_exec(skip_sha1)?;
                 if let Some(out) = sub_sub_matches.value_of("out") {
                     let mut out = fs::OpenOptions::new()
                         .create(true)
                         .truncate(true)
                         .write(true)
                         .open(out)?;
-                    server.list_remote_file_exec(&mut out, skip_sha1)?;
+                    let mut rf = fs::OpenOptions::new()
+                        .read(true)
+                        .open(&server.get_dir_sync_working_file_list())?;
+                    io::copy(&mut rf, &mut out)?;
                 } else {
-                    server.list_remote_file_exec(&mut io::stdout(), skip_sha1)?;
+                    let mut rf = fs::OpenOptions::new()
+                        .read(true)
+                        .open(&server.get_dir_sync_working_file_list())?;
+                    io::copy(&mut rf, &mut io::stdout())?;
                 }
 
                 println!("time costs: {:?}", start.elapsed().as_secs());

@@ -7,7 +7,7 @@ use bzip2::write::BzEncoder;
 use bzip2::Compression;
 use glob::Pattern;
 use log::*;
-use pbr::ProgressBar;
+use pbr::{ProgressBar, Units};
 use serde::{Deserialize, Serialize};
 use ssh2;
 use std::io::prelude::{BufRead, Read, Write};
@@ -111,7 +111,7 @@ impl Directory {
     }
 }
 
-#[derive(Builder, Deserialize,Serialize, Debug)]
+#[derive(Builder, Deserialize, Serialize, Debug)]
 #[builder(setter(into))]
 pub struct PruneStrategy {
     #[builder(default = "1")]
@@ -160,6 +160,8 @@ pub struct Server {
     report_dir: Option<PathBuf>,
     #[serde(skip)]
     tar_dir: Option<PathBuf>,
+    #[serde(skip)]
+    working_dir: Option<PathBuf>,
     #[serde(skip)]
     pub yml_location: Option<PathBuf>,
 }
@@ -246,6 +248,13 @@ impl Server {
             .join("sync_dir_report.json")
     }
 
+    pub fn get_dir_sync_working_file_list(&self) -> PathBuf {
+        self.working_dir
+            .as_ref()
+            .expect("working_dir of server should always exists.")
+            .join("file_list_working.txt")
+    }
+
     pub fn load_from_yml(
         servers_dir: impl AsRef<Path>,
         data_dir: impl AsRef<Path>,
@@ -284,14 +293,20 @@ impl Server {
         let maybe_local_server_base_dir = data_dir.join(&server.host);
         let report_dir = data_dir.join("report").join(&server.host);
         let tar_dir = data_dir.join("tar").join(&server.host);
+        let working_dir = data_dir.join("working").join(&server.host);
         if !report_dir.exists() {
             fs::create_dir_all(&report_dir)?;
         }
         if !tar_dir.exists() {
             fs::create_dir_all(&tar_dir)?;
         }
+
+        if !working_dir.exists() {
+            fs::create_dir_all(&working_dir)?;
+        }
         server.report_dir.replace(report_dir);
         server.tar_dir.replace(tar_dir);
+        server.working_dir.replace(working_dir);
         let ab = server_yml_path.canonicalize()?;
         server.yml_location.replace(ab);
 
@@ -501,9 +516,9 @@ impl Server {
 
     pub fn list_remote_file_sftp(
         &mut self,
-        out: &mut impl io::Write,
+        // out: &mut impl io::Write,
         skip_sha1: bool,
-    ) -> Result<(), failure::Error> {
+    ) -> Result<PathBuf, failure::Error> {
         self.connect()?;
         let mut channel: ssh2::Channel = self.create_channel()?;
         let cmd = format!(
@@ -526,15 +541,22 @@ impl Server {
         }
         let sftp = self.session.as_ref().unwrap().sftp()?;
         let mut f = sftp.open(Path::new(&self.file_list_file))?;
-        io::copy(&mut f, out)?;
-        Ok(())
+
+        let working_file = self.get_dir_sync_working_file_list();
+        let mut wf = fs::OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(&working_file)?;
+        io::copy(&mut f, &mut wf)?;
+        Ok(working_file)
     }
 
     pub fn list_remote_file_exec(
         &mut self,
-        out: &mut impl io::Write,
+        // out: &mut impl io::Write,
         skip_sha1: bool,
-    ) -> Result<(), failure::Error> {
+    ) -> Result<PathBuf, failure::Error> {
         self.connect()?;
         let mut channel: ssh2::Channel = self.create_channel()?;
         let cmd = format!(
@@ -545,8 +567,14 @@ impl Server {
         );
         info!("invoking remote command: {:?}", cmd);
         channel.exec(cmd.as_str())?;
-        io::copy(&mut channel, out)?;
-        Ok(())
+        let working_file = self.get_dir_sync_working_file_list();
+        let mut wf = fs::OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(&working_file)?;
+        io::copy(&mut channel, &mut wf)?;
+        Ok(working_file)
     }
 
     fn count_and_len(&self, input: &mut (impl io::BufRead + Seek)) -> (u64, u64) {
@@ -556,15 +584,17 @@ impl Server {
             match input.read_line(&mut buf) {
                 Ok(0) => break,
                 Ok(_length) => {
-                    match serde_json::from_str::<RemoteFileItemOwned>(&buf) {
-                        Ok(remote_item) => {
-                            count_and_len.0 += 1;
-                            count_and_len.1 += remote_item.get_len();
-                        }
-                        Err(err) => {
-                            error!("deserialize cursor line failed: {}, {:?}", buf, err);
-                        }
-                    };
+                    if buf.starts_with('{') {
+                        match serde_json::from_str::<RemoteFileItemOwned>(&buf) {
+                            Ok(remote_item) => {
+                                count_and_len.0 += 1;
+                                count_and_len.1 += remote_item.get_len();
+                            }
+                            Err(err) => {
+                                error!("deserialize cursor line failed: {}, {:?}", buf, err);
+                            }
+                        };
+                    }
                 }
                 Err(err) => {
                     error!("read line from cursor failed: {:?}", err);
@@ -575,7 +605,7 @@ impl Server {
         count_and_len
     }
 
-    pub fn start_sync<R: Read + Seek>(
+    pub fn start_sync<R: BufRead + Seek>(
         &mut self,
         skip_sha1: bool,
         no_pb: bool,
@@ -585,42 +615,57 @@ impl Server {
         if let Some(r) = file_item_lines {
             self._start_sync(r, None)
         } else {
-            let mut cursor = io::Cursor::new(Vec::<u8>::new());
-            println!("start download file list....");
-            self.list_remote_file_sftp(&mut cursor, skip_sha1)?;
-            println!("file list download done!");
-            cursor.seek(io::SeekFrom::Start(0))?;
-            if no_pb {
-                self._start_sync(cursor, None)
+            if self.get_dir_sync_working_file_list().exists() {
+                println!("uncompleted list file exists, continue processing");
             } else {
-                let cl = self.count_and_len(&mut cursor);
-                cursor.seek(io::SeekFrom::Start(0))?;
-                self._start_sync(cursor, Some(cl))
+                println!("start download file list....");
+                self.list_remote_file_sftp(skip_sha1)?;
+                println!("file list download done!");
             }
+
+            let working_file = &self.get_dir_sync_working_file_list();
+            let wf = fs::File::open(working_file)?;
+            let r = {
+                let mut wf_buf = io::BufReader::new(wf);
+                if no_pb {
+                    self._start_sync(wf_buf, None)
+                } else {
+                    let cl = self.count_and_len(&mut wf_buf);
+                    wf_buf.seek(io::SeekFrom::Start(0))?;
+                    self._start_sync(wf_buf, Some(cl))
+                }
+            };
+            fs::remove_file(working_file)?;
+            r
         }
     }
 
     /// Do not try to return item stream from this function. consume it locally, pass in function to alter the behavior.
-    fn _start_sync<R: Read>(
+    fn _start_sync<R: BufRead>(
         &self,
         file_item_lines: R,
         count_and_len_op: Option<(u64, u64)>,
     ) -> Result<FileItemProcessResultStats, failure::Error> {
         let mut current_remote_dir = Option::<String>::None;
         let mut current_local_dir = Option::<&Path>::None;
+        let mut consume_count = 0u64;
+        let mut total_count = 0u64;
         let sftp = self.session.as_ref().unwrap().sftp()?;
         let mut pb_op = count_and_len_op.map(|cl| {
+            total_count = cl.0;
             let mut pb = ProgressBar::new(cl.1);
-            pb.tick_format("\\|/-");
-            pb.format("|#--|");
+            // pb.tick_format("\\|/-");
+            // pb.format("|#--|");
+            pb.set_units(Units::Bytes);
             pb.show_tick = true;
             pb.show_speed = true;
             pb.show_percent = true;
             pb.show_counter = true;
             pb.show_time_left = true;
+            pb.show_message = true;
             pb
         });
-        let result = io::BufReader::new(file_item_lines).lines().map(|line_r|{
+        let result = file_item_lines.lines().map(|line_r|{
             match line_r {
                 Ok(line) => {
                     if line.starts_with('{') {
@@ -642,14 +687,18 @@ impl Server {
                                         remote_item,
                                         sync_type,
                                     );
-                                    if local_item.had_changed() {
-                                        let r = copy_a_file_item(&self, &sftp, local_item);
-                                        pb_op.as_mut().map(|pb| pb.add(l));
-                                        r
+                                    consume_count += 1;
+                                    let r = if local_item.had_changed() {
+                                        copy_a_file_item(&self, &sftp, local_item)
                                     } else {
-                                        pb_op.as_mut().map(|pb| pb.add(l));
                                         FileItemProcessResult::Skipped(local_item.get_local_path_str().expect("get_local_path_str should has some at thia point."))
+                                    };
+                                    if let Some(pb) = pb_op.as_mut() {
+                                        let s = format!("{} / {} , ", consume_count, total_count);
+                                        pb.message(s.as_str());
+                                        pb.add(l);
                                     }
+                                    r
                                 }
                                 Err(err) => {
                                     error!("deserialize line failed: {}, {:?}", line, err);
@@ -712,12 +761,12 @@ impl Server {
     ) -> Result<SyncDirReport, failure::Error> {
         let start = Instant::now();
         self.connect()?;
-        let rs = self.start_sync(skip_sha1, no_pb, Option::<fs::File>::None)?;
+        let rs = self.start_sync(skip_sha1, no_pb, Option::<io::Cursor<Vec<u8>>>::None)?;
         Ok(SyncDirReport::new(start.elapsed(), rs))
     }
 
     #[allow(dead_code)]
-    pub fn sync_file_item_lines<R: Read + Seek>(
+    pub fn sync_file_item_lines<R: BufRead + Seek>(
         &mut self,
         skip_sha1: bool,
         from: R,
@@ -807,9 +856,11 @@ mod tests {
         assert!(!d.exists());
         let mut server = load_server_yml();
         server.connect()?;
-        let f = fs::OpenOptions::new()
-            .read(true)
-            .open("fixtures/linux_remote_item_dir.txt")?;
+        let f = io::BufReader::new(
+            fs::OpenOptions::new()
+                .read(true)
+                .open("fixtures/linux_remote_item_dir.txt")?,
+        );
         server.start_sync(true, true, Some(f))?;
 
         assert!(d.exists());
@@ -820,7 +871,7 @@ mod tests {
     fn t_sync_dirs() -> Result<(), failure::Error> {
         log();
         let mut server = load_server_yml();
-        let stats = server.sync_dirs(true, true)?;
+        let stats = server.sync_dirs(true, false)?;
         info!("result {:?}", stats);
         Ok(())
     }
