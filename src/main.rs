@@ -6,8 +6,8 @@ extern crate failure;
 #[macro_use]
 extern crate clap;
 
-extern crate rand;
 extern crate askama;
+extern crate rand;
 // extern crate rustsync;
 
 mod actions;
@@ -15,8 +15,8 @@ mod data_shape;
 mod develope;
 mod ioutil;
 mod log_util;
-mod rustsync;
 mod mail;
+mod rustsync;
 
 use crate::rustsync::DeltaWriter;
 use std::borrow::Cow::{self, Borrowed, Owned};
@@ -25,7 +25,9 @@ use clap::App;
 use clap::ArgMatches;
 use clap::Shell;
 use log::*;
+use mail::send_test_mail;
 use pbr::{MultiBar, ProgressBar, Units};
+use rayon::prelude::*;
 use rustyline::completion::{Completer, FilenameCompleter, Pair};
 use rustyline::config::OutputStreamType;
 use rustyline::error::ReadlineError;
@@ -33,12 +35,10 @@ use rustyline::highlight::{Highlighter, MatchingBracketHighlighter};
 use rustyline::hint::{Hinter, HistoryHinter};
 use rustyline::{Cmd, CompletionType, Config, Context, EditMode, Editor, Helper, KeyPress};
 use std::env;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 use std::{fs, io, io::Write};
-use rayon::prelude::*;
-use std::sync::{Arc, Mutex};
-use mail::send_test_mail;
 
 use data_shape::{AppConf, MyPb, Server, CONF_FILE_NAME};
 
@@ -166,7 +166,11 @@ fn demonstrate_pbr() -> Result<(), failure::Error> {
     Ok(())
 }
 
-fn process_app_config(conf: Option<&str>, console_log: bool, re_try: bool) -> Result<AppConf, failure::Error> {
+fn process_app_config(
+    conf: Option<&str>,
+    console_log: bool,
+    re_try: bool,
+) -> Result<AppConf, failure::Error> {
     let mut app_conf = match AppConf::guess_conf_file(conf) {
         Ok(cfg) => {
             if let Some(cfg) = cfg {
@@ -236,7 +240,7 @@ fn sync_dirs<'a>(
         );
     }
     if no_pb {
-        servers.into_par_iter().for_each(|mut server|{
+        servers.into_par_iter().for_each(|mut server| {
             if let Err(err) = server.prepare_file_list(skip_sha1) {
                 warn!("prepare_file_list failed: {:?}", err);
                 println!("prepare_file_list failed: {:?}", err);
@@ -253,18 +257,25 @@ fn sync_dirs<'a>(
     } else {
         let mb = MultiBar::new();
         let mb = Arc::new(Mutex::new(mb));
-        let server_pbs: Vec<(Server, MyPb)> = servers
+        let mb_clone = Arc::clone(&mb);
+
+        thread::spawn(move || loop {
+            thread::sleep(Duration::from_millis(50));
+            mb_clone.lock().unwrap().listen();
+        });
+
+        servers
             .into_par_iter()
-            .filter_map(|mut s| {
-                if let Err(err) = s.prepare_file_list(skip_sha1) {
+            .filter_map(|mut server| {
+                if let Err(err) = server.prepare_file_list(skip_sha1) {
                     warn!("prepare_file_list failed: {:?}", err);
                     println!("prepare_file_list failed: {:?}", err);
                     None
                 } else {
-                    Some(s)
+                    Some(server)
                 }
             })
-            .filter_map(|s| match s.get_pb_data() {
+            .filter_map(|server| match server.get_pb_data() {
                 Err(err) => {
                     warn!("get_pb_data failed: {:?}", err);
                     None
@@ -276,28 +287,21 @@ fn sync_dirs<'a>(
                         file_count: pb_data.0,
                         pb,
                     };
-                    Some((s, mypb))
+                    Some((server, mypb))
                 }
             })
-            .collect();
-
-        let t = thread::spawn(move || {
-            thread::sleep(Duration::from_millis(500));
-            mb.lock().unwrap().listen();
-        });
-
-        server_pbs.into_par_iter().for_each(|server_pb| {
-            let (mut server, pb) = server_pb;
-            match server.sync_dirs(skip_sha1, Some(pb)) {
-                Ok(result) => {
-                    actions::write_dir_sync_result(&server, &result);
-                    println!("{:?}", result);
+            .for_each(|server_pb| {
+                let (mut server, pb) = server_pb;
+                match server.sync_dirs(skip_sha1, Some(pb)) {
+                    Ok(result) => {
+                        actions::write_dir_sync_result(&server, &result);
+                        println!("{:?}", result);
+                    }
+                    Err(err) => println!("sync-dirs failed: {:?}", err),
                 }
-                Err(err) => println!("sync-dirs failed: {:?}", err),
-            }
-        });
+            });
 
-        t.join().unwrap();
+        // t.join().unwrap();
     }
     Ok(())
 }
