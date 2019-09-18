@@ -235,6 +235,7 @@ fn sync_dirs<'a>(
         for mut server in servers {
             if let Err(err) = server.prepare_file_list(skip_sha1) {
                 warn!("prepare_file_list failed: {:?}", err);
+                println!("prepare_file_list failed: {:?}", err);
             } else {
                 match server.sync_dirs(skip_sha1, None) {
                     Ok(result) => {
@@ -252,6 +253,7 @@ fn sync_dirs<'a>(
             .filter_map(|mut s| {
                 if let Err(err) = s.prepare_file_list(skip_sha1) {
                     warn!("prepare_file_list failed: {:?}", err);
+                    println!("prepare_file_list failed: {:?}", err);
                     None
                 } else {
                     Some(s)
@@ -276,7 +278,6 @@ fn sync_dirs<'a>(
 
         let t = thread::spawn(move || {
             mb.listen();
-            println!("all bars done!");
         });
 
         for server_pb in server_pbs {
@@ -352,6 +353,7 @@ fn main() -> Result<(), failure::Error> {
                 println!("write demo server yml to file done. {}", out);
             } else {
                 io::stdout().write_all(&bytes[..])?;
+                println!();
             }
         }
         ("list-server-yml", Some(_sub_matches)) => {
@@ -376,6 +378,7 @@ fn main() -> Result<(), failure::Error> {
             let start = Instant::now();
             let mut server = app_conf.load_server_yml(parse_server_yml(sub_matches))?;
             server.list_remote_file_exec(skip_sha1)?;
+
             if let Some(out) = sub_matches.value_of("out") {
                 let mut out = fs::OpenOptions::new()
                     .create(true)
@@ -384,12 +387,12 @@ fn main() -> Result<(), failure::Error> {
                     .open(out)?;
                 let mut rf = fs::OpenOptions::new()
                     .read(true)
-                    .open(&server.get_dir_sync_working_file_list())?;
+                    .open(&server.get_working_file_list_file())?;
                 io::copy(&mut rf, &mut out)?;
             } else {
                 let mut rf = fs::OpenOptions::new()
                     .read(true)
-                    .open(&server.get_dir_sync_working_file_list())?;
+                    .open(&server.get_working_file_list_file())?;
                 io::copy(&mut rf, &mut io::stdout())?;
             }
 

@@ -26,7 +26,6 @@ pub enum FileItemProcessResult {
     Successed(u64, String, SyncType),
     GetLocalPathFailed,
     SftpOpenFailed,
-    ReadLineFailed,
 }
 
 #[derive(Debug, Default, Serialize)]

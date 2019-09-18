@@ -254,11 +254,18 @@ impl Server {
             .join("sync_dir_report.json")
     }
 
-    pub fn get_dir_sync_working_file_list(&self) -> PathBuf {
+    pub fn get_working_file_list_file(&self) -> PathBuf {
         self.working_dir
             .as_ref()
             .expect("working_dir of server should always exists.")
             .join("file_list_working.txt")
+    }
+
+    pub fn remove_working_file_list_file(&self) {
+        let wf = self.get_working_file_list_file();
+        if let Err(err) = fs::remove_file(&wf) {
+            error!("delete working file list file failed: {:?}, {:?}", self.get_working_file_list_file(), err);
+        }
     }
 
     pub fn load_from_yml_with_app_config(
@@ -285,7 +292,6 @@ impl Server {
                 server_yml_path = servers_dir.as_ref().join(name);
             }
             if !server_yml_path.exists() {
-
                 bail!(
                     "server yml file does't exist and had created one for you: {:?}",
                     server_yml_path
@@ -520,10 +526,7 @@ impl Server {
             .expect("a channel session."))
     }
 
-    pub fn list_remote_file_sftp(
-        &mut self,
-        skip_sha1: bool,
-    ) -> Result<PathBuf, failure::Error> {
+    pub fn list_remote_file_sftp(&mut self, skip_sha1: bool) -> Result<PathBuf, failure::Error> {
         self.connect()?;
         let mut channel: ssh2::Channel = self.create_channel()?;
         let cmd = format!(
@@ -549,7 +552,7 @@ impl Server {
         let sftp = self.session.as_ref().unwrap().sftp()?;
         let mut f = sftp.open(Path::new(&self.file_list_file))?;
 
-        let working_file = self.get_dir_sync_working_file_list();
+        let working_file = self.get_working_file_list_file();
         let mut wf = fs::OpenOptions::new()
             .create(true)
             .truncate(true)
@@ -559,10 +562,7 @@ impl Server {
         Ok(working_file)
     }
 
-    pub fn list_remote_file_exec(
-        &mut self,
-        skip_sha1: bool,
-    ) -> Result<PathBuf, failure::Error> {
+    pub fn list_remote_file_exec(&mut self, skip_sha1: bool) -> Result<PathBuf, failure::Error> {
         self.connect()?;
         let mut channel: ssh2::Channel = self.create_channel()?;
         let cmd = format!(
@@ -573,7 +573,7 @@ impl Server {
         );
         info!("invoking remote command: {:?}", cmd);
         channel.exec(cmd.as_str())?;
-        let working_file = self.get_dir_sync_working_file_list();
+        let working_file = self.get_working_file_list_file();
         let mut wf = fs::OpenOptions::new()
             .create(true)
             .truncate(true)
@@ -612,8 +612,11 @@ impl Server {
     }
 
     pub fn prepare_file_list(&mut self, skip_sha1: bool) -> Result<(), failure::Error> {
-        if self.get_dir_sync_working_file_list().exists() {
-            println!("uncompleted list file exists: {:?} continue processing", self.get_dir_sync_working_file_list());
+        if self.get_working_file_list_file().exists() {
+            println!(
+                "uncompleted list file exists: {:?} continue processing",
+                self.get_working_file_list_file()
+            );
         } else {
             println!("start download file list from {}....", self.host);
             self.list_remote_file_sftp(skip_sha1)?;
@@ -623,13 +626,13 @@ impl Server {
     }
 
     pub fn get_pb_data(&self) -> Result<(u64, u64), failure::Error> {
-        let working_file = &self.get_dir_sync_working_file_list();
+        let working_file = &self.get_working_file_list_file();
         let mut wfb = io::BufReader::new(fs::File::open(working_file)?);
         Ok(self.count_and_len(&mut wfb))
     }
 
     pub fn get_file_list_reader(&self) -> Result<impl io::BufRead, failure::Error> {
-        let working_file = &self.get_dir_sync_working_file_list();
+        let working_file = &self.get_working_file_list_file();
         Ok(io::BufReader::new(fs::File::open(working_file)?))
     }
 
@@ -681,7 +684,12 @@ impl Server {
                                     )
                                 };
                                 if let Some(pb) = pb_op.as_mut() {
-                                    let s = format!("[{}]{} / {} , ", self.host.as_str(), consume_count, total_count);
+                                    let s = format!(
+                                        "[{}]{} / {} , ",
+                                        self.host.as_str(),
+                                        consume_count,
+                                        total_count
+                                    );
                                     pb.pb.message(s.as_str());
                                     pb.pb.add(l);
                                 }
@@ -738,7 +746,6 @@ impl Server {
                     }
                     FileItemProcessResult::GetLocalPathFailed => accu.get_local_path_failed += 1,
                     FileItemProcessResult::SftpOpenFailed => accu.sftp_open_failed += 1,
-                    FileItemProcessResult::ReadLineFailed => accu.read_line_failed += 1,
                 };
                 accu
             });
@@ -757,8 +764,11 @@ impl Server {
         let start = Instant::now();
         self.connect()?;
         self.prepare_file_list(skip_sha1)?;
-        let rd = self.get_file_list_reader()?;
-        let rs = self.start_sync(rd, pb_op)?;
+        let rs = {
+            let rd = self.get_file_list_reader()?;
+            self.start_sync(rd, pb_op)?
+        };
+        self.remove_working_file_list_file();
         Ok(SyncDirReport::new(start.elapsed(), rs))
     }
 
