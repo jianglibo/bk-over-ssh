@@ -35,6 +35,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 use std::{fs, io, io::Write};
 use rayon::prelude::*;
+use std::sync::{Arc, Mutex};
 
 use data_shape::{AppConf, MyPb, Server, CONF_FILE_NAME};
 
@@ -232,7 +233,7 @@ fn sync_dirs<'a>(
         );
     }
     if no_pb {
-        for mut server in servers {
+        servers.into_par_iter().for_each(|mut server|{
             if let Err(err) = server.prepare_file_list(skip_sha1) {
                 warn!("prepare_file_list failed: {:?}", err);
                 println!("prepare_file_list failed: {:?}", err);
@@ -245,11 +246,12 @@ fn sync_dirs<'a>(
                     Err(err) => println!("sync-dirs failed: {:?}", err),
                 }
             }
-        }
+        });
     } else {
-        let mut mb = MultiBar::new();
+        let mb = MultiBar::new();
+        let mb = Arc::new(Mutex::new(mb));
         let server_pbs: Vec<(Server, MyPb)> = servers
-            .into_iter()
+            .into_par_iter()
             .filter_map(|mut s| {
                 if let Err(err) = s.prepare_file_list(skip_sha1) {
                     warn!("prepare_file_list failed: {:?}", err);
@@ -265,7 +267,7 @@ fn sync_dirs<'a>(
                     None
                 }
                 Ok(pb_data) => {
-                    let mut pb = mb.create_bar(pb_data.1);
+                    let mut pb = mb.lock().unwrap().create_bar(pb_data.1);
                     pb.set_units(Units::Bytes);
                     let mypb = MyPb {
                         file_count: pb_data.0,
@@ -277,7 +279,8 @@ fn sync_dirs<'a>(
             .collect();
 
         let t = thread::spawn(move || {
-            mb.listen();
+            thread::sleep(Duration::from_millis(200));
+            mb.lock().unwrap().listen();
         });
 
         server_pbs.into_par_iter().for_each(|server_pb| {
