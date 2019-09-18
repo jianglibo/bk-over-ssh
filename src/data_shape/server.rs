@@ -285,12 +285,7 @@ impl Server {
                 server_yml_path = servers_dir.as_ref().join(name);
             }
             if !server_yml_path.exists() {
-                let bytes = include_bytes!("../server_template.yaml");
-                let mut f = fs::OpenOptions::new()
-                    .create(true)
-                    .write(true)
-                    .open(&server_yml_path)?;
-                f.write_all(&bytes[..])?;
+
                 bail!(
                     "server yml file does't exist and had created one for you: {:?}",
                     server_yml_path
@@ -541,7 +536,9 @@ impl Server {
         trace!("invoking remote command: {:?}", cmd);
         channel.exec(cmd.as_str())?;
         let mut contents = String::new();
-        channel.read_to_string(&mut contents)?;
+        if let Err(err) = channel.read_to_string(&mut contents) {
+            bail!("is remote exec executable? {:?}", err);
+        }
         trace!("list-local-files output: {:?}", contents);
         contents.clear();
         channel.stderr().read_to_string(&mut contents)?;
@@ -616,7 +613,7 @@ impl Server {
 
     pub fn prepare_file_list(&mut self, skip_sha1: bool) -> Result<(), failure::Error> {
         if self.get_dir_sync_working_file_list().exists() {
-            println!("uncompleted list file exists, continue processing");
+            println!("uncompleted list file exists: {:?} continue processing", self.get_dir_sync_working_file_list());
         } else {
             println!("start download file list from {}....", self.host);
             self.list_remote_file_sftp(skip_sha1)?;
@@ -684,7 +681,7 @@ impl Server {
                                     )
                                 };
                                 if let Some(pb) = pb_op.as_mut() {
-                                    let s = format!("{} / {} , ", consume_count, total_count);
+                                    let s = format!("[{}]{} / {} , ", self.host.as_str(), consume_count, total_count);
                                     pb.pb.message(s.as_str());
                                     pb.pb.add(l);
                                 }

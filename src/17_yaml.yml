@@ -125,6 +125,13 @@ subcommands:
                 index: 1
     - list-server-yml:
         about: list server yml in the configurated data dir.
+    - demo-server-yml:
+        about: print out a demonstrate server-yml as a start point for you editing. you can redirect output to file.
+        args:
+            - out:
+                long: out
+                required: false
+                takes_value: true
     - archive-local:
         about: archive directories in the configuration file.
         args:

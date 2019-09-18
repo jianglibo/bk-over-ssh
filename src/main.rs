@@ -23,7 +23,7 @@ use clap::App;
 use clap::ArgMatches;
 use clap::Shell;
 use log::*;
-use pbr::{MultiBar, ProgressBar};
+use pbr::{MultiBar, ProgressBar, Units};
 use rustyline::completion::{Completer, FilenameCompleter, Pair};
 use rustyline::config::OutputStreamType;
 use rustyline::error::ReadlineError;
@@ -193,7 +193,9 @@ fn process_app_config(conf: Option<&str>, console_log: bool) -> Result<AppConf, 
         app_conf
             .config_file_path
             .as_ref()
-            .expect("configuration file should exist at this point.").to_str().unwrap_or("O")
+            .expect("configuration file should exist at this point.")
+            .to_str()
+            .unwrap_or("O")
     );
 
     app_conf.validate_conf()?;
@@ -261,9 +263,11 @@ fn sync_dirs<'a>(
                     None
                 }
                 Ok(pb_data) => {
+                    let mut pb = mb.create_bar(pb_data.1);
+                    pb.set_units(Units::Bytes);
                     let mypb = MyPb {
                         file_count: pb_data.0,
-                        pb: mb.create_bar(pb_data.1),
+                        pb,
                     };
                     Some((s, mypb))
                 }
@@ -315,6 +319,12 @@ fn main() -> Result<(), failure::Error> {
             let executable = sub_matches.value_of("executable").unwrap();
             let remote = server.remote_exec.clone();
             server.copy_a_file(executable, &remote)?;
+            println!(
+                "copy from {} to {} {} successed.",
+                executable,
+                server.host.as_str(),
+                remote
+            );
         }
         ("copy-server-yml", Some(sub_matches)) => {
             let mut server = app_conf.load_server_yml(parse_server_yml(sub_matches))?;
@@ -325,7 +335,24 @@ fn main() -> Result<(), failure::Error> {
                 .and_then(|pb| pb.to_str())
                 .unwrap()
                 .to_string();
-            server.copy_a_file(local, &remote)?;
+            server.copy_a_file(&local, &remote)?;
+            println!(
+                "copy from {} to {} {} successed.",
+                local,
+                server.host.as_str(),
+                remote
+            );
+        }
+        ("demo-server-yml", Some(sub_matches)) => {
+            let bytes = include_bytes!("server_template.yaml");
+
+            if let Some(out) = sub_matches.value_of("out") {
+                let mut f = fs::OpenOptions::new().create(true).write(true).open(out)?;
+                f.write_all(&bytes[..])?;
+                println!("write demo server yml to file done. {}", out);
+            } else {
+                io::stdout().write_all(&bytes[..])?;
+            }
         }
         ("list-server-yml", Some(_sub_matches)) => {
             println!(

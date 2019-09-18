@@ -9,3 +9,7 @@ Get-Service ssh-agent
 * compare files
 * download files
 
+## workflow
+
+git checkout -b develop, git checkout develop
+
