@@ -34,6 +34,7 @@ use std::env;
 use std::thread;
 use std::time::{Duration, Instant};
 use std::{fs, io, io::Write};
+use rayon::prelude::*;
 
 use data_shape::{AppConf, MyPb, Server, CONF_FILE_NAME};
 
@@ -161,12 +162,12 @@ fn demonstrate_pbr() -> Result<(), failure::Error> {
     Ok(())
 }
 
-fn process_app_config(conf: Option<&str>, console_log: bool) -> Result<AppConf, failure::Error> {
+fn process_app_config(conf: Option<&str>, console_log: bool, re_try: bool) -> Result<AppConf, failure::Error> {
     let mut app_conf = match AppConf::guess_conf_file(conf) {
         Ok(cfg) => {
             if let Some(cfg) = cfg {
                 cfg
-            } else {
+            } else if !re_try {
                 let bytes = include_bytes!("app_config_demo.yml");
                 let path = env::current_exe()?
                     .parent()
@@ -177,14 +178,13 @@ fn process_app_config(conf: Option<&str>, console_log: bool) -> Result<AppConf, 
                     .create(true)
                     .open(&path)?;
                 file.write_all(bytes)?;
-                bail!(
-                    "Cann't find app configuration file,  had created one for you: \n{:?}",
-                    path
-                );
+                process_app_config(conf, console_log, true)?
+            } else {
+                bail!("re_try read app_conf failed!");
             }
         }
         Err(err) => {
-            bail!("Read app configuration file failed: {:?}", err);
+            bail!("Read app configuration file failed:{:?}, {:?}", conf, err);
         }
     };
 
@@ -280,7 +280,7 @@ fn sync_dirs<'a>(
             mb.listen();
         });
 
-        for server_pb in server_pbs {
+        server_pbs.into_par_iter().for_each(|server_pb| {
             let (mut server, pb) = server_pb;
             match server.sync_dirs(skip_sha1, Some(pb)) {
                 Ok(result) => {
@@ -289,7 +289,7 @@ fn sync_dirs<'a>(
                 }
                 Err(err) => println!("sync-dirs failed: {:?}", err),
             }
-        }
+        });
 
         t.join().unwrap();
     }
@@ -306,7 +306,7 @@ fn main() -> Result<(), failure::Error> {
     let conf = m.value_of("conf");
     let console_log = m.is_present("console-log");
 
-    let app_conf = process_app_config(conf, console_log)?;
+    let app_conf = process_app_config(conf, console_log, false)?;
 
     match m.subcommand() {
         ("pbr", Some(_sub_matches)) => {
