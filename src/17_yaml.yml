@@ -148,6 +148,12 @@ subcommands:
                 required: false
                 conflicts_with:
                     - prune
+    - send-test-mail:
+        about: send a test mail to verify mail configuration.
+        args:
+            - to:
+                required: true
+                index: 1
     - list-remote-files:
         args:
             - server-yml:

@@ -3,3 +3,9 @@ log_conf:
   log_file: output.log
   verbose_modules: []
     # - data_shape::server
+mail_conf:
+  from: xxx@gmail.com
+  username: xxx@gmail.com
+  password: password
+  hostname: xxx.example.com
+  port: 587

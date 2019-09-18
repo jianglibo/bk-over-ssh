@@ -8,4 +8,4 @@ pub mod rolling_files;
 pub use file_item::{FileItem, FileItemProcessResult, FileItemProcessResultStats, SyncType};
 pub use remote_file_item::{load_dirs, RemoteFileItemOwned, load_remote_item_owned};
 pub use server::{Server, Directory, PruneStrategy, PruneStrategyBuilder, MyPb};
-pub use app_conf::{AppConf, CONF_FILE_NAME};
+pub use app_conf::{AppConf, CONF_FILE_NAME, MailConf};

@@ -165,4 +165,52 @@ mod tests {
         let x = Some("foo".to_string());
         x.map(|_| ()).ok_or_else(|| failure::err_msg("abc"))
     }
+
+    #[test]
+    fn t_lettre() -> Result<(), failure::Error> {
+        use lettre::{SmtpClient, Transport};
+        use lettre_email::{mime::TEXT_PLAIN, Email};
+        use lettre::smtp::extension::ClientId;
+        use lettre::smtp::authentication::{Credentials, Mechanism};
+        use lettre::smtp::ConnectionReuseParameters;
+        use std::path::Path;
+
+        let email = Email::builder()
+            // Addresses can be specified by the tuple (email, alias)
+            .to(("jianglibo@hotmail.com", "Firstname Lastname"))
+            // ... or by an address only
+            .from("jlbfine@qq.com")
+            .subject("Hi, Hello world")
+            .text("Hello world.")
+            .attachment_from_file(Path::new("Cargo.toml"), None, &TEXT_PLAIN)
+            .unwrap()
+            .build()
+            .unwrap();
+
+        // Open a local connection on port 25
+        // let mut mailer = SmtpClient::new_unencrypted_localhost().unwrap().transport();
+        let mut mailer = SmtpClient::new_simple("smtp.qq.com").unwrap()
+        // Set the name sent during EHLO/HELO, default is `localhost`
+        // .hello_name(ClientId::Domain("my.hostname.tld".to_string()))
+        // Add credentials for authentication
+        .credentials(Credentials::new("jlbfine@qq.com".to_string(), "emnbsygyqacibgjh".to_string()))
+        // Enable SMTPUTF8 if the server supports it
+        .smtp_utf8(true)
+        // Configure expected authentication mechanism
+        .authentication_mechanism(Mechanism::Plain)
+        // Enable connection reuse
+        .connection_reuse(ConnectionReuseParameters::ReuseUnlimited).transport();
+
+        // Send the email
+        let result = mailer.send(email.into());
+
+        if result.is_ok() {
+            println!("Email sent");
+        } else {
+            println!("Could not send email: {:?}", result);
+        }
+
+        assert!(result.is_ok());
+        Ok(())
+    }
 }

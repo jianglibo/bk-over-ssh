@@ -15,6 +15,7 @@ mod develope;
 mod ioutil;
 mod log_util;
 mod rustsync;
+mod mail;
 
 use crate::rustsync::DeltaWriter;
 use std::borrow::Cow::{self, Borrowed, Owned};
@@ -36,6 +37,7 @@ use std::time::{Duration, Instant};
 use std::{fs, io, io::Write};
 use rayon::prelude::*;
 use std::sync::{Arc, Mutex};
+use mail::send_test_mail;
 
 use data_shape::{AppConf, MyPb, Server, CONF_FILE_NAME};
 
@@ -279,7 +281,7 @@ fn sync_dirs<'a>(
             .collect();
 
         let t = thread::spawn(move || {
-            thread::sleep(Duration::from_millis(200));
+            thread::sleep(Duration::from_millis(500));
             mb.lock().unwrap().listen();
         });
 
@@ -314,6 +316,10 @@ fn main() -> Result<(), failure::Error> {
     match m.subcommand() {
         ("pbr", Some(_sub_matches)) => {
             demonstrate_pbr()?;
+        }
+        ("send-test-mail", Some(sub_matches)) => {
+            let to = sub_matches.value_of("to").unwrap();
+            send_test_mail(&app_conf.mail_conf, to)?;
         }
         ("sync-dirs", Some(sub_matches)) => {
             sync_dirs(&app_conf, sub_matches)?;

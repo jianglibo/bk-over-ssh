@@ -14,9 +14,19 @@ pub struct LogConf {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+pub struct MailConf {
+    pub from: String,
+    pub username: String,
+    pub password: String,
+    pub hostname: String,
+    pub port: u16,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
 pub struct AppConf {
     data_dir: String,
     log_conf: LogConf,
+    pub mail_conf: MailConf,
     #[serde(skip_deserializing)]
     pub config_file_path: Option<PathBuf>,
     #[serde(skip_deserializing)]
