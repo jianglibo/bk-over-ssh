@@ -7,6 +7,7 @@ extern crate failure;
 extern crate clap;
 
 extern crate rand;
+extern crate askama;
 // extern crate rustsync;
 
 mod actions;

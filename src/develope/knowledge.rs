@@ -4,12 +4,80 @@ mod tests {
     use crate::actions::copy_stream_to_file_return_sha1;
     use crate::data_shape::Server;
     use crate::develope::tutil;
+    use askama::Template;
     use failure;
     use ssh2::{self, Session};
     use std::io::prelude::*;
     use std::net::TcpStream;
     use std::path::Path;
-    use walkdir::WalkDir;
+    use walkdir::WalkDir; // bring trait in scope
+
+    #[derive(Template)] // this will generate the code...
+    #[template(path = "hello.html")] // using the template in this path, relative
+    struct HelloTemplate<'a> {
+        // the name of the struct can be anything
+        name: &'a str, // the field name should match the variable name
+                       // in your template
+    }
+
+    #[derive(Template)]
+    #[template(source = "hello.html", ext="txt")]
+    struct SourceTpl1<'a> {
+        name: &'a str,
+
+    }
+
+    #[derive(Template)]
+    #[template(source = "{{ name }}", ext="txt")]
+    struct SourceTpl2<'a> {
+        name: &'a str,
+    }
+
+
+
+    #[test]
+    fn t_source_tpl1() {
+        let hello = SourceTpl1 { name: "world" };
+        assert_eq!(hello.render().unwrap(), "hello.html");
+    }
+
+    #[test]
+    fn t_source_tpl2() {
+        let hello = SourceTpl2 { name: "world" };
+        assert_eq!(hello.render().unwrap(), "world");
+    }
+
+    #[derive(Template)] 
+    #[template(source = "{% if 1 == 1 %} {{ name }} {% endif %}", ext="txt")]
+    struct SourceTpl3<'a> {
+        name: &'a str, 
+    }
+
+    #[test]
+    fn t_source_tpl3() {
+        let hello = SourceTpl3 { name: "world" };
+        assert_eq!(hello.render().unwrap(), " world ");
+    }
+
+
+    #[derive(Template)] 
+    #[template(source = "{% if 1 == 1 -%} {{ name }} {%- endif %}", ext="txt")]
+    struct SourceTpl4<'a> {
+        name: &'a str, 
+    }
+
+    #[test]
+    fn t_source_tpl4() {
+        let hello = SourceTpl4 { name: "world" };
+        assert_eq!(hello.render().unwrap(), "world");
+    }
+
+
+    #[test]
+    fn t_hello_html() {
+        let hello = HelloTemplate { name: "world" }; // instantiate your struct
+        assert_eq!(hello.render().unwrap(), "Hello, world!");
+    }
 
     #[test]
     fn t_main_password() {
@@ -168,11 +236,11 @@ mod tests {
 
     #[test]
     fn t_lettre() -> Result<(), failure::Error> {
+        use lettre::smtp::authentication::{Credentials, Mechanism};
+        use lettre::smtp::extension::ClientId;
+        use lettre::smtp::ConnectionReuseParameters;
         use lettre::{SmtpClient, Transport};
         use lettre_email::{mime::TEXT_PLAIN, Email};
-        use lettre::smtp::extension::ClientId;
-        use lettre::smtp::authentication::{Credentials, Mechanism};
-        use lettre::smtp::ConnectionReuseParameters;
         use std::path::Path;
 
         let email = Email::builder()
@@ -189,17 +257,22 @@ mod tests {
 
         // Open a local connection on port 25
         // let mut mailer = SmtpClient::new_unencrypted_localhost().unwrap().transport();
-        let mut mailer = SmtpClient::new_simple("smtp.qq.com").unwrap()
-        // Set the name sent during EHLO/HELO, default is `localhost`
-        // .hello_name(ClientId::Domain("my.hostname.tld".to_string()))
-        // Add credentials for authentication
-        .credentials(Credentials::new("jlbfine@qq.com".to_string(), "emnbsygyqacibgjh".to_string()))
-        // Enable SMTPUTF8 if the server supports it
-        .smtp_utf8(true)
-        // Configure expected authentication mechanism
-        .authentication_mechanism(Mechanism::Plain)
-        // Enable connection reuse
-        .connection_reuse(ConnectionReuseParameters::ReuseUnlimited).transport();
+        let mut mailer = SmtpClient::new_simple("smtp.qq.com")
+            .unwrap()
+            // Set the name sent during EHLO/HELO, default is `localhost`
+            // .hello_name(ClientId::Domain("my.hostname.tld".to_string()))
+            // Add credentials for authentication
+            .credentials(Credentials::new(
+                "jlbfine@qq.com".to_string(),
+                "emnbsygyqacibgjh".to_string(),
+            ))
+            // Enable SMTPUTF8 if the server supports it
+            .smtp_utf8(true)
+            // Configure expected authentication mechanism
+            .authentication_mechanism(Mechanism::Plain)
+            // Enable connection reuse
+            .connection_reuse(ConnectionReuseParameters::ReuseUnlimited)
+            .transport();
 
         // Send the email
         let result = mailer.send(email.into());

@@ -37,7 +37,7 @@ pbr = "1.0.1"
 rayon = "1.2.0"
 lettre = "0.9"
 lettre_email = "0.9"
-
+askama = "0.8"
 # https://docs.rs/crate/rustsync/0.2.3
 [dependencies.clap]
 version = "~2.33"
