@@ -1,5 +1,6 @@
 use crate::data_shape::{FileItem, FileItemProcessResult, Server, SyncType};
 use crate::rustsync::{DeltaFileReader, DeltaReader, Signature};
+use indicatif::HumanBytes;
 use indicatif::ProgressBar;
 use log::*;
 use sha1::{Digest, Sha1};
@@ -21,10 +22,10 @@ pub fn copy_file_to_stream(
     Ok(())
 }
 
-pub fn copy_stream_to_file<T: AsRef<Path>>(
+pub fn copy_stream_to_file_with_cb<T: AsRef<Path>, F: Fn(u64) -> ()>(
     from: &mut impl std::io::Read,
     to_file: T,
-    mut fi_pb_op: Option<ProgressBar>,
+    mut cb: Option<F>,
 ) -> Result<u64, failure::Error> {
     let mut u8_buf = [0; 1024];
     let mut length = 0_u64;
@@ -40,23 +41,50 @@ pub fn copy_stream_to_file<T: AsRef<Path>>(
             Ok(n) if n > 0 => {
                 length += n as u64;
                 wf.write_all(&u8_buf[..n])?;
-                if let Some(mypb) = fi_pb_op.as_mut() {
-                    mypb.inc(n.try_into().unwrap())
+                if let Some(cb) = cb.as_ref() {
+                    cb(length);
                 }
             }
             _ => break,
         }
     }
-    if let Some(fpo) = fi_pb_op {
-        fpo.finish();
+    Ok(length)
+}
+
+pub fn copy_stream_to_file<T: AsRef<Path>>(
+    from: &mut impl std::io::Read,
+    to_file: T,
+    pb_op: Option<&ProgressBar>,
+) -> Result<u64, failure::Error> {
+    let mut u8_buf = [0; 1024];
+    let mut length = 0_u64;
+    let path = to_file.as_ref();
+    if let Some(pp) = path.parent() {
+        if !pp.exists() {
+            fs::create_dir_all(pp)?;
+        }
+    }
+    let mut wf = fs::OpenOptions::new().create(true).write(true).open(path)?;
+    loop {
+        match from.read(&mut u8_buf[..]) {
+            Ok(n) if n > 0 => {
+                length += n as u64;
+                wf.write_all(&u8_buf[..n])?;
+                if let Some(pb) = pb_op.as_ref() {
+                    let message = format!("{}/{}", HumanBytes(length), "");
+                    pb.set_message(message.as_str())
+                }
+            }
+            _ => break,
+        }
     }
     Ok(length)
 }
 
-pub fn copy_stream_to_file_return_sha1<T: AsRef<Path>>(
+pub fn copy_stream_to_file_return_sha1_with_cb<T: AsRef<Path>, F: Fn(u64) -> ()>(
     from: &mut impl std::io::Read,
     to_file: T,
-    mut fi_pb_op: Option<ProgressBar>,
+    mut cb: Option<F>,
 ) -> Result<(u64, String), failure::Error> {
     let mut u8_buf = [0; 1024];
     let mut length = 0_u64;
@@ -74,8 +102,41 @@ pub fn copy_stream_to_file_return_sha1<T: AsRef<Path>>(
                 length += n as u64;
                 wf.write_all(&u8_buf[..n])?;
                 hasher.input(&u8_buf[..n]);
-                if let Some(mypb) = fi_pb_op
-                    .as_mut() { mypb.inc(n.try_into().unwrap()) }
+                if let Some(cb) = cb.as_ref() {
+                    cb(length);
+                }
+            }
+            _ => break,
+        }
+    }
+    ensure!(path.exists(), "write_stream_to_file should be done.");
+    Ok((length, format!("{:X}", hasher.result())))
+}
+
+pub fn copy_stream_to_file_return_sha1<T: AsRef<Path>>(
+    from: &mut impl std::io::Read,
+    to_file: T,
+    mut fi_pb_op: Option<&ProgressBar>,
+) -> Result<(u64, String), failure::Error> {
+    let mut u8_buf = [0; 1024];
+    let mut length = 0_u64;
+    let mut hasher = Sha1::new();
+    let path = to_file.as_ref();
+    if let Some(pp) = path.parent() {
+        if !pp.exists() {
+            fs::create_dir_all(pp)?;
+        }
+    }
+    let mut wf = fs::OpenOptions::new().create(true).write(true).open(path)?;
+    loop {
+        match from.read(&mut u8_buf[..]) {
+            Ok(n) if n > 0 => {
+                length += n as u64;
+                wf.write_all(&u8_buf[..n])?;
+                hasher.input(&u8_buf[..n]);
+                if let Some(mypb) = fi_pb_op.as_mut() {
+                    mypb.inc(n.try_into().unwrap())
+                }
             }
             _ => break,
         }
@@ -152,16 +213,17 @@ pub fn visit_dirs(dir: &Path, cb: &dyn Fn(&fs::DirEntry)) -> io::Result<()> {
 
 // https://stackoverflow.com/questions/32300132/why-cant-i-store-a-value-and-a-reference-to-that-value-in-the-same-struct
 
-pub fn copy_a_file_item_sftp<'a>(
+pub fn copy_a_file_item_sftp<'a, F: Fn(u64) -> ()>(
     sftp: &ssh2::Sftp,
     local_file_path: String,
     file_item: &FileItem<'a>,
-    mypb_op: Option<ProgressBar>,
+    mut cb: Option<F>,
+    // pb_op: Option<&ProgressBar>,
 ) -> FileItemProcessResult {
     match sftp.open(Path::new(&file_item.get_remote_path())) {
         Ok(mut file) => {
             if let Some(_r_sha1) = file_item.get_remote_item().get_sha1() {
-                match copy_stream_to_file_return_sha1(&mut file, &local_file_path, mypb_op) {
+                match copy_stream_to_file_return_sha1_with_cb(&mut file, &local_file_path, cb) {
                     Ok((length, sha1)) => {
                         if length != file_item.get_remote_item().get_len() {
                             error!("length didn't match: {:?}", file_item);
@@ -183,7 +245,7 @@ pub fn copy_a_file_item_sftp<'a>(
                     }
                 }
             } else {
-                match copy_stream_to_file(&mut file, &local_file_path, mypb_op) {
+                match copy_stream_to_file_with_cb(&mut file, &local_file_path, cb) {
                     Ok(length) => {
                         if length != file_item.get_remote_item().get_len() {
                             FileItemProcessResult::LengthNotMatch(local_file_path)
@@ -281,21 +343,34 @@ pub fn copy_a_file_item<'a>(
     server: &Server,
     sftp: &ssh2::Sftp,
     file_item: FileItem<'a>,
-    fi_pb_op: Option<ProgressBar>,
+    fi_pb_op: Option<&ProgressBar>,
 ) -> FileItemProcessResult {
     if let Some(local_file_path) = file_item.get_local_path_str() {
+        let cb = if fi_pb_op.is_some() {
+            Some(|length| {
+                let message = format!(
+                    "{}/{} - {}",
+                    HumanBytes(length),
+                    HumanBytes(file_item.get_remote_item().get_len()),
+                    file_item.get_remote_item().get_path()
+                );
+                fi_pb_op.unwrap().set_message(message.as_str())
+            })
+        } else {
+            None
+        };
         let copy_result = match file_item.sync_type {
-            SyncType::Sftp => copy_a_file_item_sftp(sftp, local_file_path, &file_item, fi_pb_op),
+            SyncType::Sftp => copy_a_file_item_sftp(sftp, local_file_path, &file_item, cb),
             SyncType::Rsync => {
                 if !Path::new(&local_file_path).exists() {
-                    copy_a_file_item_sftp(sftp, local_file_path, &file_item, fi_pb_op)
+                    copy_a_file_item_sftp(sftp, local_file_path, &file_item, cb)
                 } else {
                     match copy_a_file_item_rsync(server, sftp, local_file_path.clone(), &file_item)
                     {
                         Ok(r) => r,
                         Err(err) => {
                             error!("rsync file failed: {:?}, {:?}", file_item, err);
-                            copy_a_file_item_sftp(sftp, local_file_path, &file_item, fi_pb_op)
+                            copy_a_file_item_sftp(sftp, local_file_path, &file_item, cb)
                         }
                     }
                 }

@@ -3,11 +3,11 @@ use crate::data_shape::{
     load_remote_item_owned, rolling_files, string_path, AppConf, FileItem, FileItemProcessResult,
     FileItemProcessResultStats, RemoteFileItemOwned, SyncType,
 };
-use crate::ioutil::{SharedMpb};
-use indicatif::{ProgressBar};
+use crate::ioutil::SharedMpb;
 use bzip2::write::BzEncoder;
 use bzip2::Compression;
 use glob::Pattern;
+use indicatif::{ProgressBar, ProgressStyle};
 use log::*;
 use serde::{Deserialize, Serialize};
 use ssh2;
@@ -169,6 +169,8 @@ pub struct Server {
     pub yml_location: Option<PathBuf>,
     #[serde(skip)]
     pub multi_bar: Option<SharedMpb>,
+    #[serde(skip)]
+    pub pb: Option<ProgressBar>,
 }
 
 impl Server {
@@ -211,7 +213,6 @@ impl Server {
         &mut self,
         remote: impl AsRef<Path>,
     ) -> Result<ssh2::FileStat, failure::Error> {
-        self.connect()?;
         let sftp: ssh2::Sftp = self.session.as_ref().unwrap().sftp()?;
         let stat = match sftp.stat(remote.as_ref()) {
             Ok(stat) => stat,
@@ -226,7 +227,6 @@ impl Server {
         &mut self,
         remote: impl AsRef<Path>,
     ) -> Result<String, failure::Error> {
-        self.connect()?;
         let sftp: ssh2::Sftp = self.session.as_ref().unwrap().sftp()?;
         let content = match sftp.open(remote.as_ref()) {
             Ok(mut r_file) => {
@@ -314,6 +314,14 @@ impl Server {
         let mut server: Server = serde_yaml::from_str(&buf)?;
 
         server.multi_bar = multi_bar;
+
+        if let Some(mb) = server.multi_bar.as_ref() {
+            let pb = ProgressBar::new(!0);
+            let ps = ProgressStyle::default_spinner(); // {spinner} {msg}
+            pb.set_style(ps);
+            let pb = mb.add(pb);
+            server.pb = Some(pb);
+        }
         let data_dir = data_dir.as_ref();
         let maybe_local_server_base_dir = data_dir.join(&server.host);
         let report_dir = data_dir.join("report").join(&server.host);
@@ -461,7 +469,12 @@ impl Server {
     pub fn prune_backups(&self) -> Result<(), failure::Error> {
         let prune_strategy = &self.prune_strategy;
         if let Some(tdir) = self.tar_dir.as_ref() {
-            rolling_files::do_prune_dir(prune_strategy, tdir, &self.archive_prefix, &self.archive_postfix)?;
+            rolling_files::do_prune_dir(
+                prune_strategy,
+                tdir,
+                &self.archive_prefix,
+                &self.archive_postfix,
+            )?;
         }
         Ok(())
     }
@@ -528,6 +541,9 @@ impl Server {
     }
 
     pub fn connect(&mut self) -> Result<(), failure::Error> {
+        if let Some(pb) = self.pb.as_ref() {
+            pb.set_message(format!("connecting to {}", self.host).as_str());
+        }
         if !self.is_connected() {
             let (tcp, sess) = self.create_ssh_session()?;
             if tcp.is_some() {
@@ -634,19 +650,28 @@ impl Server {
     /// Preparing file list includes invoking remote command to collect file list and downloading to local.
     pub fn prepare_file_list(&self, skip_sha1: bool) -> Result<(), failure::Error> {
         if self.get_working_file_list_file().exists() {
-            println!(
-                "uncompleted list file exists: {:?} continue processing",
-                self.get_working_file_list_file()
-            );
+            if let Some(pb) = self.pb.as_ref() {
+                let message = format!(
+                    "uncompleted list file exists: {:?} continue processing",
+                    self.get_working_file_list_file()
+                );
+                pb.set_message(message.as_str());
+            }
         } else {
-            println!("start download file list from {}....", self.host);
+            if let Some(pb) = self.pb.as_ref() {
+                let message = format!("start download file list from {}....", self.host);
+                pb.set_message(message.as_str());
+            }
             self.list_remote_file_sftp(skip_sha1)?;
-            println!("{} file list download done!", self.host);
         }
         Ok(())
     }
 
     pub fn get_pb_count_and_len(&self) -> Result<(u64, u64), failure::Error> {
+        if let Some(pb) = self.pb.as_ref() {
+            let message = format!("counting files in {} ...", self.host);
+            pb.set_message(message.as_str());
+        }
         let working_file = &self.get_working_file_list_file();
         let mut wfb = io::BufReader::new(fs::File::open(working_file)?);
         Ok(self.count_and_len(&mut wfb))
@@ -675,13 +700,13 @@ impl Server {
                 .expect("get_pb_count_and_len should success.")
         });
         let total_count = count_and_len_op.map(|cl| cl.0).unwrap_or_default();
-        let mut pb_op = self
-            .multi_bar
-            .as_ref()
-            .map(|mb| {
-                let pb = ProgressBar::new(count_and_len_op.map(|cl|cl.1).unwrap_or(0u64));
-                mb.add(pb)
-                });
+
+        if let Some(pb) = self.pb.as_ref() {
+            let style = ProgressStyle::default_bar().template("[{eta_precise}] {prefix:.bold.dim} {decimal_bytes}/{decimal_total_bytes} {bar:40.cyan/blue} {spinner} {wide_msg}");
+            pb.set_length(count_and_len_op.map(|cl| cl.1).unwrap_or(0u64));
+            pb.set_style(style);
+        }
+
         let sftp = self.session.as_ref().unwrap().sftp()?;
 
         let result = file_item_lines
@@ -711,13 +736,19 @@ impl Server {
                                     FileItem::new(ld, rd.as_str(), remote_item, sync_type);
                                 consume_count += 1;
                                 let r = if local_item.had_changed() {
-                                    let mypb_op = self.multi_bar.as_ref().map(|mb| {
-                                        let message = format!("{}{}", self.host, local_item.get_remote_item().get_path());
-                                        let pb = ProgressBar::new(local_item.get_remote_item().get_len());
-                                        pb.set_message(message.as_str());
-                                        mb.add(pb)
-                                    });
-                                    copy_a_file_item(&self, &sftp, local_item, mypb_op)
+                                    // let mypb_op = self.multi_bar.as_ref().map(|mb| {
+                                    //     let message = format!(
+                                    //         "{}{}",
+                                    //         self.host,
+                                    //         local_item.get_remote_item().get_path()
+                                    //     );
+                                    //     let pb = ProgressBar::new(
+                                    //         local_item.get_remote_item().get_len(),
+                                    //     );
+                                    //     pb.set_message(message.as_str());
+                                    //     mb.add(pb)
+                                    // });
+                                    copy_a_file_item(&self, &sftp, local_item, self.pb.as_ref())
                                 } else {
                                     FileItemProcessResult::Skipped(
                                         local_item.get_local_path_str().expect(
@@ -725,14 +756,14 @@ impl Server {
                                         ),
                                     )
                                 };
-                                if let Some(pb) = pb_op.as_mut() {
-                                    let s = format!(
-                                        "[{}]{} / {} , ",
+                                if let Some(pb) = self.pb.as_ref() {
+                                    let prefix = format!(
+                                        "[{}]{}/{} , ",
                                         self.host.as_str(),
                                         consume_count,
                                         total_count
                                     );
-                                    pb.set_message(s.as_str());
+                                    pb.set_prefix(prefix.as_str());
                                     pb.inc(l);
                                 }
                                 r
@@ -756,8 +787,7 @@ impl Server {
                         .iter()
                         .find(|d| string_path::path_equal(&d.remote_dir, &line));
 
-                    if let Some(rd) = k
-                    {
+                    if let Some(rd) = k {
                         current_remote_dir = Some(line.clone());
                         current_local_dir = Some(Path::new(rd.local_dir.as_str()));
                         FileItemProcessResult::Directory(line)
@@ -793,17 +823,10 @@ impl Server {
                 };
                 accu
             });
-
-        if let Some(pb) = pb_op {
-            pb.finish();
-        }
         Ok(result)
     }
 
-    pub fn sync_dirs(
-        &mut self,
-        skip_sha1: bool,
-    ) -> Result<SyncDirReport, failure::Error> {
+    pub fn sync_dirs(&mut self, skip_sha1: bool) -> Result<SyncDirReport, failure::Error> {
         let start = Instant::now();
         self.connect()?;
         let rs = self.start_sync_working_file_list(skip_sha1)?;
@@ -841,9 +864,9 @@ mod tests {
     use crate::log_util;
     use bzip2::write::{BzDecoder, BzEncoder};
     use bzip2::Compression;
-    use std::thread;
+    use indicatif::MultiProgress;
     use std::sync::Arc;
-    use indicatif::{MultiProgress};
+    use std::thread;
 
     fn log() {
         log_util::setup_logger_detail(
@@ -924,13 +947,12 @@ mod tests {
         let mb1 = Arc::clone(&mb);
         let mb2 = Arc::clone(&mb);
 
-        let _ = thread::spawn(move|| loop {
+        let _ = thread::spawn(move || loop {
             mb1.join().unwrap();
         });
 
         server.multi_bar.replace(mb2);
         let stats = server.sync_dirs(true)?;
-
 
         info!("result {:?}", stats);
         mb.join_and_clear().unwrap();

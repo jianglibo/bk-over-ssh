@@ -298,7 +298,11 @@ fn sync_dirs<'a>(
             Err(err) => println!("sync-dirs failed: {:?}", err),
         });
 
-    mb_op.map(|mb| mb.join_and_clear().unwrap());
+    if let Some(mb) = mb_op {
+        if let Err(err) = mb.join_and_clear() {
+            error!("last join_and_clear failed: {:?}", err);
+        }
+    }
     Ok(())
 }
 
