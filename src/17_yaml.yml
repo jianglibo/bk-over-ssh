@@ -172,34 +172,21 @@ subcommands:
                 long: out
                 required: false
                 takes_value: true
+            - skip-sha1:
+                long: skip-sha1
+                required: false
     - sync-dirs:
         about: sync directories in the configuration file.
         args:
             - server-yml:
                 required: false
                 index: 1
-    - rsync:
-        about: sync relative functions.
-        args:
-            - skip-sha1:
-                long: skip-sha1
-                required: false
-                global: true
-                conflicts_with:
-                    - verify-server-yml
             - no-pb:
                 long: no-pb
                 required: false
-                global: true
-        # args:
-        #     - server-yml:
-        #         help: the path to server configuration file.
-        #         long: server-yml
-        #         required: true
-        #         takes_value: true
-        #         global: true       
+    - rsync:
+        about: sync relative functions.
         subcommands:
-
             - signature:
                 args:
                     - file:

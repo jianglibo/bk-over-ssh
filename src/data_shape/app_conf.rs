@@ -1,9 +1,11 @@
 use crate::data_shape::Server;
 use log::*;
+use pbr::{MultiBar};
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::path::{Path, PathBuf};
-use std::{fs, io::Read, io::Write};
+use std::sync::{Arc, Mutex};
+use std::{fs, io, io::Read, io::Write};
 
 pub const CONF_FILE_NAME: &str = "bk_over_ssh.yml";
 
@@ -142,13 +144,24 @@ impl AppConf {
     pub fn load_server_yml(
         &self,
         yml_file_name: impl AsRef<str>,
+        multi_bar: Option<Arc<Mutex<MultiBar<io::Stdout>>>>,
     ) -> Result<Server, failure::Error> {
-        let server = Server::load_from_yml_with_app_config(&self, yml_file_name.as_ref())?;
-        println!("load server yml from: {}", server.yml_location.as_ref().map_or("O", |b|b.to_str().unwrap_or("O")));
+        let server =
+            Server::load_from_yml_with_app_config(&self, yml_file_name.as_ref(), multi_bar)?;
+        println!(
+            "load server yml from: {}",
+            server
+                .yml_location
+                .as_ref()
+                .map_or("O", |b| b.to_str().unwrap_or("O"))
+        );
         Ok(server)
     }
 
-    pub fn load_all_server_yml(&self) -> Vec<Server> {
+    pub fn load_all_server_yml(
+        &self,
+        multi_bar: Option<Arc<Mutex<MultiBar<io::Stdout>>>>,
+    ) -> Vec<Server> {
         if let Ok(rd) = self.get_servers_dir().read_dir() {
             rd.filter_map(|ery| match ery {
                 Err(err) => {
@@ -164,7 +177,7 @@ impl AppConf {
                 }
                 Ok(astr) => Some(astr),
             })
-            .map(|astr| self.load_server_yml(astr))
+            .map(|astr| self.load_server_yml(astr, multi_bar.as_ref().map(Arc::clone)))
             .filter_map(|rr| match rr {
                 Err(err) => {
                     warn!("load_server_yml failed: {:?}", err);

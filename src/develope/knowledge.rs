@@ -21,19 +21,16 @@ mod tests {
     }
 
     #[derive(Template)]
-    #[template(source = "hello.html", ext="txt")]
+    #[template(source = "hello.html", ext = "txt")]
     struct SourceTpl1<'a> {
         name: &'a str,
-
     }
 
     #[derive(Template)]
-    #[template(source = "{{ name }}", ext="txt")]
+    #[template(source = "{{ name }}", ext = "txt")]
     struct SourceTpl2<'a> {
         name: &'a str,
     }
-
-
 
     #[test]
     fn t_source_tpl1() {
@@ -47,10 +44,10 @@ mod tests {
         assert_eq!(hello.render().unwrap(), "world");
     }
 
-    #[derive(Template)] 
-    #[template(source = "{% if 1 == 1 %} {{ name }} {% endif %}", ext="txt")]
+    #[derive(Template)]
+    #[template(source = "{% if 1 == 1 %} {{ name }} {% endif %}", ext = "txt")]
     struct SourceTpl3<'a> {
-        name: &'a str, 
+        name: &'a str,
     }
 
     #[test]
@@ -59,11 +56,10 @@ mod tests {
         assert_eq!(hello.render().unwrap(), " world ");
     }
 
-
-    #[derive(Template)] 
-    #[template(source = "{% if 1 == 1 -%} {{ name }} {%- endif %}", ext="txt")]
+    #[derive(Template)]
+    #[template(source = "{% if 1 == 1 -%} {{ name }} {%- endif %}", ext = "txt")]
     struct SourceTpl4<'a> {
-        name: &'a str, 
+        name: &'a str,
     }
 
     #[test]
@@ -71,7 +67,6 @@ mod tests {
         let hello = SourceTpl4 { name: "world" };
         assert_eq!(hello.render().unwrap(), "world");
     }
-
 
     #[test]
     fn t_hello_html() {
@@ -109,7 +104,7 @@ mod tests {
     }
 
     fn load_server_yml() -> Server {
-        Server::load_from_yml("data/servers", "data", "localhost.yml").unwrap()
+        Server::load_from_yml("data/servers", "data", "localhost.yml", None).unwrap()
     }
 
     #[test]
@@ -174,7 +169,7 @@ mod tests {
         let sess = server.get_ssh_session();
         let mut channel: ssh2::Channel = sess.channel_session().unwrap();
         channel.exec("ls").unwrap();
-        copy_stream_to_file_return_sha1(&mut channel, "not_in_git/t.txt")?;
+        copy_stream_to_file_return_sha1(&mut channel, "not_in_git/t.txt", None)?;
         Ok(())
     }
 

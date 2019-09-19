@@ -26,7 +26,7 @@ use clap::ArgMatches;
 use clap::Shell;
 use log::*;
 use mail::send_test_mail;
-use pbr::{MultiBar, ProgressBar, Units};
+use pbr::{MultiBar, ProgressBar};
 use rayon::prelude::*;
 use rustyline::completion::{Completer, FilenameCompleter, Pair};
 use rustyline::config::OutputStreamType;
@@ -40,7 +40,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 use std::{fs, io, io::Write};
 
-use data_shape::{AppConf, MyPb, Server, CONF_FILE_NAME};
+use data_shape::{AppConf, Server, CONF_FILE_NAME};
 
 struct MyHelper {
     completer: FilenameCompleter,
@@ -221,15 +221,31 @@ fn sync_dirs<'a>(
     sub_matches: &'a clap::ArgMatches<'a>,
 ) -> Result<(), failure::Error> {
     let mut servers: Vec<Server> = Vec::new();
-    if sub_matches.value_of("server-yml").is_some() {
-        let server = app_conf.load_server_yml(parse_server_yml(sub_matches))?;
-        servers.push(server);
-    } else {
-        servers.append(&mut app_conf.load_all_server_yml());
-    }
-
     let skip_sha1 = sub_matches.is_present("skip-sha1");
     let no_pb = sub_matches.is_present("no-pb");
+
+    let mb_op = if no_pb {
+        None
+    } else {
+        Some(Arc::new(Mutex::new(MultiBar::new())))
+    };
+
+    if let Some(mb) = mb_op.as_ref().map(Arc::clone) {
+        thread::spawn(move || loop {
+            thread::sleep(Duration::from_millis(50));
+            mb.lock().unwrap().listen();
+        });
+    }
+
+    if sub_matches.value_of("server-yml").is_some() {
+        let server = app_conf.load_server_yml(
+            parse_server_yml(sub_matches),
+            mb_op.as_ref().map(Arc::clone),
+        )?;
+        servers.push(server);
+    } else {
+        servers.append(&mut app_conf.load_all_server_yml(mb_op.as_ref().map(Arc::clone)));
+    }
 
     if servers.is_empty() {
         println!("found no server yml!");
@@ -239,70 +255,70 @@ fn sync_dirs<'a>(
             servers.len()
         );
     }
-    if no_pb {
-        servers.into_par_iter().for_each(|mut server| {
-            if let Err(err) = server.prepare_file_list(skip_sha1) {
-                warn!("prepare_file_list failed: {:?}", err);
-                println!("prepare_file_list failed: {:?}", err);
-            } else {
-                match server.sync_dirs(skip_sha1, None) {
-                    Ok(result) => {
-                        actions::write_dir_sync_result(&server, &result);
-                        println!("{:?}", result);
-                    }
-                    Err(err) => println!("sync-dirs failed: {:?}", err),
-                }
+    // if no_pb {
+    servers.into_par_iter().for_each(|mut server| {
+        // if let Err(err) = server.prepare_file_list(skip_sha1) {
+        //     warn!("prepare_file_list failed: {:?}", err);
+        //     println!("prepare_file_list failed: {:?}", err);
+        // } else {
+        match server.sync_dirs(skip_sha1) {
+            Ok(result) => {
+                actions::write_dir_sync_result(&server, &result);
+                println!("{:?}", result);
             }
-        });
-    } else {
-        let mb = MultiBar::new();
-        let mb = Arc::new(Mutex::new(mb));
-        let mb_clone = Arc::clone(&mb);
+            Err(err) => println!("sync-dirs failed: {:?}", err),
+        }
+        // }
+    });
+    // } else {
+    //     let mb = MultiBar::new();
+    //     let mb = Arc::new(Mutex::new(mb));
+    //     let mb_clone = Arc::clone(&mb);
 
-        thread::spawn(move || loop {
-            thread::sleep(Duration::from_millis(50));
-            mb_clone.lock().unwrap().listen();
-        });
+    //     thread::spawn(move || loop {
+    //         thread::sleep(Duration::from_millis(50));
+    //         mb_clone.lock().unwrap().listen();
+    //     });
 
-        servers
-            .into_par_iter()
-            .filter_map(|mut server| {
-                if let Err(err) = server.prepare_file_list(skip_sha1) {
-                    warn!("prepare_file_list failed: {:?}", err);
-                    println!("prepare_file_list failed: {:?}", err);
-                    None
-                } else {
-                    Some(server)
-                }
-            })
-            .filter_map(|server| match server.get_pb_data() {
-                Err(err) => {
-                    warn!("get_pb_data failed: {:?}", err);
-                    None
-                }
-                Ok(pb_data) => {
-                    let mut pb = mb.lock().unwrap().create_bar(pb_data.1);
-                    pb.set_units(Units::Bytes);
-                    let mypb = MyPb {
-                        file_count: pb_data.0,
-                        pb,
-                    };
-                    Some((server, mypb))
-                }
-            })
-            .for_each(|server_pb| {
-                let (mut server, pb) = server_pb;
-                match server.sync_dirs(skip_sha1, Some(pb)) {
-                    Ok(result) => {
-                        actions::write_dir_sync_result(&server, &result);
-                        println!("{:?}", result);
-                    }
-                    Err(err) => println!("sync-dirs failed: {:?}", err),
-                }
-            });
+    //     servers
+    //         .into_par_iter()
+    //         .filter_map(|mut server| {
+    //             if let Err(err) = server.prepare_file_list(skip_sha1) {
+    //                 warn!("prepare_file_list failed: {:?}", err);
+    //                 println!("prepare_file_list failed: {:?}", err);
+    //                 None
+    //             } else {
+    //                 Some(server)
+    //             }
+    //         })
+    //         .filter_map(|server| match server.get_pb_data() {
+    //             Err(err) => {
+    //                 warn!("get_pb_data failed: {:?}", err);
+    //                 None
+    //             }
+    //             Ok(pb_data) => {
+    //                 let mut pb = mb.lock().unwrap().create_bar(pb_data.1);
+    //                 pb.set_units(Units::Bytes);
+    //                 let mypb = MyPb {
+    //                     file_count: pb_data.0,
+    //                     pb,
+    //                 };
+    //                 Some((server, mypb))
+    //             }
+    //         })
+    //         .for_each(|server_pb| {
+    //             let (mut server, pb) = server_pb;
+    //             match server.sync_dirs(skip_sha1, Some(pb)) {
+    //                 Ok(result) => {
+    //                     actions::write_dir_sync_result(&server, &result);
+    //                     println!("{:?}", result);
+    //                 }
+    //                 Err(err) => println!("sync-dirs failed: {:?}", err),
+    //             }
+    //         });
 
-        // t.join().unwrap();
-    }
+    //     // t.join().unwrap();
+    // }
     Ok(())
 }
 
@@ -330,7 +346,7 @@ fn main() -> Result<(), failure::Error> {
             sync_dirs(&app_conf, sub_matches)?;
         }
         ("copy-executable", Some(sub_matches)) => {
-            let mut server = app_conf.load_server_yml(parse_server_yml(sub_matches))?;
+            let mut server = app_conf.load_server_yml(parse_server_yml(sub_matches), None)?;
             let executable = sub_matches.value_of("executable").unwrap();
             let remote = server.remote_exec.clone();
             server.copy_a_file(executable, &remote)?;
@@ -342,7 +358,7 @@ fn main() -> Result<(), failure::Error> {
             );
         }
         ("copy-server-yml", Some(sub_matches)) => {
-            let mut server = app_conf.load_server_yml(parse_server_yml(sub_matches))?;
+            let mut server = app_conf.load_server_yml(parse_server_yml(sub_matches), None)?;
             let remote = server.remote_server_yml.clone();
             let local = server
                 .yml_location
@@ -384,13 +400,13 @@ fn main() -> Result<(), failure::Error> {
             }
         }
         ("archive-local", Some(sub_matches)) => {
-            let server = app_conf.load_server_yml(parse_server_yml(sub_matches))?;
+            let server = app_conf.load_server_yml(parse_server_yml(sub_matches), None)?;
             server.tar_local()?;
         }
         ("list-remote-files", Some(sub_matches)) => {
             let skip_sha1 = sub_matches.is_present("skip-sha1");
             let start = Instant::now();
-            let mut server = app_conf.load_server_yml(parse_server_yml(sub_matches))?;
+            let mut server = app_conf.load_server_yml(parse_server_yml(sub_matches), None)?;
             server.list_remote_file_exec(skip_sha1)?;
 
             if let Some(out) = sub_matches.value_of("out") {
@@ -414,7 +430,7 @@ fn main() -> Result<(), failure::Error> {
         }
         ("list-local-files", Some(sub_matches)) => {
             let skip_sha1 = sub_matches.is_present("skip-sha1");
-            let server = &app_conf.load_server_yml(parse_server_yml(sub_matches))?;
+            let server = &app_conf.load_server_yml(parse_server_yml(sub_matches), None)?;
             if let Some(out) = sub_matches.value_of("out") {
                 let mut out = fs::OpenOptions::new()
                     .create(true)
@@ -427,7 +443,7 @@ fn main() -> Result<(), failure::Error> {
             }
         }
         ("verify-server-yml", Some(sub_matches)) => {
-            let mut server = app_conf.load_server_yml(parse_server_yml(sub_matches))?;
+            let mut server = app_conf.load_server_yml(parse_server_yml(sub_matches), None)?;
             println!(
                 "found server configuration yml at: {:?}",
                 server.yml_location.as_ref().unwrap()

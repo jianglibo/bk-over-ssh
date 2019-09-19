@@ -8,6 +8,7 @@ use bzip2::Compression;
 use glob::Pattern;
 use log::*;
 use pbr::{MultiBar, Pipe, ProgressBar, Units};
+use std::sync::{Arc, Mutex};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use ssh2;
@@ -18,8 +19,9 @@ use std::time::Instant;
 use std::{fs, io, io::Seek};
 use tar::Builder;
 
-pub struct MyPb {
-    pub file_count: u64,
+pub struct FileItemPb {
+    pub hostname: String,
+    pub filename: String,
     pub pb: ProgressBar<Pipe>,
 }
 
@@ -171,7 +173,7 @@ pub struct Server {
     #[serde(skip)]
     pub yml_location: Option<PathBuf>,
     #[serde(skip)]
-    pub file_list_prepared: bool,
+    pub multi_bar: Option<Arc<Mutex<MultiBar<io::Stdout>>>>,
 }
 
 impl Server {
@@ -266,20 +268,31 @@ impl Server {
     pub fn remove_working_file_list_file(&self) {
         let wf = self.get_working_file_list_file();
         if let Err(err) = fs::remove_file(&wf) {
-            error!("delete working file list file failed: {:?}, {:?}", self.get_working_file_list_file(), err);
+            error!(
+                "delete working file list file failed: {:?}, {:?}",
+                self.get_working_file_list_file(),
+                err
+            );
         }
     }
 
     pub fn load_from_yml_with_app_config(
         app_conf: &AppConf,
         name: impl AsRef<str>,
+        multi_bar: Option<Arc<Mutex<MultiBar<io::Stdout>>>>,
     ) -> Result<Server, failure::Error> {
-        Server::load_from_yml(app_conf.get_servers_dir(), app_conf.get_data_dir(), name)
+        Server::load_from_yml(
+            app_conf.get_servers_dir(),
+            app_conf.get_data_dir(),
+            name,
+            multi_bar,
+        )
     }
     pub fn load_from_yml(
         servers_dir: impl AsRef<Path>,
         data_dir: impl AsRef<Path>,
         name: impl AsRef<str>,
+        multi_bar: Option<Arc<Mutex<MultiBar<io::Stdout>>>>,
     ) -> Result<Server, failure::Error> {
         let name = name.as_ref();
         trace!("got server yml name: {:?}", name);
@@ -304,6 +317,8 @@ impl Server {
         let mut buf = String::new();
         f.read_to_string(&mut buf)?;
         let mut server: Server = serde_yaml::from_str(&buf)?;
+
+        server.multi_bar = multi_bar;
         let data_dir = data_dir.as_ref();
         let maybe_local_server_base_dir = data_dir.join(&server.host);
         let report_dir = data_dir.join("report").join(&server.host);
@@ -528,8 +543,7 @@ impl Server {
             .expect("a channel session."))
     }
 
-    pub fn list_remote_file_sftp(&mut self, skip_sha1: bool) -> Result<PathBuf, failure::Error> {
-        self.connect()?;
+    pub fn list_remote_file_sftp(&self, skip_sha1: bool) -> Result<PathBuf, failure::Error> {
         let mut channel: ssh2::Channel = self.create_channel()?;
         let cmd = format!(
             "{} list-local-files {} --out {}{}",
@@ -614,10 +628,7 @@ impl Server {
     }
 
     /// Preparing file list includes invoking remote command to collect file list and downloading to local.
-    pub fn prepare_file_list(&mut self, skip_sha1: bool) -> Result<(), failure::Error> {
-        if self.file_list_prepared {
-            return Ok(());
-        }
+    pub fn prepare_file_list(&self, skip_sha1: bool) -> Result<(), failure::Error> {
         if self.get_working_file_list_file().exists() {
             println!(
                 "uncompleted list file exists: {:?} continue processing",
@@ -628,31 +639,46 @@ impl Server {
             self.list_remote_file_sftp(skip_sha1)?;
             println!("{} file list download done!", self.host);
         }
-        self.file_list_prepared = true;
         Ok(())
     }
 
-    pub fn get_pb_data(&self) -> Result<(u64, u64), failure::Error> {
+    pub fn get_pb_count_and_len(&self) -> Result<(u64, u64), failure::Error> {
         let working_file = &self.get_working_file_list_file();
         let mut wfb = io::BufReader::new(fs::File::open(working_file)?);
         Ok(self.count_and_len(&mut wfb))
     }
 
-    pub fn get_file_list_reader(&self) -> Result<impl io::BufRead, failure::Error> {
+    fn start_sync_working_file_list(
+        &self,
+        skip_sha1: bool,
+    ) -> Result<FileItemProcessResultStats, failure::Error> {
+        self.prepare_file_list(skip_sha1)?;
         let working_file = &self.get_working_file_list_file();
-        Ok(io::BufReader::new(fs::File::open(working_file)?))
+        let rb = io::BufReader::new(fs::File::open(working_file)?);
+        self.start_sync(rb)
     }
 
     /// Do not try to return item stream from this function. consume it locally, pass in function to alter the behavior.
     fn start_sync<R: BufRead>(
         &self,
         file_item_lines: R,
-        mut pb_op: Option<MyPb>,
     ) -> Result<FileItemProcessResultStats, failure::Error> {
         let mut current_remote_dir = Option::<String>::None;
         let mut current_local_dir = Option::<&Path>::None;
         let mut consume_count = 0u64;
-        let total_count = pb_op.as_ref().map(|pb| pb.file_count).unwrap_or(0u64);
+        let count_and_len_op = self.multi_bar.as_ref().map(|_| {
+            self.get_pb_count_and_len()
+                .expect("get_pb_count_and_len should success.")
+        });
+        let total_count = count_and_len_op.map(|cl| cl.0).unwrap_or_default();
+        let mut pb_op = self
+            .multi_bar
+            .as_ref()
+            .map(|mb| {
+                let mut pb = mb.lock().unwrap().create_bar(count_and_len_op.unwrap().1);
+                pb.set_units(Units::Bytes);
+                pb
+                });
         let sftp = self.session.as_ref().unwrap().sftp()?;
 
         let result = file_item_lines
@@ -697,8 +723,8 @@ impl Server {
                                         consume_count,
                                         total_count
                                     );
-                                    pb.pb.message(s.as_str());
-                                    pb.pb.add(l);
+                                    pb.message(s.as_str());
+                                    pb.add(l);
                                 }
                                 r
                             }
@@ -757,8 +783,8 @@ impl Server {
                 accu
             });
 
-        if let Some(mut bp) = pb_op {
-            bp.pb.finish_println("done!")
+        if let Some(mut pb) = pb_op {
+            pb.finish_println("done!")
         }
         Ok(result)
     }
@@ -766,15 +792,11 @@ impl Server {
     pub fn sync_dirs(
         &mut self,
         skip_sha1: bool,
-        pb_op: Option<MyPb>,
+        // pb_op: Option<MyPb>,
     ) -> Result<SyncDirReport, failure::Error> {
         let start = Instant::now();
         self.connect()?;
-        self.prepare_file_list(skip_sha1)?;
-        let rs = {
-            let rd = self.get_file_list_reader()?;
-            self.start_sync(rd, pb_op)?
-        };
+        let rs = self.start_sync_working_file_list(skip_sha1)?;
         self.remove_working_file_list_file();
         Ok(SyncDirReport::new(start.elapsed(), rs))
     }
@@ -822,7 +844,7 @@ mod tests {
     }
 
     fn load_server_yml() -> Server {
-        Server::load_from_yml("data/servers", "data", "localhost.yml").unwrap()
+        Server::load_from_yml("data/servers", "data", "localhost.yml", None).unwrap()
     }
 
     #[test]
@@ -885,21 +907,17 @@ mod tests {
     fn t_sync_dirs() -> Result<(), failure::Error> {
         log();
         let mut server = load_server_yml();
-        let mut mb = MultiBar::new();
-        server.prepare_file_list(false)?;
-        let cl = server.get_pb_data()?;
-        let p1 = mb.create_bar(cl.1);
+        let mb = Arc::new(Mutex::new(MultiBar::new()));
 
-        thread::spawn(move || {
-            mb.listen();
-            println!("all bars done!");
+        let mb_cloned = Arc::clone(&mb);
+
+        thread::spawn(move || loop {
+            thread::sleep(std::time::Duration::from_millis(50));
+            mb_cloned.lock().unwrap().listen();
         });
 
-        let mypb = MyPb {
-            file_count: cl.0,
-            pb: p1,
-        };
-        let stats = server.sync_dirs(true, Some(mypb))?;
+        server.multi_bar.replace(mb);
+        let stats = server.sync_dirs(true)?;
         info!("result {:?}", stats);
         Ok(())
     }
