@@ -1,5 +1,6 @@
 use crate::data_shape::{FileItem, FileItemProcessResult, Server, SyncType};
 use crate::rustsync::{DeltaFileReader, DeltaReader, Signature};
+use indicatif::ProgressBar;
 use log::*;
 use sha1::{Digest, Sha1};
 use ssh2;
@@ -8,7 +9,6 @@ use std::ffi::OsStr;
 use std::io::prelude::Write;
 use std::path::Path;
 use std::{fs, io, io::Read};
-use indicatif::{ProgressBar};
 
 #[allow(dead_code)]
 pub fn copy_file_to_stream(
@@ -40,9 +40,9 @@ pub fn copy_stream_to_file<T: AsRef<Path>>(
             Ok(n) if n > 0 => {
                 length += n as u64;
                 wf.write_all(&u8_buf[..n])?;
-                fi_pb_op
-                    .as_mut()
-                    .map(|mypb| mypb.inc(n.try_into().unwrap()));
+                if let Some(mypb) = fi_pb_op.as_mut() {
+                    mypb.inc(n.try_into().unwrap())
+                }
             }
             _ => break,
         }
@@ -74,9 +74,8 @@ pub fn copy_stream_to_file_return_sha1<T: AsRef<Path>>(
                 length += n as u64;
                 wf.write_all(&u8_buf[..n])?;
                 hasher.input(&u8_buf[..n]);
-                fi_pb_op
-                    .as_mut()
-                    .map(|mypb| mypb.inc(n.try_into().unwrap()));
+                if let Some(mypb) = fi_pb_op
+                    .as_mut() { mypb.inc(n.try_into().unwrap()) }
             }
             _ => break,
         }
@@ -341,7 +340,7 @@ mod tests {
         let sftp = session.sftp()?;
         let mut server = Server::load_from_yml("servers", "data", "localhost.yml", None)?;
         server.connect()?;
-        let r = copy_a_file_item(&mut server, &sftp, fi, None);
+        let r = copy_a_file_item(&server, &sftp, fi, None);
         Ok(r)
     }
 

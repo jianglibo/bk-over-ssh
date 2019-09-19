@@ -1,12 +1,11 @@
 use crate::data_shape::Server;
 use crate::ioutil::{SharedMpb};
 use log::*;
-use indicatif::{MultiProgress, ProgressBar};
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
-use std::{fs, io, io::Read, io::Write};
+use std::sync::{Arc};
+use std::{fs, io::Read, io::Write};
 
 pub const CONF_FILE_NAME: &str = "bk_over_ssh.yml";
 
@@ -178,7 +177,7 @@ impl AppConf {
                 }
                 Ok(astr) => Some(astr),
             })
-            .map(|astr| self.load_server_yml(astr, multi_bar))
+            .map(|astr| self.load_server_yml(astr, multi_bar.as_ref().map(Arc::clone)))
             .filter_map(|rr| match rr {
                 Err(err) => {
                     warn!("load_server_yml failed: {:?}", err);

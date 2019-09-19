@@ -86,20 +86,20 @@ fn parse_date_time(ss: impl AsRef<str>) -> Result<DateTime<FixedOffset>, failure
 fn dir_entry_matches(
     dir: impl AsRef<Path>,
     dir_entry: io::Result<fs::DirEntry>,
-    name_stem: impl AsRef<str>,
+    name_prefix: impl AsRef<str>,
     name_ext_with_dot: impl AsRef<str>,
 ) -> Result<Option<FileCopy>, failure::Error> {
     let dir = dir.as_ref();
     let dir_entry = dir_entry?;
-    let name_stem = name_stem.as_ref();
+    let name_prefix = name_prefix.as_ref();
     let name_ext_with_dot = name_ext_with_dot.as_ref();
     if let Some(com) = dir_entry.path().strip_prefix(dir)?.components().next() {
         if let Component::Normal(d_name) = com {
             if let Some(d_name) = d_name.to_str() {
-                if d_name.starts_with(name_stem) && d_name.ends_with(name_ext_with_dot) {
-                    let mut sn = d_name.splitn(2, name_stem);
+                if d_name.starts_with(name_prefix) && d_name.ends_with(name_ext_with_dot) {
+                    let mut sn = d_name.splitn(2, name_prefix);
                     sn.next();
-                    let strip_prefix = sn.next().expect("strip name_stem should success.");
+                    let strip_prefix = sn.next().expect("strip name_prefix should success.");
                     let mut sn = strip_prefix.rsplitn(2, name_ext_with_dot);
                     sn.next();
                     let copy_trait = sn
@@ -117,8 +117,8 @@ fn dir_entry_matches(
                     }
                 } else {
                     warn!(
-                        "skip item in directory: {:?}, name_stem: {:?}, name_ext_with_dot: {:?}",
-                        d_name, name_stem, name_ext_with_dot
+                        "skip item in directory: {:?}, name_prefix: {:?}, name_ext_with_dot: {:?}",
+                        d_name, name_prefix, name_ext_with_dot
                     );
                 }
             } else {
@@ -135,7 +135,7 @@ fn dir_entry_matches(
 
 fn get_file_copy_vec(
     dir: impl AsRef<Path>,
-    name_stem: impl AsRef<str>,
+    name_prefix: impl AsRef<str>,
     name_ext_with_dot: impl AsRef<str>,
 ) -> Result<Vec<FileCopy>, failure::Error> {
     let rd = dir.as_ref().read_dir()?;
@@ -144,7 +144,7 @@ fn get_file_copy_vec(
             match dir_entry_matches(
                 dir.as_ref(),
                 et,
-                name_stem.as_ref(),
+                name_prefix.as_ref(),
                 name_ext_with_dot.as_ref(),
             ) {
                 Ok(dn) => dn,
@@ -222,15 +222,14 @@ fn prune_period(
     (FileCopies { inner: mp }, file_copies_to_delete)
 }
 
-#[allow(dead_code)]
 fn prune_dir_result(
     prune_strategy: &PruneStrategy,
     dir: impl AsRef<Path>,
-    name_stem: impl AsRef<str>,
+    name_prefix: impl AsRef<str>,
     name_ext_with_dot: impl AsRef<str>,
 ) -> Result<(Vec<FileCopy>, Vec<FileCopy>), failure::Error> {
     // order by created time asc.
-    let mv = get_file_copy_vec(dir, name_stem, name_ext_with_dot)?;
+    let mv = get_file_copy_vec(dir, name_prefix, name_ext_with_dot)?;
 
     let mut all_to_delete: Vec<FileCopy> = Vec::new();
     let mut all_remains: Vec<FileCopy> = Vec::new();
@@ -323,14 +322,14 @@ fn prune_dir_result(
     Ok((all_remains, all_to_delete))
 }
 
-fn do_prune_dir(
+pub fn do_prune_dir(
     prune_strategy: &PruneStrategy,
     dir: impl AsRef<Path>,
-    name_stem: impl AsRef<str>,
+    name_prefix: impl AsRef<str>,
     name_ext_with_dot: impl AsRef<str>,
 ) -> Result<(), failure::Error> {
     let (_to_remain, to_delete) =
-        prune_dir_result(prune_strategy, dir, name_stem, name_ext_with_dot)?;
+        prune_dir_result(prune_strategy, dir, name_prefix, name_ext_with_dot)?;
     for d in to_delete {
         let p = d.dir_entry.path();
         if d.dir_entry.metadata()?.file_type().is_file() {
@@ -342,31 +341,13 @@ fn do_prune_dir(
     Ok(())
 }
 
-// fn group_file_copies(
-//     dir_entrys: Vec<FileCopy>,
-//     compare_char_len: usize,
-// ) -> Result<HashMap<String, Vec<FileCopy>>, failure::Error> {
-//     Ok(dir_entrys
-//         .into_iter()
-//         .fold(HashMap::<String, Vec<FileCopy>>::new(), |mut mp, fc| {
-//             let mut s = fc.copy_trait.clone();
-//             s.replace_range(compare_char_len.., "");
-
-//             mp.entry(s).or_insert_with(Vec::new).push(fc);
-//             mp
-//         }))
-// }
-
-/// monthly, weekly, daily, hourly, minutely,
-/// The file name pattern is yyyyMMddHHmmss 14 chars.
-
 pub fn get_next_file_name(
     dir: impl AsRef<Path>,
-    name_stem: impl AsRef<str>,
+    name_prefix: impl AsRef<str>,
     name_ext_with_dot: impl AsRef<str>,
 ) -> PathBuf {
     let dir = dir.as_ref();
-    let name_stem = name_stem.as_ref();
+    let name_stem = name_prefix.as_ref();
     let name_ext_with_dot = name_ext_with_dot.as_ref();
 
     let s = format_dt(&Utc::now(), name_stem, name_ext_with_dot);
@@ -815,7 +796,7 @@ mod tests {
         Ok(())
     }
 
-        #[test]
+    #[test]
     fn t_rolling_file_6() -> Result<(), failure::Error> {
         log();
         let fcg = FileCopyGeneratorBuilder::default()

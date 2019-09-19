@@ -24,9 +24,9 @@ use std::borrow::Cow::{self, Borrowed, Owned};
 use clap::App;
 use clap::ArgMatches;
 use clap::Shell;
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use log::*;
 use mail::send_test_mail;
-use indicatif::{MultiProgress, ProgressBar};
 use rayon::prelude::*;
 use rustyline::completion::{Completer, FilenameCompleter, Pair};
 use rustyline::config::OutputStreamType;
@@ -35,13 +35,12 @@ use rustyline::highlight::{Highlighter, MatchingBracketHighlighter};
 use rustyline::hint::{Hinter, HistoryHinter};
 use rustyline::{Cmd, CompletionType, Config, Context, EditMode, Editor, Helper, KeyPress};
 use std::env;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 use std::{fs, io, io::Write};
 
 use data_shape::{AppConf, Server, CONF_FILE_NAME};
-use ioutil::SharedMpb;
 
 struct MyHelper {
     completer: FilenameCompleter,
@@ -160,7 +159,7 @@ fn demonstrate_pbr() -> Result<(), failure::Error> {
 
     let multi_bar1 = Arc::clone(&multi_bar);
 
-    let count = 10;
+    let count = 100;
 
     let mut i = 0;
 
@@ -171,18 +170,30 @@ fn demonstrate_pbr() -> Result<(), failure::Error> {
         thread::sleep(Duration::from_millis(5));
     });
 
-    let pb1 = multi_bar.add(ProgressBar::new(count));
+    let pb1 = multi_bar.add(ProgressBar::new(1_000_000));
+    pb1.set_style(
+        ProgressStyle::default_bar()
+            // .template("[{eta_precise}] {prefix:.bold.dim} {bar:40.cyan/blue} {pos:>7}/{len:7} {wide_msg}")
+            .template("[{eta_precise}] {prefix:.bold.dim} {spinner} {bar:40.cyan/blue}  {decimal_bytes}/{decimal_total_bytes}  {bytes:>7}/{bytes_per_sec}/{total_bytes:7} {wide_msg}")
+            .progress_chars("##-"),
+    );
+    // pb1.format_state(); format_style list all possible value.
+    pb1.set_message("hello message.");
+    pb1.set_prefix(&format!("[{}/?]", 33));
+
     let pb2 = multi_bar.add(ProgressBar::new(count));
 
     for _ in 0..count {
-        pb1.inc(1);
-        pb2.inc(2);
+        pb1.inc(1000);
+        pb2.inc(1);
         thread::sleep(Duration::from_millis(200));
     }
     pb1.finish();
     pb2.finish();
 
-    multi_bar.join_and_clear().unwrap();
+    if let Err(err) = multi_bar.join_and_clear() {
+        println!("join_and_clear failed: {:?}", err);
+    }
     Ok(())
 }
 
@@ -251,7 +262,7 @@ fn sync_dirs<'a>(
     };
 
     let _ = if let Some(mb) = mb_op.as_ref().map(Arc::clone) {
-        Some(thread::spawn( move || loop {
+        Some(thread::spawn(move || loop {
             thread::sleep(Duration::from_millis(5));
             mb.join().unwrap();
         }))
@@ -262,11 +273,11 @@ fn sync_dirs<'a>(
     if sub_matches.value_of("server-yml").is_some() {
         let server = app_conf.load_server_yml(
             parse_server_yml(sub_matches),
-            mb_op.as_ref(),
+            mb_op.as_ref().map(Arc::clone),
         )?;
         servers.push(server);
     } else {
-        servers.append(&mut app_conf.load_all_server_yml(mb_op.as_ref()));
+        servers.append(&mut app_conf.load_all_server_yml(mb_op.as_ref().map(Arc::clone)));
     }
 
     if servers.is_empty() {
@@ -286,9 +297,8 @@ fn sync_dirs<'a>(
             }
             Err(err) => println!("sync-dirs failed: {:?}", err),
         });
-    // if let Some(tt) = t {
-    //     tt.join().unwrap();
-    // }
+
+    mb_op.map(|mb| mb.join_and_clear().unwrap());
     Ok(())
 }
 
@@ -371,7 +381,16 @@ fn main() -> Result<(), failure::Error> {
         }
         ("archive-local", Some(sub_matches)) => {
             let server = app_conf.load_server_yml(parse_server_yml(sub_matches), None)?;
-            server.tar_local()?;
+            let prune_op = sub_matches.value_of("prune");
+            let prune_only_op = sub_matches.value_of("prune-only");
+            if prune_op.is_some() {
+                server.tar_local()?;
+                server.prune_backups()?;
+            } else if prune_only_op.is_some() {
+                server.prune_backups()?;
+            } else {
+                server.tar_local()?;
+            }
         }
         ("list-remote-files", Some(sub_matches)) => {
             let skip_sha1 = sub_matches.is_present("skip-sha1");

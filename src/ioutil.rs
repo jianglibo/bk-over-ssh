@@ -33,13 +33,3 @@ pub type SharedMpb = Arc<MultiProgress>;
 //     }
 // }
 
-// pub fn map_multibar_to_pb_unit_bytes(
-//     multi_bar: &mut ArcedMultiBar,
-//     message: &str,
-//     total: u64,
-// ) -> FileItemPb {
-//         let mut pb = multi_bar.create_bar(total);
-//         pb.set_units(Units::Bytes);
-//         pb.message(message);
-//         pb
-// }

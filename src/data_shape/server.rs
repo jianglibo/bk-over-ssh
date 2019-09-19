@@ -4,11 +4,10 @@ use crate::data_shape::{
     FileItemProcessResultStats, RemoteFileItemOwned, SyncType,
 };
 use crate::ioutil::{SharedMpb};
-use indicatif::{MultiProgress, ProgressBar};
+use indicatif::{ProgressBar};
 use bzip2::write::BzEncoder;
 use bzip2::Compression;
 use glob::Pattern;
-use std::sync::{Arc};
 use log::*;
 use serde::{Deserialize, Serialize};
 use ssh2;
@@ -378,6 +377,7 @@ impl Server {
         Ok(server)
     }
 
+    /// get tar_dir , archive_prefix, archive_postfix from server yml configuration file.
     fn next_tar_file(&self) -> PathBuf {
         let tar_dir = self
             .tar_dir
@@ -454,6 +454,14 @@ impl Server {
             }
         } else {
             error!("empty tar_dir in the server.");
+        }
+        Ok(())
+    }
+
+    pub fn prune_backups(&self) -> Result<(), failure::Error> {
+        let prune_strategy = &self.prune_strategy;
+        if let Some(tdir) = self.tar_dir.as_ref() {
+            rolling_files::do_prune_dir(prune_strategy, tdir, &self.archive_prefix, &self.archive_postfix)?;
         }
         Ok(())
     }
@@ -669,6 +677,7 @@ impl Server {
         let total_count = count_and_len_op.map(|cl| cl.0).unwrap_or_default();
         let mut pb_op = self
             .multi_bar
+            .as_ref()
             .map(|mb| {
                 let pb = ProgressBar::new(count_and_len_op.map(|cl|cl.1).unwrap_or(0u64));
                 mb.add(pb)
@@ -702,9 +711,10 @@ impl Server {
                                     FileItem::new(ld, rd.as_str(), remote_item, sync_type);
                                 consume_count += 1;
                                 let r = if local_item.had_changed() {
-                                    let mypb_op = self.multi_bar.map(|mb| {
+                                    let mypb_op = self.multi_bar.as_ref().map(|mb| {
                                         let message = format!("{}{}", self.host, local_item.get_remote_item().get_path());
                                         let pb = ProgressBar::new(local_item.get_remote_item().get_len());
+                                        pb.set_message(message.as_str());
                                         mb.add(pb)
                                     });
                                     copy_a_file_item(&self, &sftp, local_item, mypb_op)
@@ -784,7 +794,7 @@ impl Server {
                 accu
             });
 
-        if let Some(mut pb) = pb_op {
+        if let Some(pb) = pb_op {
             pb.finish();
         }
         Ok(result)
@@ -793,7 +803,6 @@ impl Server {
     pub fn sync_dirs(
         &mut self,
         skip_sha1: bool,
-        // pb_op: Option<MyPb>,
     ) -> Result<SyncDirReport, failure::Error> {
         let start = Instant::now();
         self.connect()?;
@@ -833,6 +842,8 @@ mod tests {
     use bzip2::write::{BzDecoder, BzEncoder};
     use bzip2::Compression;
     use std::thread;
+    use std::sync::Arc;
+    use indicatif::{MultiProgress};
 
     fn log() {
         log_util::setup_logger_detail(

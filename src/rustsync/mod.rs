@@ -451,7 +451,7 @@ mod tests {
         }
 
         impl Aenum {
-            pub fn set_value(&mut self, v: u8) {
+            pub fn set_value(&mut self, _v: u8) {
                 match self {
                     Self::A(_) => {}
                     Self::B(_) => {}
