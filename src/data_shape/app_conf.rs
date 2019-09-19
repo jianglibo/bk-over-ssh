@@ -1,6 +1,7 @@
 use crate::data_shape::Server;
+use crate::ioutil::{SharedMpb};
 use log::*;
-use pbr::{MultiBar};
+use indicatif::{MultiProgress, ProgressBar};
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::path::{Path, PathBuf};
@@ -144,7 +145,7 @@ impl AppConf {
     pub fn load_server_yml(
         &self,
         yml_file_name: impl AsRef<str>,
-        multi_bar: Option<Arc<Mutex<MultiBar<io::Stdout>>>>,
+        multi_bar: Option<SharedMpb>,
     ) -> Result<Server, failure::Error> {
         let server =
             Server::load_from_yml_with_app_config(&self, yml_file_name.as_ref(), multi_bar)?;
@@ -160,7 +161,7 @@ impl AppConf {
 
     pub fn load_all_server_yml(
         &self,
-        multi_bar: Option<Arc<Mutex<MultiBar<io::Stdout>>>>,
+        multi_bar: Option<SharedMpb>,
     ) -> Vec<Server> {
         if let Ok(rd) = self.get_servers_dir().read_dir() {
             rd.filter_map(|ery| match ery {
@@ -177,7 +178,7 @@ impl AppConf {
                 }
                 Ok(astr) => Some(astr),
             })
-            .map(|astr| self.load_server_yml(astr, multi_bar.as_ref().map(Arc::clone)))
+            .map(|astr| self.load_server_yml(astr, multi_bar))
             .filter_map(|rr| match rr {
                 Err(err) => {
                     warn!("load_server_yml failed: {:?}", err);

@@ -3,27 +3,23 @@ use crate::data_shape::{
     load_remote_item_owned, rolling_files, string_path, AppConf, FileItem, FileItemProcessResult,
     FileItemProcessResultStats, RemoteFileItemOwned, SyncType,
 };
+use crate::ioutil::{SharedMpb};
+use indicatif::{MultiProgress, ProgressBar};
 use bzip2::write::BzEncoder;
 use bzip2::Compression;
 use glob::Pattern;
+use std::sync::{Arc};
 use log::*;
-use pbr::{MultiBar, Pipe, ProgressBar, Units};
-use std::sync::{Arc, Mutex};
-use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use ssh2;
-use std::io::prelude::{BufRead, Read, Write};
+use std::io::prelude::{BufRead, Read};
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 use std::{fs, io, io::Seek};
 use tar::Builder;
 
-pub struct FileItemPb {
-    pub hostname: String,
-    pub filename: String,
-    pub pb: ProgressBar<Pipe>,
-}
+// pub type FileItemPb = ProgressBar<Pipe>;
 
 #[derive(Deserialize, Serialize, Debug)]
 #[serde(rename_all(deserialize = "snake_case"))]
@@ -173,7 +169,7 @@ pub struct Server {
     #[serde(skip)]
     pub yml_location: Option<PathBuf>,
     #[serde(skip)]
-    pub multi_bar: Option<Arc<Mutex<MultiBar<io::Stdout>>>>,
+    pub multi_bar: Option<SharedMpb>,
 }
 
 impl Server {
@@ -279,7 +275,7 @@ impl Server {
     pub fn load_from_yml_with_app_config(
         app_conf: &AppConf,
         name: impl AsRef<str>,
-        multi_bar: Option<Arc<Mutex<MultiBar<io::Stdout>>>>,
+        multi_bar: Option<SharedMpb>,
     ) -> Result<Server, failure::Error> {
         Server::load_from_yml(
             app_conf.get_servers_dir(),
@@ -292,7 +288,7 @@ impl Server {
         servers_dir: impl AsRef<Path>,
         data_dir: impl AsRef<Path>,
         name: impl AsRef<str>,
-        multi_bar: Option<Arc<Mutex<MultiBar<io::Stdout>>>>,
+        multi_bar: Option<SharedMpb>,
     ) -> Result<Server, failure::Error> {
         let name = name.as_ref();
         trace!("got server yml name: {:?}", name);
@@ -673,11 +669,9 @@ impl Server {
         let total_count = count_and_len_op.map(|cl| cl.0).unwrap_or_default();
         let mut pb_op = self
             .multi_bar
-            .as_ref()
             .map(|mb| {
-                let mut pb = mb.lock().unwrap().create_bar(count_and_len_op.unwrap().1);
-                pb.set_units(Units::Bytes);
-                pb
+                let pb = ProgressBar::new(count_and_len_op.map(|cl|cl.1).unwrap_or(0u64));
+                mb.add(pb)
                 });
         let sftp = self.session.as_ref().unwrap().sftp()?;
 
@@ -708,7 +702,12 @@ impl Server {
                                     FileItem::new(ld, rd.as_str(), remote_item, sync_type);
                                 consume_count += 1;
                                 let r = if local_item.had_changed() {
-                                    copy_a_file_item(&self, &sftp, local_item)
+                                    let mypb_op = self.multi_bar.map(|mb| {
+                                        let message = format!("{}{}", self.host, local_item.get_remote_item().get_path());
+                                        let pb = ProgressBar::new(local_item.get_remote_item().get_len());
+                                        mb.add(pb)
+                                    });
+                                    copy_a_file_item(&self, &sftp, local_item, mypb_op)
                                 } else {
                                     FileItemProcessResult::Skipped(
                                         local_item.get_local_path_str().expect(
@@ -723,8 +722,8 @@ impl Server {
                                         consume_count,
                                         total_count
                                     );
-                                    pb.message(s.as_str());
-                                    pb.add(l);
+                                    pb.set_message(s.as_str());
+                                    pb.inc(l);
                                 }
                                 r
                             }
@@ -742,10 +741,12 @@ impl Server {
                         "got directory line, it's a remote represent of path, be careful: {:?}",
                         line
                     );
-                    if let Some(rd) = self
+                    let k = self
                         .directories
                         .iter()
-                        .find(|d| string_path::path_equal(&d.remote_dir, &line))
+                        .find(|d| string_path::path_equal(&d.remote_dir, &line));
+
+                    if let Some(rd) = k
                     {
                         current_remote_dir = Some(line.clone());
                         current_local_dir = Some(Path::new(rd.local_dir.as_str()));
@@ -784,7 +785,7 @@ impl Server {
             });
 
         if let Some(mut pb) = pb_op {
-            pb.finish_println("done!")
+            pb.finish();
         }
         Ok(result)
     }
@@ -812,9 +813,9 @@ impl Server {
     //     Ok(())
     // }
 
-    pub fn load_dirs<'a, O: io::Write>(
+    pub fn load_dirs<O: io::Write>(
         &self,
-        out: &'a mut O,
+        out: &mut O,
         skip_sha1: bool,
     ) -> Result<(), failure::Error> {
         for one_dir in self.directories.iter() {
@@ -907,18 +908,21 @@ mod tests {
     fn t_sync_dirs() -> Result<(), failure::Error> {
         log();
         let mut server = load_server_yml();
-        let mb = Arc::new(Mutex::new(MultiBar::new()));
+        let mb = Arc::new(MultiProgress::new());
 
-        let mb_cloned = Arc::clone(&mb);
+        let mb1 = Arc::clone(&mb);
+        let mb2 = Arc::clone(&mb);
 
-        thread::spawn(move || loop {
-            thread::sleep(std::time::Duration::from_millis(50));
-            mb_cloned.lock().unwrap().listen();
+        let _ = thread::spawn(move|| loop {
+            mb1.join().unwrap();
         });
 
-        server.multi_bar.replace(mb);
+        server.multi_bar.replace(mb2);
         let stats = server.sync_dirs(true)?;
+
+
         info!("result {:?}", stats);
+        mb.join_and_clear().unwrap();
         Ok(())
     }
 

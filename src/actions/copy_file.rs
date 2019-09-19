@@ -1,13 +1,14 @@
-use crate::data_shape::{FileItem, FileItemProcessResult, Server, SyncType, FileItemPb};
+use crate::data_shape::{FileItem, FileItemProcessResult, Server, SyncType};
 use crate::rustsync::{DeltaFileReader, DeltaReader, Signature};
 use log::*;
 use sha1::{Digest, Sha1};
 use ssh2;
+use std::convert::TryInto;
 use std::ffi::OsStr;
 use std::io::prelude::Write;
 use std::path::Path;
 use std::{fs, io, io::Read};
-use crate::ioutil;
+use indicatif::{ProgressBar};
 
 #[allow(dead_code)]
 pub fn copy_file_to_stream(
@@ -23,7 +24,7 @@ pub fn copy_file_to_stream(
 pub fn copy_stream_to_file<T: AsRef<Path>>(
     from: &mut impl std::io::Read,
     to_file: T,
-    mypb_op: Option<FileItemPb>,
+    mut fi_pb_op: Option<ProgressBar>,
 ) -> Result<u64, failure::Error> {
     let mut u8_buf = [0; 1024];
     let mut length = 0_u64;
@@ -39,9 +40,15 @@ pub fn copy_stream_to_file<T: AsRef<Path>>(
             Ok(n) if n > 0 => {
                 length += n as u64;
                 wf.write_all(&u8_buf[..n])?;
+                fi_pb_op
+                    .as_mut()
+                    .map(|mypb| mypb.inc(n.try_into().unwrap()));
             }
             _ => break,
         }
+    }
+    if let Some(fpo) = fi_pb_op {
+        fpo.finish();
     }
     Ok(length)
 }
@@ -49,7 +56,7 @@ pub fn copy_stream_to_file<T: AsRef<Path>>(
 pub fn copy_stream_to_file_return_sha1<T: AsRef<Path>>(
     from: &mut impl std::io::Read,
     to_file: T,
-    mypb_op: Option<FileItemPb>,
+    mut fi_pb_op: Option<ProgressBar>,
 ) -> Result<(u64, String), failure::Error> {
     let mut u8_buf = [0; 1024];
     let mut length = 0_u64;
@@ -67,11 +74,17 @@ pub fn copy_stream_to_file_return_sha1<T: AsRef<Path>>(
                 length += n as u64;
                 wf.write_all(&u8_buf[..n])?;
                 hasher.input(&u8_buf[..n]);
+                fi_pb_op
+                    .as_mut()
+                    .map(|mypb| mypb.inc(n.try_into().unwrap()));
             }
             _ => break,
         }
     }
     ensure!(path.exists(), "write_stream_to_file should be done.");
+    if let Some(fpo) = fi_pb_op {
+        fpo.finish();
+    }
     Ok((length, format!("{:X}", hasher.result())))
 }
 
@@ -144,7 +157,7 @@ pub fn copy_a_file_item_sftp<'a>(
     sftp: &ssh2::Sftp,
     local_file_path: String,
     file_item: &FileItem<'a>,
-    mypb_op: Option<FileItemPb>,
+    mypb_op: Option<ProgressBar>,
 ) -> FileItemProcessResult {
     match sftp.open(Path::new(&file_item.get_remote_path())) {
         Ok(mut file) => {
@@ -158,7 +171,11 @@ pub fn copy_a_file_item_sftp<'a>(
                             error!("sha1 didn't match: {:?}, local sha1: {:?}", file_item, sha1);
                             FileItemProcessResult::Sha1NotMatch(local_file_path)
                         } else {
-                            FileItemProcessResult::Successed(length, local_file_path, SyncType::Sftp)
+                            FileItemProcessResult::Successed(
+                                length,
+                                local_file_path,
+                                SyncType::Sftp,
+                            )
                         }
                     }
                     Err(err) => {
@@ -167,13 +184,16 @@ pub fn copy_a_file_item_sftp<'a>(
                     }
                 }
             } else {
-
                 match copy_stream_to_file(&mut file, &local_file_path, mypb_op) {
                     Ok(length) => {
                         if length != file_item.get_remote_item().get_len() {
                             FileItemProcessResult::LengthNotMatch(local_file_path)
                         } else {
-                            FileItemProcessResult::Successed(length, local_file_path, SyncType::Sftp)
+                            FileItemProcessResult::Successed(
+                                length,
+                                local_file_path,
+                                SyncType::Sftp,
+                            )
                         }
                     }
                     Err(err) => {
@@ -262,21 +282,21 @@ pub fn copy_a_file_item<'a>(
     server: &Server,
     sftp: &ssh2::Sftp,
     file_item: FileItem<'a>,
+    fi_pb_op: Option<ProgressBar>,
 ) -> FileItemProcessResult {
-    let mypb_op = ioutil::map_multibar_to_pb_unit_bytes(server.multi_bar.as_ref(), server, &file_item);
     if let Some(local_file_path) = file_item.get_local_path_str() {
         let copy_result = match file_item.sync_type {
-            SyncType::Sftp => copy_a_file_item_sftp(sftp, local_file_path, &file_item, mypb_op),
+            SyncType::Sftp => copy_a_file_item_sftp(sftp, local_file_path, &file_item, fi_pb_op),
             SyncType::Rsync => {
                 if !Path::new(&local_file_path).exists() {
-                    copy_a_file_item_sftp(sftp, local_file_path, &file_item, mypb_op)
+                    copy_a_file_item_sftp(sftp, local_file_path, &file_item, fi_pb_op)
                 } else {
                     match copy_a_file_item_rsync(server, sftp, local_file_path.clone(), &file_item)
                     {
                         Ok(r) => r,
                         Err(err) => {
                             error!("rsync file failed: {:?}, {:?}", file_item, err);
-                            copy_a_file_item_sftp(sftp, local_file_path, &file_item, mypb_op)
+                            copy_a_file_item_sftp(sftp, local_file_path, &file_item, fi_pb_op)
                         }
                     }
                 }
@@ -300,7 +320,9 @@ pub fn copy_a_file_item<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data_shape::{FileItem, FileItemProcessResult, RemoteFileItemOwned, Server, SyncType};
+    use crate::data_shape::{
+        FileItem, FileItemProcessResult, RemoteFileItemOwned, Server, SyncType,
+    };
     use crate::develope::tutil;
     use crate::log_util;
     use std::panic;
@@ -319,7 +341,7 @@ mod tests {
         let sftp = session.sftp()?;
         let mut server = Server::load_from_yml("servers", "data", "localhost.yml", None)?;
         server.connect()?;
-        let r = copy_a_file_item(&server, &sftp, fi);
+        let r = copy_a_file_item(&mut server, &sftp, fi, None);
         Ok(r)
     }
 
@@ -337,7 +359,7 @@ mod tests {
     fn t_copy_a_file() -> Result<(), failure::Error> {
         log_util::setup_test_logger_only_self(vec!["actions::copy_file"]);
 
-        let mut server = Server::load_from_yml("servers","data", "localhost", None)?;
+        let mut server = Server::load_from_yml("servers", "data", "localhost", None)?;
         server.connect()?;
         server.rsync_valve = 4;
         let test_dir1 = tutil::create_a_dir_and_a_filename("xx.txt")?;

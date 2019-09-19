@@ -26,7 +26,7 @@ use clap::ArgMatches;
 use clap::Shell;
 use log::*;
 use mail::send_test_mail;
-use pbr::{MultiBar, ProgressBar};
+use indicatif::{MultiProgress, ProgressBar};
 use rayon::prelude::*;
 use rustyline::completion::{Completer, FilenameCompleter, Pair};
 use rustyline::config::OutputStreamType;
@@ -41,6 +41,7 @@ use std::time::{Duration, Instant};
 use std::{fs, io, io::Write};
 
 use data_shape::{AppConf, Server, CONF_FILE_NAME};
+use ioutil::SharedMpb;
 
 struct MyHelper {
     completer: FilenameCompleter,
@@ -155,14 +156,33 @@ fn parse_server_yml<'a>(sub_sub_matches: &'a clap::ArgMatches<'a>) -> &'a str {
 }
 
 fn demonstrate_pbr() -> Result<(), failure::Error> {
-    let count = 1000;
-    let mut pb = ProgressBar::new(count);
-    pb.format("╢▌▌░╟");
+    let multi_bar = Arc::new(MultiProgress::new());
+
+    let multi_bar1 = Arc::clone(&multi_bar);
+
+    let count = 10;
+
+    let mut i = 0;
+
+    let _ = thread::spawn(move || loop {
+        i += 1;
+        println!("{}", i);
+        multi_bar1.join_and_clear().unwrap();
+        thread::sleep(Duration::from_millis(5));
+    });
+
+    let pb1 = multi_bar.add(ProgressBar::new(count));
+    let pb2 = multi_bar.add(ProgressBar::new(count));
+
     for _ in 0..count {
-        pb.inc();
+        pb1.inc(1);
+        pb2.inc(2);
         thread::sleep(Duration::from_millis(200));
     }
-    pb.finish_print("done");
+    pb1.finish();
+    pb2.finish();
+
+    multi_bar.join_and_clear().unwrap();
     Ok(())
 }
 
@@ -227,24 +247,26 @@ fn sync_dirs<'a>(
     let mb_op = if no_pb {
         None
     } else {
-        Some(Arc::new(Mutex::new(MultiBar::new())))
+        Some(Arc::new(MultiProgress::new()))
     };
 
-    if let Some(mb) = mb_op.as_ref().map(Arc::clone) {
-        thread::spawn(move || loop {
-            thread::sleep(Duration::from_millis(50));
-            mb.lock().unwrap().listen();
-        });
-    }
+    let _ = if let Some(mb) = mb_op.as_ref().map(Arc::clone) {
+        Some(thread::spawn( move || loop {
+            thread::sleep(Duration::from_millis(5));
+            mb.join().unwrap();
+        }))
+    } else {
+        None
+    };
 
     if sub_matches.value_of("server-yml").is_some() {
         let server = app_conf.load_server_yml(
             parse_server_yml(sub_matches),
-            mb_op.as_ref().map(Arc::clone),
+            mb_op.as_ref(),
         )?;
         servers.push(server);
     } else {
-        servers.append(&mut app_conf.load_all_server_yml(mb_op.as_ref().map(Arc::clone)));
+        servers.append(&mut app_conf.load_all_server_yml(mb_op.as_ref()));
     }
 
     if servers.is_empty() {
@@ -255,69 +277,17 @@ fn sync_dirs<'a>(
             servers.len()
         );
     }
-    // if no_pb {
-    servers.into_par_iter().for_each(|mut server| {
-        // if let Err(err) = server.prepare_file_list(skip_sha1) {
-        //     warn!("prepare_file_list failed: {:?}", err);
-        //     println!("prepare_file_list failed: {:?}", err);
-        // } else {
-        match server.sync_dirs(skip_sha1) {
+    servers
+        .into_par_iter()
+        .for_each(|mut server| match server.sync_dirs(skip_sha1) {
             Ok(result) => {
                 actions::write_dir_sync_result(&server, &result);
                 println!("{:?}", result);
             }
             Err(err) => println!("sync-dirs failed: {:?}", err),
-        }
-        // }
-    });
-    // } else {
-    //     let mb = MultiBar::new();
-    //     let mb = Arc::new(Mutex::new(mb));
-    //     let mb_clone = Arc::clone(&mb);
-
-    //     thread::spawn(move || loop {
-    //         thread::sleep(Duration::from_millis(50));
-    //         mb_clone.lock().unwrap().listen();
-    //     });
-
-    //     servers
-    //         .into_par_iter()
-    //         .filter_map(|mut server| {
-    //             if let Err(err) = server.prepare_file_list(skip_sha1) {
-    //                 warn!("prepare_file_list failed: {:?}", err);
-    //                 println!("prepare_file_list failed: {:?}", err);
-    //                 None
-    //             } else {
-    //                 Some(server)
-    //             }
-    //         })
-    //         .filter_map(|server| match server.get_pb_data() {
-    //             Err(err) => {
-    //                 warn!("get_pb_data failed: {:?}", err);
-    //                 None
-    //             }
-    //             Ok(pb_data) => {
-    //                 let mut pb = mb.lock().unwrap().create_bar(pb_data.1);
-    //                 pb.set_units(Units::Bytes);
-    //                 let mypb = MyPb {
-    //                     file_count: pb_data.0,
-    //                     pb,
-    //                 };
-    //                 Some((server, mypb))
-    //             }
-    //         })
-    //         .for_each(|server_pb| {
-    //             let (mut server, pb) = server_pb;
-    //             match server.sync_dirs(skip_sha1, Some(pb)) {
-    //                 Ok(result) => {
-    //                     actions::write_dir_sync_result(&server, &result);
-    //                     println!("{:?}", result);
-    //                 }
-    //                 Err(err) => println!("sync-dirs failed: {:?}", err),
-    //             }
-    //         });
-
-    //     // t.join().unwrap();
+        });
+    // if let Some(tt) = t {
+    //     tt.join().unwrap();
     // }
     Ok(())
 }

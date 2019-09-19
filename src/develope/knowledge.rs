@@ -103,7 +103,7 @@ mod tests {
         }
     }
 
-    fn load_server_yml() -> Server {
+    fn load_server_yml<'a>() -> Server<'a> {
         Server::load_from_yml("data/servers", "data", "localhost.yml", None).unwrap()
     }
 
