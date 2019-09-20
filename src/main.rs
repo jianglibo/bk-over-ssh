@@ -19,7 +19,7 @@ mod mail;
 mod rustsync;
 
 use crate::rustsync::DeltaWriter;
-use std::borrow::Cow::{self, Borrowed, Owned};
+// use std::borrow::Cow::{self, Borrowed, Owned};
 
 use clap::App;
 use clap::ArgMatches;
@@ -28,12 +28,12 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use log::*;
 use mail::send_test_mail;
 use rayon::prelude::*;
-use rustyline::completion::{Completer, FilenameCompleter, Pair};
-use rustyline::config::OutputStreamType;
-use rustyline::error::ReadlineError;
-use rustyline::highlight::{Highlighter, MatchingBracketHighlighter};
-use rustyline::hint::{Hinter, HistoryHinter};
-use rustyline::{Cmd, CompletionType, Config, Context, EditMode, Editor, Helper, KeyPress};
+// use rustyline::completion::{Completer, FilenameCompleter, Pair};
+// use rustyline::config::OutputStreamType;
+// use rustyline::error::ReadlineError;
+// use rustyline::highlight::{Highlighter, MatchingBracketHighlighter};
+// use rustyline::hint::{Hinter, HistoryHinter};
+// use rustyline::{Cmd, CompletionType, Config, Context, EditMode, Editor, Helper, KeyPress};
 use std::env;
 use std::sync::Arc;
 use std::thread;
@@ -189,13 +189,14 @@ fn sync_dirs<'a>(
         .for_each(|mut server| match server.sync_dirs(skip_sha1) {
             Ok(result) => {
                 actions::write_dir_sync_result(&server, &result);
-                println!("{:?}", result);
+                let result_yml = serde_yaml::to_string(&result)
+                    .expect("SyncDirReport should deserialize success.");
+                println!("{}:\n{}", server.host, result_yml);
             }
             Err(err) => println!("sync-dirs failed: {:?}", err),
         });
 
     if let Some(t) = t {
-        println!("stopping...");
         t.join().unwrap();
     }
     Ok(())

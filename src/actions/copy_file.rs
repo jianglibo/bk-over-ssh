@@ -51,6 +51,7 @@ pub fn copy_stream_to_file_with_cb<T: AsRef<Path>, F: Fn(u64) -> ()>(
     Ok(length)
 }
 
+#[allow(dead_code)]
 pub fn copy_stream_to_file<T: AsRef<Path>>(
     from: &mut impl std::io::Read,
     to_file: T,
@@ -113,6 +114,7 @@ pub fn copy_stream_to_file_return_sha1_with_cb<T: AsRef<Path>, F: Fn(u64) -> ()>
     Ok((length, format!("{:X}", hasher.result())))
 }
 
+#[allow(dead_code)]
 pub fn copy_stream_to_file_return_sha1<T: AsRef<Path>>(
     from: &mut impl std::io::Read,
     to_file: T,

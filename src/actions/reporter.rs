@@ -1,6 +1,6 @@
 use crate::data_shape::{FileItemProcessResultStats, Server};
 use log::*;
-use serde::{Serialize};
+use serde::{Serialize, Deserialize};
 use std::time::{Duration};
 use std::{fs, io::Write};
 // fn ser_instant<S>(inst: &Instant, serer: S) -> Result<S::Ok, S::Error> where S: Serializer {
@@ -36,7 +36,7 @@ use std::{fs, io::Write};
 //     }
 // }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SyncDirReport {
     duration: Duration,
     statistics: FileItemProcessResultStats,

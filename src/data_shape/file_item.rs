@@ -5,7 +5,7 @@ use filetime;
 use log::*;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
 
 #[derive(Debug)]
 pub enum SyncType {
@@ -28,7 +28,7 @@ pub enum FileItemProcessResult {
     SftpOpenFailed,
 }
 
-#[derive(Debug, Default, Serialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct FileItemProcessResultStats {
     pub deserialize_failed: u64,
     pub skipped: u64,
