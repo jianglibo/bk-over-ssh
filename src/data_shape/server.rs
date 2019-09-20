@@ -695,9 +695,12 @@ impl Server {
         let mut current_remote_dir = Option::<String>::None;
         let mut current_local_dir = Option::<&Path>::None;
         let mut consume_count = 0u64;
-        let count_and_len_op = self.multi_bar.as_ref().map(|_| {
-            self.get_pb_count_and_len()
-                .expect("get_pb_count_and_len should success.")
+        let count_and_len_op = self.pb.as_ref().map(|pb| {
+            pb.enable_steady_tick(250);
+            let cl = self.get_pb_count_and_len()
+                .expect("get_pb_count_and_len should success.");
+            pb.disable_steady_tick();
+            cl
         });
         let total_count = count_and_len_op.map(|cl| cl.0).unwrap_or_default();
 
@@ -819,6 +822,9 @@ impl Server {
         self.connect()?;
         let rs = self.start_sync_working_file_list(skip_sha1)?;
         self.remove_working_file_list_file();
+        if let Some(pb) = self.pb.as_ref() {
+            pb.finish();
+        }
         Ok(SyncDirReport::new(start.elapsed(), rs))
     }
 

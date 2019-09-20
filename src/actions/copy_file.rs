@@ -25,7 +25,7 @@ pub fn copy_file_to_stream(
 pub fn copy_stream_to_file_with_cb<T: AsRef<Path>, F: Fn(u64) -> ()>(
     from: &mut impl std::io::Read,
     to_file: T,
-    mut cb: Option<F>,
+    cb: Option<F>,
 ) -> Result<u64, failure::Error> {
     let mut u8_buf = [0; 1024];
     let mut length = 0_u64;
@@ -84,7 +84,7 @@ pub fn copy_stream_to_file<T: AsRef<Path>>(
 pub fn copy_stream_to_file_return_sha1_with_cb<T: AsRef<Path>, F: Fn(u64) -> ()>(
     from: &mut impl std::io::Read,
     to_file: T,
-    mut cb: Option<F>,
+    cb: Option<F>,
 ) -> Result<(u64, String), failure::Error> {
     let mut u8_buf = [0; 1024];
     let mut length = 0_u64;
@@ -217,7 +217,7 @@ pub fn copy_a_file_item_sftp<'a, F: Fn(u64) -> ()>(
     sftp: &ssh2::Sftp,
     local_file_path: String,
     file_item: &FileItem<'a>,
-    mut cb: Option<F>,
+    cb: Option<F>,
     // pb_op: Option<&ProgressBar>,
 ) -> FileItemProcessResult {
     match sftp.open(Path::new(&file_item.get_remote_path())) {
@@ -343,10 +343,10 @@ pub fn copy_a_file_item<'a>(
     server: &Server,
     sftp: &ssh2::Sftp,
     file_item: FileItem<'a>,
-    fi_pb_op: Option<&ProgressBar>,
+    pb_op: Option<&ProgressBar>,
 ) -> FileItemProcessResult {
     if let Some(local_file_path) = file_item.get_local_path_str() {
-        let cb = if fi_pb_op.is_some() {
+        let cb = if pb_op.is_some() {
             Some(|length| {
                 let message = format!(
                     "{}/{} - {}",
@@ -354,7 +354,8 @@ pub fn copy_a_file_item<'a>(
                     HumanBytes(file_item.get_remote_item().get_len()),
                     file_item.get_remote_item().get_path()
                 );
-                fi_pb_op.unwrap().set_message(message.as_str())
+                pb_op.unwrap().set_message(message.as_str());
+                pb_op.unwrap().inc(length);
             })
         } else {
             None
@@ -423,7 +424,6 @@ mod tests {
     fn t_visit() {
         let mut _count = 0_u64;
         visit_dirs(Path::new("e:\\"), &|entry| {
-            // count += 1;
             println!("{:?}", entry);
         })
         .expect("success");

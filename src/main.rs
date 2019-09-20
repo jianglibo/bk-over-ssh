@@ -42,114 +42,6 @@ use std::{fs, io, io::Write};
 
 use data_shape::{AppConf, Server, CONF_FILE_NAME};
 
-struct MyHelper {
-    completer: FilenameCompleter,
-    highlighter: MatchingBracketHighlighter,
-    hinter: HistoryHinter,
-    colored_prompt: String,
-}
-
-impl Completer for MyHelper {
-    type Candidate = Pair;
-
-    fn complete(
-        &self,
-        line: &str,
-        pos: usize,
-        ctx: &Context<'_>,
-    ) -> Result<(usize, Vec<Pair>), ReadlineError> {
-        self.completer.complete(line, pos, ctx)
-    }
-}
-
-impl Hinter for MyHelper {
-    fn hint(&self, line: &str, pos: usize, ctx: &Context<'_>) -> Option<String> {
-        self.hinter.hint(line, pos, ctx)
-    }
-}
-
-impl Highlighter for MyHelper {
-    fn highlight_prompt<'b, 's: 'b, 'p: 'b>(
-        &'s self,
-        prompt: &'p str,
-        default: bool,
-    ) -> Cow<'b, str> {
-        if default {
-            Borrowed(&self.colored_prompt)
-        } else {
-            Borrowed(prompt)
-        }
-    }
-
-    fn highlight_hint<'h>(&self, hint: &'h str) -> Cow<'h, str> {
-        Owned("\x1b[1m".to_owned() + hint + "\x1b[m")
-    }
-
-    fn highlight<'l>(&self, line: &'l str, pos: usize) -> Cow<'l, str> {
-        self.highlighter.highlight(line, pos)
-    }
-
-    fn highlight_char(&self, line: &str, pos: usize) -> bool {
-        self.highlighter.highlight_char(line, pos)
-    }
-}
-
-impl Helper for MyHelper {}
-
-fn main_client() {
-    // env_logger::init();
-    let config = Config::builder()
-        .history_ignore_space(true)
-        .completion_type(CompletionType::List)
-        .edit_mode(EditMode::Emacs)
-        .output_stream(OutputStreamType::Stdout)
-        .build();
-
-    let h = MyHelper {
-        completer: FilenameCompleter::new(),
-        highlighter: MatchingBracketHighlighter::new(),
-        hinter: HistoryHinter {},
-        colored_prompt: "".to_owned(),
-    };
-    let mut rl = Editor::with_config(config);
-    rl.set_helper(Some(h));
-    rl.bind_sequence(KeyPress::Meta('N'), Cmd::HistorySearchForward);
-    rl.bind_sequence(KeyPress::Meta('P'), Cmd::HistorySearchBackward);
-    if rl.load_history("history.txt").is_err() {
-        println!("No previous history.");
-    }
-    let mut count = 1;
-    loop {
-        let p = format!("{}> ", count);
-        rl.helper_mut().unwrap().colored_prompt = format!("\x1b[1;32m{}\x1b[0m", p);
-        let readline = rl.readline(&p);
-        match readline {
-            Ok(line) => {
-                rl.add_history_entry(line.as_str());
-                println!("Line: {}", line);
-                if line.starts_with("hash ") {
-                    let (_s1, s2) = line.split_at(5);
-                    actions::hash_file_sha1(s2).expect("hash should success.");
-                }
-            }
-            Err(ReadlineError::Interrupted) => {
-                println!("CTRL-C");
-                break;
-            }
-            Err(ReadlineError::Eof) => {
-                println!("CTRL-D");
-                break;
-            }
-            Err(err) => {
-                println!("Error: {:?}", err);
-                break;
-            }
-        }
-        count += 1;
-    }
-    rl.save_history("history.txt").unwrap();
-}
-
 fn parse_server_yml<'a>(sub_sub_matches: &'a clap::ArgMatches<'a>) -> &'a str {
     sub_sub_matches.value_of("server-yml").unwrap()
 }
@@ -200,6 +92,7 @@ fn demonstrate_pbr() -> Result<(), failure::Error> {
 fn process_app_config(
     conf: Option<&str>,
     console_log: bool,
+    message_pb: &ProgressBar,
     re_try: bool,
 ) -> Result<AppConf, failure::Error> {
     let mut app_conf = match AppConf::guess_conf_file(conf) {
@@ -217,7 +110,7 @@ fn process_app_config(
                     .create(true)
                     .open(&path)?;
                 file.write_all(bytes)?;
-                process_app_config(conf, console_log, true)?
+                return process_app_config(conf, console_log, &message_pb, true);
             } else {
                 bail!("re_try read app_conf failed!");
             }
@@ -227,15 +120,17 @@ fn process_app_config(
         }
     };
 
-    println!(
+    let message = format!(
         "using configuration file: {}",
         app_conf
             .config_file_path
             .as_ref()
             .expect("configuration file should exist at this point.")
             .to_str()
-            .unwrap_or("O")
+            .unwrap_or("to_str failed.")
     );
+
+    message_pb.set_message(message.as_str());
 
     app_conf.validate_conf()?;
     log_util::setup_logger_for_this_app(
@@ -261,15 +156,6 @@ fn sync_dirs<'a>(
         Some(Arc::new(MultiProgress::new()))
     };
 
-    let t = if let Some(mb) = mb_op.as_ref().map(Arc::clone) {
-        Some(thread::spawn(move || {
-            thread::sleep(Duration::from_millis(200));
-            mb.join().unwrap();
-        }))
-    } else {
-        None
-    };
-
     if sub_matches.value_of("server-yml").is_some() {
         let server = app_conf.load_server_yml(
             parse_server_yml(sub_matches),
@@ -279,6 +165,16 @@ fn sync_dirs<'a>(
     } else {
         servers.append(&mut app_conf.load_all_server_yml(mb_op.as_ref().map(Arc::clone)));
     }
+
+    // all progress bars already create from here on.
+
+    let t = if let Some(mb) = mb_op.as_ref().map(Arc::clone) {
+        Some(thread::spawn(move || {
+            mb.join().unwrap();
+        }))
+    } else {
+        None
+    };
 
     if servers.is_empty() {
         println!("found no server yml!");
@@ -298,12 +194,8 @@ fn sync_dirs<'a>(
             Err(err) => println!("sync-dirs failed: {:?}", err),
         });
 
-    if let Some(mb) = mb_op {
-        if let Err(err) = mb.join_and_clear() {
-            error!("last join_and_clear failed: {:?}", err);
-        }
-    }
     if let Some(t) = t {
+        println!("stopping...");
         t.join().unwrap();
     }
     Ok(())
@@ -314,12 +206,17 @@ fn main() -> Result<(), failure::Error> {
     let app = App::from_yaml(yml);
     let m: ArgMatches = app.get_matches();
 
+    let message_pb = ProgressBar::new_spinner();
+    message_pb.enable_steady_tick(200);
+
     let mut app1 = App::from_yaml(yml);
 
     let conf = m.value_of("conf");
     let console_log = m.is_present("console-log");
 
-    let app_conf = process_app_config(conf, console_log, false)?;
+    let app_conf = process_app_config(conf, console_log, &message_pb, false)?;
+
+    message_pb.finish();
 
     match m.subcommand() {
         ("pbr", Some(_sub_matches)) => {
@@ -547,9 +444,9 @@ fn main() -> Result<(), failure::Error> {
                 println!("please add --help to view usage help.");
             }
         },
-        ("repl", Some(_)) => {
-            main_client();
-        }
+        // ("repl", Some(_)) => {
+        //     main_client();
+        // }
         ("print-env", Some(_)) => {
             for (key, value) in env::vars_os() {
                 println!("{:?}: {:?}", key, value);
@@ -567,3 +464,111 @@ fn main() -> Result<(), failure::Error> {
     }
     Ok(())
 }
+
+// struct MyHelper {
+//     completer: FilenameCompleter,
+//     highlighter: MatchingBracketHighlighter,
+//     hinter: HistoryHinter,
+//     colored_prompt: String,
+// }
+
+// impl Completer for MyHelper {
+//     type Candidate = Pair;
+
+//     fn complete(
+//         &self,
+//         line: &str,
+//         pos: usize,
+//         ctx: &Context<'_>,
+//     ) -> Result<(usize, Vec<Pair>), ReadlineError> {
+//         self.completer.complete(line, pos, ctx)
+//     }
+// }
+
+// impl Hinter for MyHelper {
+//     fn hint(&self, line: &str, pos: usize, ctx: &Context<'_>) -> Option<String> {
+//         self.hinter.hint(line, pos, ctx)
+//     }
+// }
+
+// impl Highlighter for MyHelper {
+//     fn highlight_prompt<'b, 's: 'b, 'p: 'b>(
+//         &'s self,
+//         prompt: &'p str,
+//         default: bool,
+//     ) -> Cow<'b, str> {
+//         if default {
+//             Borrowed(&self.colored_prompt)
+//         } else {
+//             Borrowed(prompt)
+//         }
+//     }
+
+//     fn highlight_hint<'h>(&self, hint: &'h str) -> Cow<'h, str> {
+//         Owned("\x1b[1m".to_owned() + hint + "\x1b[m")
+//     }
+
+//     fn highlight<'l>(&self, line: &'l str, pos: usize) -> Cow<'l, str> {
+//         self.highlighter.highlight(line, pos)
+//     }
+
+//     fn highlight_char(&self, line: &str, pos: usize) -> bool {
+//         self.highlighter.highlight_char(line, pos)
+//     }
+// }
+
+// impl Helper for MyHelper {}
+
+// fn main_client() {
+//     // env_logger::init();
+//     let config = Config::builder()
+//         .history_ignore_space(true)
+//         .completion_type(CompletionType::List)
+//         .edit_mode(EditMode::Emacs)
+//         .output_stream(OutputStreamType::Stdout)
+//         .build();
+
+//     let h = MyHelper {
+//         completer: FilenameCompleter::new(),
+//         highlighter: MatchingBracketHighlighter::new(),
+//         hinter: HistoryHinter {},
+//         colored_prompt: "".to_owned(),
+//     };
+//     let mut rl = Editor::with_config(config);
+//     rl.set_helper(Some(h));
+//     rl.bind_sequence(KeyPress::Meta('N'), Cmd::HistorySearchForward);
+//     rl.bind_sequence(KeyPress::Meta('P'), Cmd::HistorySearchBackward);
+//     if rl.load_history("history.txt").is_err() {
+//         println!("No previous history.");
+//     }
+//     let mut count = 1;
+//     loop {
+//         let p = format!("{}> ", count);
+//         rl.helper_mut().unwrap().colored_prompt = format!("\x1b[1;32m{}\x1b[0m", p);
+//         let readline = rl.readline(&p);
+//         match readline {
+//             Ok(line) => {
+//                 rl.add_history_entry(line.as_str());
+//                 println!("Line: {}", line);
+//                 if line.starts_with("hash ") {
+//                     let (_s1, s2) = line.split_at(5);
+//                     actions::hash_file_sha1(s2).expect("hash should success.");
+//                 }
+//             }
+//             Err(ReadlineError::Interrupted) => {
+//                 println!("CTRL-C");
+//                 break;
+//             }
+//             Err(ReadlineError::Eof) => {
+//                 println!("CTRL-D");
+//                 break;
+//             }
+//             Err(err) => {
+//                 println!("Error: {:?}", err);
+//                 break;
+//             }
+//         }
+//         count += 1;
+//     }
+//     rl.save_history("history.txt").unwrap();
+// }
