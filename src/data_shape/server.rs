@@ -736,18 +736,6 @@ impl Server {
                                     FileItem::new(ld, rd.as_str(), remote_item, sync_type);
                                 consume_count += 1;
                                 let r = if local_item.had_changed() {
-                                    // let mypb_op = self.multi_bar.as_ref().map(|mb| {
-                                    //     let message = format!(
-                                    //         "{}{}",
-                                    //         self.host,
-                                    //         local_item.get_remote_item().get_path()
-                                    //     );
-                                    //     let pb = ProgressBar::new(
-                                    //         local_item.get_remote_item().get_len(),
-                                    //     );
-                                    //     pb.set_message(message.as_str());
-                                    //     mb.add(pb)
-                                    // });
                                     copy_a_file_item(&self, &sftp, local_item, self.pb.as_ref())
                                 } else {
                                     FileItemProcessResult::Skipped(
@@ -867,6 +855,7 @@ mod tests {
     use indicatif::MultiProgress;
     use std::sync::Arc;
     use std::thread;
+    use std::time::Duration;
 
     fn log() {
         log_util::setup_logger_detail(
@@ -947,15 +936,18 @@ mod tests {
         let mb1 = Arc::clone(&mb);
         let mb2 = Arc::clone(&mb);
 
-        let _ = thread::spawn(move || loop {
-            mb1.join().unwrap();
+        let t = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(200));
+            if let Err(err) = mb1.join() {
+                warn!("join account failure. {:?}", err);
+            }
         });
 
         server.multi_bar.replace(mb2);
         let stats = server.sync_dirs(true)?;
 
         info!("result {:?}", stats);
-        mb.join_and_clear().unwrap();
+        t.join().unwrap();
         Ok(())
     }
 

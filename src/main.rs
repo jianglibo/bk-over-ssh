@@ -261,9 +261,9 @@ fn sync_dirs<'a>(
         Some(Arc::new(MultiProgress::new()))
     };
 
-    let _ = if let Some(mb) = mb_op.as_ref().map(Arc::clone) {
-        Some(thread::spawn(move || loop {
-            thread::sleep(Duration::from_millis(5));
+    let t = if let Some(mb) = mb_op.as_ref().map(Arc::clone) {
+        Some(thread::spawn(move || {
+            thread::sleep(Duration::from_millis(200));
             mb.join().unwrap();
         }))
     } else {
@@ -302,6 +302,9 @@ fn sync_dirs<'a>(
         if let Err(err) = mb.join_and_clear() {
             error!("last join_and_clear failed: {:?}", err);
         }
+    }
+    if let Some(t) = t {
+        t.join().unwrap();
     }
     Ok(())
 }
