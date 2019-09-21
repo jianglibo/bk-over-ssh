@@ -11,7 +11,7 @@ use std::io::prelude::Write;
 use std::path::Path;
 use std::{fs, io, io::Read};
 
-const BUFF_LEN: usize = 8192;
+const BUFF_LEN: usize = 16384;
 
 #[allow(dead_code)]
 pub fn copy_file_to_stream(
@@ -29,7 +29,7 @@ pub fn copy_stream_to_file_with_cb<T: AsRef<Path>, F: FnMut(u64) -> ()>(
     to_file: T,
     mut cb: Option<F>,
 ) -> Result<u64, failure::Error> {
-    let mut u8_buf = [0; 8192];
+    let mut u8_buf = [0; BUFF_LEN];
     let mut length = 0_u64;
     let path = to_file.as_ref();
     if let Some(pp) = path.parent() {
@@ -508,6 +508,17 @@ mod tests {
         io::sink().write_all(&u8_buf[..len])?;
         // assert_eq!(copied_length, 55);
         Ok(())
+    }
+
+    #[test]
+    fn t_buff_init() {
+        let start = std::time::Instant::now();
+        (0..1000).for_each(|i|{
+            let u8_buf = [0_u8; BUFF_LEN];
+            println!("{}, {}", u8_buf.len(), i);
+        });
+
+        println!("{:?}", start.elapsed().as_millis());
     }
 }
 
