@@ -153,7 +153,6 @@ pub fn load_remote_item_owned<O: io::Write>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::develope::tutil;
     use crate::log_util;
     use failure;
 

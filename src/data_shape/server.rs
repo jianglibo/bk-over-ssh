@@ -66,32 +66,44 @@ impl Directory {
             .expect("directory pattern should compile.");
         o
     }
-    /// if has exclude items any matching will return None,
+    /// if has exclude items any matching will return None first,
     /// if has include items, only matched item will return.
-    /// if neither exclude nor include, mathes.
+    /// if no include patterns, any not excluded item mathes.
     pub fn match_path(&self, path: PathBuf) -> Option<PathBuf> {
-        let mut no_exlucdes = false;
-        if let Some(exclude_ptns) = self.excludes_patterns.as_ref() {
-            if exclude_ptns.iter().any(|p| p.matches_path(&path)) {
+        let no_exlucdes = self.excludes_patterns.is_none();
+
+        if !no_exlucdes {
+            if self
+                .excludes_patterns
+                .as_ref()
+                .unwrap()
+                .iter()
+                .any(|p| p.matches_path(&path))
+            {
                 return None;
             }
+        }
+
+        // not excluded files go here.
+        let no_includes = self.includes_patterns.is_none();
+        if !no_includes {
+            if self
+                .includes_patterns
+                .as_ref()
+                .unwrap()
+                .iter()
+                .any(|ptn| ptn.matches_path(&path))
+            {
+                Some(path)
+            } else {
+                None // not excluded and not included.
+            }
         } else {
-            no_exlucdes = true;
+            // not excluded and no include patterns.
+            Some(path)
         }
-
-        if let Some(include_ptns) = self.includes_patterns.as_ref() {
-            if include_ptns.is_empty() {
-                return Some(path);
-            }
-            if include_ptns.iter().any(|p| p.matches_path(&path)) {
-                return Some(path);
-            }
-        } else if no_exlucdes {
-            return Some(path);
-        }
-        None
     }
-
+    /// When includes is empyt, includes_patterns will be None, excludes is the same.
     pub fn compile_patterns(&mut self) -> Result<(), failure::Error> {
         if self.includes_patterns.is_none() && !self.includes.is_empty() {
             self.includes_patterns.replace(
@@ -649,7 +661,8 @@ impl Server {
 
     /// Preparing file list includes invoking remote command to collect file list and downloading to local.
     pub fn prepare_file_list(&self, skip_sha1: bool) -> Result<(), failure::Error> {
-        let pb = if self.pb.is_some() { // show progress bar.
+        let pb = if self.pb.is_some() {
+            // show progress bar.
             Some(ProgressBar::new_spinner())
         } else {
             None
@@ -676,7 +689,8 @@ impl Server {
     }
 
     pub fn get_pb_count_and_len(&self) -> Result<(u64, u64), failure::Error> {
-        let pb = if self.pb.is_some() { // show progress bar.
+        let pb = if self.pb.is_some() {
+            // show progress bar.
             Some(ProgressBar::new_spinner())
         } else {
             None
@@ -693,7 +707,6 @@ impl Server {
             pb.finish_and_clear();
         }
         v
-        
     }
 
     fn start_sync_working_file_list(
@@ -1045,8 +1058,6 @@ mod tests {
         assert_eq!(num, 7);
         tutil::print_cursor_lines(&mut cur);
 
-
-
         let mut cur = tutil::get_a_cursor_writer();
         let mut one_dir = Directory {
             remote_dir: "fixtures/adir".to_string(),
@@ -1055,9 +1066,22 @@ mod tests {
         };
 
         one_dir.compile_patterns()?;
+        assert!(one_dir.excludes_patterns.is_none());
         load_remote_item_owned(&one_dir, &mut cur, true)?;
         let num = tutil::count_cursor_lines(&mut cur);
         assert_eq!(num, 2);
+        let mut cur = tutil::get_a_cursor_writer();
+        let mut one_dir = Directory {
+            remote_dir: "fixtures/adir".to_string(),
+            excludes: vec!["**/fixtures/adir/b/b.txt".to_string()],
+            ..Directory::default()
+        };
+
+        one_dir.compile_patterns()?;
+        assert!(one_dir.includes_patterns.is_none());
+        load_remote_item_owned(&one_dir, &mut cur, true)?;
+        let num = tutil::count_cursor_lines(&mut cur);
+        assert_eq!(num, 6, "if exlude 1 file there should 6 left.");
 
         Ok(())
     }
