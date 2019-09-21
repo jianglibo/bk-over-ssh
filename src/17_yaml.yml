@@ -163,6 +163,9 @@ subcommands:
                 long: out
                 required: false
                 takes_value: true
+            - skip-sha1:
+                long: skip-sha1
+                required: false
     - list-local-files:
         args:
             - server-yml:
@@ -183,6 +186,9 @@ subcommands:
                 index: 1
             - no-pb:
                 long: no-pb
+                required: false
+            - skip-sha1:
+                long: skip-sha1
                 required: false
     - rsync:
         about: sync relative functions.

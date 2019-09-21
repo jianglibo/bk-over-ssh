@@ -649,8 +649,13 @@ impl Server {
 
     /// Preparing file list includes invoking remote command to collect file list and downloading to local.
     pub fn prepare_file_list(&self, skip_sha1: bool) -> Result<(), failure::Error> {
+        let pb = if self.pb.is_some() { // show progress bar.
+            Some(ProgressBar::new_spinner())
+        } else {
+            None
+        };
         if self.get_working_file_list_file().exists() {
-            if let Some(pb) = self.pb.as_ref() {
+            if let Some(pb) = pb.as_ref() {
                 let message = format!(
                     "uncompleted list file exists: {:?} continue processing",
                     self.get_working_file_list_file()
@@ -658,23 +663,37 @@ impl Server {
                 pb.set_message(message.as_str());
             }
         } else {
-            if let Some(pb) = self.pb.as_ref() {
+            if let Some(pb) = pb.as_ref() {
                 let message = format!("start download file list from {}....", self.host);
                 pb.set_message(message.as_str());
             }
             self.list_remote_file_sftp(skip_sha1)?;
         }
+        if let Some(pb) = pb {
+            pb.finish_and_clear();
+        }
         Ok(())
     }
 
     pub fn get_pb_count_and_len(&self) -> Result<(u64, u64), failure::Error> {
-        if let Some(pb) = self.pb.as_ref() {
+        let pb = if self.pb.is_some() { // show progress bar.
+            Some(ProgressBar::new_spinner())
+        } else {
+            None
+        };
+        if let Some(pb) = pb.as_ref() {
             let message = format!("counting files in {} ...", self.host);
+            pb.enable_steady_tick(200);
             pb.set_message(message.as_str());
         }
         let working_file = &self.get_working_file_list_file();
         let mut wfb = io::BufReader::new(fs::File::open(working_file)?);
-        Ok(self.count_and_len(&mut wfb))
+        let v = Ok(self.count_and_len(&mut wfb));
+        if let Some(pb) = pb.as_ref() {
+            pb.finish_and_clear();
+        }
+        v
+        
     }
 
     fn start_sync_working_file_list(
@@ -696,12 +715,9 @@ impl Server {
         let mut current_local_dir = Option::<&Path>::None;
         let mut consume_count = 0u64;
         let count_and_len_op = self.pb.as_ref().map(|pb| {
-            pb.enable_steady_tick(250);
-            pb.tick();
             let cl = self
                 .get_pb_count_and_len()
                 .expect("get_pb_count_and_len should success.");
-            pb.disable_steady_tick();
             cl
         });
         let total_count = count_and_len_op.map(|cl| cl.0).unwrap_or_default();
