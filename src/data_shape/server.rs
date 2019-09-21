@@ -662,7 +662,6 @@ impl Server {
     /// Preparing file list includes invoking remote command to collect file list and downloading to local.
     pub fn prepare_file_list(&self, skip_sha1: bool) -> Result<(), failure::Error> {
         let pb = if self.pb.is_some() {
-            // show progress bar.
             Some(ProgressBar::new_spinner())
         } else {
             None
@@ -727,7 +726,7 @@ impl Server {
         let mut current_remote_dir = Option::<String>::None;
         let mut current_local_dir = Option::<&Path>::None;
         let mut consume_count = 0u64;
-        let count_and_len_op = self.pb.as_ref().map(|pb| {
+        let count_and_len_op = self.pb.as_ref().map(|_pb| {
             let cl = self
                 .get_pb_count_and_len()
                 .expect("get_pb_count_and_len should success.");
@@ -769,6 +768,15 @@ impl Server {
                                 let local_item =
                                     FileItem::new(ld, rd.as_str(), remote_item, sync_type);
                                 consume_count += 1;
+
+                                if let Some(pb) = self.pb.as_ref() {
+                                    let prefix = format!(
+                                        "[{}]{}, ",
+                                        self.host.as_str(),
+                                        total_count - consume_count,
+                                    );
+                                    pb.set_prefix(prefix.as_str());
+                                }
                                 let r = if local_item.had_changed() {
                                     copy_a_file_item(&self, &sftp, local_item, self.pb.as_ref())
                                 } else {
@@ -778,15 +786,6 @@ impl Server {
                                         ),
                                     )
                                 };
-                                if let Some(pb) = self.pb.as_ref() {
-                                    let prefix = format!(
-                                        "[{}]{}, ",
-                                        self.host.as_str(),
-                                        total_count - consume_count,
-                                    );
-                                    pb.set_prefix(prefix.as_str());
-                                    pb.inc(l);
-                                }
                                 r
                             }
                             Err(err) => {
@@ -853,7 +852,7 @@ impl Server {
         let rs = self.start_sync_working_file_list(skip_sha1)?;
         self.remove_working_file_list_file();
         if let Some(pb) = self.pb.as_ref() {
-            pb.finish();
+            pb.finish_and_clear();
         }
         Ok(SyncDirReport::new(start.elapsed(), rs))
     }

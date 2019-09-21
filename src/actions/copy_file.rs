@@ -39,10 +39,11 @@ pub fn copy_stream_to_file_with_cb<T: AsRef<Path>, F: Fn(u64) -> ()>(
     loop {
         match from.read(&mut u8_buf[..]) {
             Ok(n) if n > 0 => {
-                length += n as u64;
+                let nn = n as u64;
+                length += nn;
                 wf.write_all(&u8_buf[..n])?;
                 if let Some(cb) = cb.as_ref() {
-                    cb(length);
+                    cb(nn);
                 }
             }
             _ => break,
@@ -220,7 +221,6 @@ pub fn copy_a_file_item_sftp<'a, F: Fn(u64) -> ()>(
     local_file_path: String,
     file_item: &FileItem<'a>,
     cb: Option<F>,
-    // pb_op: Option<&ProgressBar>,
 ) -> FileItemProcessResult {
     match sftp.open(Path::new(&file_item.get_remote_path())) {
         Ok(mut file) => {
