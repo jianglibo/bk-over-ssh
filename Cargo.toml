@@ -93,3 +93,4 @@ path = "src/lib.rs"
 
 [build-dependencies]
 vcpkg = "0.2.7"
+# vcpkg = { version = "0.2.7", path = "../vcpkg-rs/vcpkg" }
