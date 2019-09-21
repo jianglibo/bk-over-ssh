@@ -150,50 +150,12 @@ pub fn load_remote_item_owned<O: io::Write>(
     Ok(())
 }
 
-#[allow(dead_code)]
-pub fn load_dirs<'a, O: io::Write>(
-    dirs: impl Iterator<Item = &'a str>,
-    out: &'a mut O,
-    skip_sha1: bool,
-) -> Result<(), failure::Error> {
-    for one_dir in dirs {
-        let directory = Directory {
-            remote_dir: one_dir.to_string(),
-            ..Directory::default()
-        };
-        load_remote_item_owned(&directory, out, skip_sha1)?;
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::develope::tutil;
     use crate::log_util;
     use failure;
-
-    #[test]
-    fn t_from_path() -> Result<(), failure::Error> {
-        log_util::setup_logger_empty();
-        let dirs = vec!["fixtures/adir"].into_iter();
-        let mut cur = tutil::get_a_cursor_writer();
-        load_dirs(dirs, &mut cur, true)?;
-        let num = tutil::count_cursor_lines(cur);
-        assert_eq!(num, 7);
-        Ok(())
-    }
-
-    #[test]
-    fn t_from_path_to_path() -> Result<(), failure::Error> {
-        log_util::setup_logger_empty();
-        let dirs = vec!["/home"].into_iter();
-        let mut cur = tutil::get_a_cursor_writer();
-        load_dirs(dirs, &mut cur, true)?;
-        let num = tutil::count_cursor_lines(cur);
-        assert_eq!(num, 58380);
-        Ok(())
-    }
 
     #[test]
     fn t_deserialize_item() -> Result<(), failure::Error> {

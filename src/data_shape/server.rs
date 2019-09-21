@@ -93,7 +93,7 @@ impl Directory {
     }
 
     pub fn compile_patterns(&mut self) -> Result<(), failure::Error> {
-        if self.includes_patterns.is_none() {
+        if self.includes_patterns.is_none() && !self.includes.is_empty() {
             self.includes_patterns.replace(
                 self.includes
                     .iter()
@@ -102,7 +102,7 @@ impl Directory {
             );
         }
 
-        if self.excludes_patterns.is_none() {
+        if self.excludes_patterns.is_none() && !self.excludes.is_empty() {
             self.excludes_patterns.replace(
                 self.excludes
                     .iter()
@@ -829,17 +829,6 @@ impl Server {
         Ok(SyncDirReport::new(start.elapsed(), rs))
     }
 
-    // #[allow(dead_code)]
-    // pub fn sync_file_item_lines<R: BufRead + Seek>(
-    //     &mut self,
-    //     skip_sha1: bool,
-    //     from: R,
-    // ) -> Result<(), failure::Error> {
-    //     self.connect()?;
-    //     self.start_sync(skip_sha1, None, Some(from))?;
-    //     Ok(())
-    // }
-
     pub fn load_dirs<O: io::Write>(
         &self,
         out: &mut O,
@@ -912,27 +901,6 @@ mod tests {
         assert!(server.is_connected());
         Ok(())
     }
-
-    // #[test]
-    // fn t_download_dirs() -> Result<(), failure::Error> {
-    //     log();
-    //     let d = Path::new("target/adir");
-    //     if d.exists() {
-    //         fs::remove_dir_all(d)?;
-    //     }
-    //     assert!(!d.exists());
-    //     let mut server = load_server_yml();
-    //     server.connect()?;
-    //     let f = io::BufReader::new(
-    //         fs::OpenOptions::new()
-    //             .read(true)
-    //             .open("fixtures/linux_remote_item_dir.txt")?,
-    //     );
-    //     server.start_sync(true, None, Some(f))?;
-
-    //     assert!(d.exists());
-    //     Ok(())
-    // }
 
     #[test]
     fn t_sync_dirs() -> Result<(), failure::Error> {
@@ -1042,6 +1010,38 @@ mod tests {
         let p1 = Path::new("xy/c/a/3.txt");
 
         assert!(ptn1.matches_path(p1));
+
+        Ok(())
+    }
+
+    #[test]
+    fn t_from_path() -> Result<(), failure::Error> {
+        log_util::setup_logger_empty();
+        let mut cur = tutil::get_a_cursor_writer();
+        let mut one_dir = Directory {
+            remote_dir: "fixtures/adir".to_string(),
+            ..Directory::default()
+        };
+
+        one_dir.compile_patterns()?;
+        load_remote_item_owned(&one_dir, &mut cur, true)?;
+        let num = tutil::count_cursor_lines(&mut cur);
+        assert_eq!(num, 7);
+        tutil::print_cursor_lines(&mut cur);
+
+
+
+        let mut cur = tutil::get_a_cursor_writer();
+        let mut one_dir = Directory {
+            remote_dir: "fixtures/adir".to_string(),
+            includes: vec!["**/fixtures/adir/b/b.txt".to_string()],
+            ..Directory::default()
+        };
+
+        one_dir.compile_patterns()?;
+        load_remote_item_owned(&one_dir, &mut cur, true)?;
+        let num = tutil::count_cursor_lines(&mut cur);
+        assert_eq!(num, 2);
 
         Ok(())
     }
