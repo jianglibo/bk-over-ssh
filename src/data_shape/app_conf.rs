@@ -144,10 +144,11 @@ impl AppConf {
     pub fn load_server_yml(
         &self,
         yml_file_name: impl AsRef<str>,
+        buf_len: Option<usize>,
         multi_bar: Option<SharedMpb>,
     ) -> Result<Server, failure::Error> {
         let server =
-            Server::load_from_yml_with_app_config(&self, yml_file_name.as_ref(), multi_bar)?;
+            Server::load_from_yml_with_app_config(&self, yml_file_name.as_ref(), buf_len, multi_bar)?;
         println!(
             "load server yml from: {}",
             server
@@ -160,6 +161,7 @@ impl AppConf {
 
     pub fn load_all_server_yml(
         &self,
+        buf_len: Option<usize>,
         multi_bar: Option<SharedMpb>,
     ) -> Vec<Server> {
         if let Ok(rd) = self.get_servers_dir().read_dir() {
@@ -177,7 +179,7 @@ impl AppConf {
                 }
                 Ok(astr) => Some(astr),
             })
-            .map(|astr| self.load_server_yml(astr, multi_bar.as_ref().map(Arc::clone)))
+            .map(|astr| self.load_server_yml(astr, buf_len, multi_bar.as_ref().map(Arc::clone)))
             .filter_map(|rr| match rr {
                 Err(err) => {
                     warn!("load_server_yml failed: {:?}", err);

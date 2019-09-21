@@ -123,6 +123,10 @@ subcommands:
             - server-yml:
                 required: true
                 index: 1
+            - buf-len:
+                long: buf-len
+                takes_value: true
+                required: false
     - list-server-yml:
         about: list server yml in the configurated data dir.
     - demo-server-yml:
@@ -189,6 +193,10 @@ subcommands:
                 required: false
             - skip-sha1:
                 long: skip-sha1
+                required: false
+            - buf-len:
+                long: buf-len
+                takes_value: true
                 required: false
     - rsync:
         about: sync relative functions.

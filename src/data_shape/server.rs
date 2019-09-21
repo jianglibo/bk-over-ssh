@@ -167,6 +167,7 @@ pub struct Server {
     pub archive_prefix: String,
     pub archive_postfix: String,
     pub compress_archive: Option<CompressionImpl>,
+    pub buf_len: usize,
     #[serde(skip)]
     _tcp_stream: Option<TcpStream>,
     #[serde(skip)]
@@ -286,12 +287,14 @@ impl Server {
     pub fn load_from_yml_with_app_config(
         app_conf: &AppConf,
         name: impl AsRef<str>,
+        buf_len: Option<usize>,
         multi_bar: Option<SharedMpb>,
     ) -> Result<Server, failure::Error> {
         Server::load_from_yml(
             app_conf.get_servers_dir(),
             app_conf.get_data_dir(),
             name,
+            buf_len,
             multi_bar,
         )
     }
@@ -299,6 +302,7 @@ impl Server {
         servers_dir: impl AsRef<Path>,
         data_dir: impl AsRef<Path>,
         name: impl AsRef<str>,
+        buf_len: Option<usize>,
         multi_bar: Option<SharedMpb>,
     ) -> Result<Server, failure::Error> {
         let name = name.as_ref();
@@ -326,6 +330,10 @@ impl Server {
         let mut server: Server = serde_yaml::from_str(&buf)?;
 
         server.multi_bar = multi_bar;
+
+        if let Some(buf_len) = buf_len {
+            server.buf_len = buf_len;
+        }
 
         if let Some(mb) = server.multi_bar.as_ref() {
             let pb = ProgressBar::new(!0);
@@ -553,9 +561,9 @@ impl Server {
     }
 
     pub fn connect(&mut self) -> Result<(), failure::Error> {
-        if let Some(pb) = self.pb.as_ref() {
-            pb.set_message(format!("connecting to {}", self.host).as_str());
-        }
+        // if let Some(pb) = self.pb.as_ref() {
+        //     pb.set_message(format!("connecting to {}", self.host).as_str());
+        // }
         if !self.is_connected() {
             let (tcp, sess) = self.create_ssh_session()?;
             if tcp.is_some() {
@@ -778,7 +786,7 @@ impl Server {
                                     pb.set_prefix(prefix.as_str());
                                 }
                                 let r = if local_item.had_changed() {
-                                    copy_a_file_item(&self, &sftp, local_item, self.pb.as_ref())
+                                    copy_a_file_item(&self, &sftp, local_item, self.buf_len, self.pb.as_ref())
                                 } else {
                                     FileItemProcessResult::Skipped(
                                         local_item.get_local_path_str().expect(
@@ -892,7 +900,7 @@ mod tests {
     }
 
     fn load_server_yml() -> Server {
-        Server::load_from_yml("data/servers", "data", "localhost.yml", None).unwrap()
+        Server::load_from_yml("data/servers", "data", "localhost.yml", None, None).unwrap()
     }
 
     #[test]

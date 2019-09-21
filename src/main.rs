@@ -150,6 +150,13 @@ fn sync_dirs<'a>(
     let mut servers: Vec<Server> = Vec::new();
     let skip_sha1 = sub_matches.is_present("skip-sha1");
     let no_pb = sub_matches.is_present("no-pb");
+    let buf_len = sub_matches.value_of("buf-len").and_then(|v| {
+        if let Ok(v) = v.parse::<usize>() {
+            Some(v)
+        } else {
+            None
+        }
+    });
 
     let mb_op = if no_pb {
         None
@@ -160,11 +167,12 @@ fn sync_dirs<'a>(
     if sub_matches.value_of("server-yml").is_some() {
         let server = app_conf.load_server_yml(
             parse_server_yml(sub_matches),
+            buf_len,
             mb_op.as_ref().map(Arc::clone),
         )?;
         servers.push(server);
     } else {
-        servers.append(&mut app_conf.load_all_server_yml(mb_op.as_ref().map(Arc::clone)));
+        servers.append(&mut app_conf.load_all_server_yml(buf_len, mb_op.as_ref().map(Arc::clone)));
     }
 
     // all progress bars already create from here on.
@@ -232,7 +240,7 @@ fn main() -> Result<(), failure::Error> {
             sync_dirs(&app_conf, sub_matches)?;
         }
         ("copy-executable", Some(sub_matches)) => {
-            let mut server = app_conf.load_server_yml(parse_server_yml(sub_matches), None)?;
+            let mut server = app_conf.load_server_yml(parse_server_yml(sub_matches),None, None)?;
             let executable = sub_matches.value_of("executable").unwrap();
             let remote = server.remote_exec.clone();
             server.copy_a_file(executable, &remote)?;
@@ -244,7 +252,7 @@ fn main() -> Result<(), failure::Error> {
             );
         }
         ("copy-server-yml", Some(sub_matches)) => {
-            let mut server = app_conf.load_server_yml(parse_server_yml(sub_matches), None)?;
+            let mut server = app_conf.load_server_yml(parse_server_yml(sub_matches), None, None)?;
             let remote = server.remote_server_yml.clone();
             let local = server
                 .yml_location
@@ -286,7 +294,7 @@ fn main() -> Result<(), failure::Error> {
             }
         }
         ("archive-local", Some(sub_matches)) => {
-            let server = app_conf.load_server_yml(parse_server_yml(sub_matches), None)?;
+            let server = app_conf.load_server_yml(parse_server_yml(sub_matches),None, None)?;
             let prune_op = sub_matches.value_of("prune");
             let prune_only_op = sub_matches.value_of("prune-only");
             if prune_op.is_some() {
@@ -301,7 +309,7 @@ fn main() -> Result<(), failure::Error> {
         ("list-remote-files", Some(sub_matches)) => {
             let skip_sha1 = sub_matches.is_present("skip-sha1");
             let start = Instant::now();
-            let mut server = app_conf.load_server_yml(parse_server_yml(sub_matches), None)?;
+            let mut server = app_conf.load_server_yml(parse_server_yml(sub_matches), None, None)?;
             server.list_remote_file_exec(skip_sha1)?;
 
             if let Some(out) = sub_matches.value_of("out") {
@@ -325,7 +333,7 @@ fn main() -> Result<(), failure::Error> {
         }
         ("list-local-files", Some(sub_matches)) => {
             let skip_sha1 = sub_matches.is_present("skip-sha1");
-            let server = &app_conf.load_server_yml(parse_server_yml(sub_matches), None)?;
+            let server = &app_conf.load_server_yml(parse_server_yml(sub_matches),None, None)?;
             if let Some(out) = sub_matches.value_of("out") {
                 let mut out = fs::OpenOptions::new()
                     .create(true)
@@ -338,7 +346,14 @@ fn main() -> Result<(), failure::Error> {
             }
         }
         ("verify-server-yml", Some(sub_matches)) => {
-            let mut server = app_conf.load_server_yml(parse_server_yml(sub_matches), None)?;
+    let buf_len = sub_matches.value_of("buf-len").and_then(|v| {
+        if let Ok(v) = v.parse::<usize>() {
+            Some(v)
+        } else {
+            None
+        }
+    });
+            let mut server = app_conf.load_server_yml(parse_server_yml(sub_matches),buf_len, None)?;
             println!(
                 "found server configuration yml at: {:?}",
                 server.yml_location.as_ref().unwrap()

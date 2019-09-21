@@ -11,8 +11,6 @@ use std::io::prelude::Write;
 use std::path::Path;
 use std::{fs, io, io::Read};
 
-const BUFF_LEN: usize = 16384;
-
 #[allow(dead_code)]
 pub fn copy_file_to_stream(
     mut to: &mut impl std::io::Write,
@@ -27,9 +25,10 @@ pub fn copy_file_to_stream(
 pub fn copy_stream_to_file_with_cb<T: AsRef<Path>, F: FnMut(u64) -> ()>(
     from: &mut impl std::io::Read,
     to_file: T,
+    buf_len: usize,
     mut cb: Option<F>,
 ) -> Result<u64, failure::Error> {
-    let mut u8_buf = [0; BUFF_LEN];
+    let  u8_buf = &mut vec![0; buf_len];
     let mut length = 0_u64;
     let path = to_file.as_ref();
     if let Some(pp) = path.parent() {
@@ -58,9 +57,10 @@ pub fn copy_stream_to_file_with_cb<T: AsRef<Path>, F: FnMut(u64) -> ()>(
 pub fn copy_stream_to_file<T: AsRef<Path>>(
     from: &mut impl std::io::Read,
     to_file: T,
+    buf_len: usize,
     pb_op: Option<&ProgressBar>,
 ) -> Result<u64, failure::Error> {
-    let mut u8_buf = [0; BUFF_LEN];
+    let u8_buf = &mut vec![0; buf_len];
     let mut length = 0_u64;
     let path = to_file.as_ref();
     if let Some(pp) = path.parent() {
@@ -88,9 +88,10 @@ pub fn copy_stream_to_file<T: AsRef<Path>>(
 pub fn copy_stream_to_file_return_sha1_with_cb<T: AsRef<Path>, F: FnMut(u64) -> ()>(
     from: &mut impl std::io::Read,
     to_file: T,
+    buf_len: usize,
     mut cb: Option<F>,
 ) -> Result<(u64, String), failure::Error> {
-    let mut u8_buf = [0; BUFF_LEN];
+    let u8_buf = &mut vec![0; buf_len];
     let mut length = 0_u64;
     let mut hasher = Sha1::new();
     let path = to_file.as_ref();
@@ -121,9 +122,10 @@ pub fn copy_stream_to_file_return_sha1_with_cb<T: AsRef<Path>, F: FnMut(u64) -> 
 pub fn copy_stream_to_file_return_sha1<T: AsRef<Path>>(
     from: &mut impl std::io::Read,
     to_file: T,
+    buf_len: usize,
     mut fi_pb_op: Option<&ProgressBar>,
 ) -> Result<(u64, String), failure::Error> {
-    let mut u8_buf = [0; BUFF_LEN];
+    let u8_buf = &mut vec![0; buf_len];
     let mut length = 0_u64;
     let mut hasher = Sha1::new();
     let path = to_file.as_ref();
@@ -222,12 +224,13 @@ pub fn copy_a_file_item_sftp<'a, F: FnMut(u64) -> ()>(
     sftp: &ssh2::Sftp,
     local_file_path: String,
     file_item: &FileItem<'a>,
+    buf_len: usize,
     cb: Option<F>,
 ) -> FileItemProcessResult {
     match sftp.open(Path::new(&file_item.get_remote_path())) {
         Ok(mut file) => {
             if let Some(_r_sha1) = file_item.get_remote_item().get_sha1() {
-                match copy_stream_to_file_return_sha1_with_cb(&mut file, &local_file_path, cb) {
+                match copy_stream_to_file_return_sha1_with_cb(&mut file, &local_file_path, buf_len, cb) {
                     Ok((length, sha1)) => {
                         if length != file_item.get_remote_item().get_len() {
                             error!("length didn't match: {:?}", file_item);
@@ -249,7 +252,7 @@ pub fn copy_a_file_item_sftp<'a, F: FnMut(u64) -> ()>(
                     }
                 }
             } else {
-                match copy_stream_to_file_with_cb(&mut file, &local_file_path, cb) {
+                match copy_stream_to_file_with_cb(&mut file, &local_file_path, buf_len, cb) {
                     Ok(length) => {
                         if length != file_item.get_remote_item().get_len() {
                             FileItemProcessResult::LengthNotMatch(local_file_path)
@@ -347,6 +350,7 @@ pub fn copy_a_file_item<'a>(
     server: &Server,
     sftp: &ssh2::Sftp,
     file_item: FileItem<'a>,
+    buf_len: usize,
     pb_op: Option<&ProgressBar>,
 ) -> FileItemProcessResult {
     let mut received = 0_u64;
@@ -367,17 +371,17 @@ pub fn copy_a_file_item<'a>(
             None
         };
         let copy_result = match file_item.sync_type {
-            SyncType::Sftp => copy_a_file_item_sftp(sftp, local_file_path, &file_item, cb),
+            SyncType::Sftp => copy_a_file_item_sftp(sftp, local_file_path, &file_item, buf_len, cb),
             SyncType::Rsync => {
                 if !Path::new(&local_file_path).exists() {
-                    copy_a_file_item_sftp(sftp, local_file_path, &file_item, cb)
+                    copy_a_file_item_sftp(sftp, local_file_path, &file_item, buf_len, cb)
                 } else {
                     match copy_a_file_item_rsync(server, sftp, local_file_path.clone(), &file_item)
                     {
                         Ok(r) => r,
                         Err(err) => {
                             error!("rsync file failed: {:?}, {:?}", file_item, err);
-                            copy_a_file_item_sftp(sftp, local_file_path, &file_item, cb)
+                            copy_a_file_item_sftp(sftp, local_file_path, &file_item, buf_len, cb)
                         }
                     }
                 }
@@ -420,9 +424,9 @@ mod tests {
         let ri = RemoteFileItemOwned::new(remote_relative_path, remote_file_len);
         let fi = FileItem::new(local_base_dir, remote_base_dir, ri, sync_type);
         let sftp = session.sftp()?;
-        let mut server = Server::load_from_yml("servers", "data", "localhost.yml", None)?;
+        let mut server = Server::load_from_yml("servers", "data", "localhost.yml", None, None)?;
         server.connect()?;
-        let r = copy_a_file_item(&server, &sftp, fi, None);
+        let r = copy_a_file_item(&server, &sftp, fi, 8192, None);
         Ok(r)
     }
 
@@ -439,7 +443,7 @@ mod tests {
     fn t_copy_a_file() -> Result<(), failure::Error> {
         log_util::setup_test_logger_only_self(vec!["actions::copy_file"]);
 
-        let mut server = Server::load_from_yml("servers", "data", "localhost", None)?;
+        let mut server = Server::load_from_yml("servers", "data", "localhost",None, None)?;
         server.connect()?;
         server.rsync_valve = 4;
         let test_dir1 = tutil::create_a_dir_and_a_filename("xx.txt")?;
@@ -502,7 +506,7 @@ mod tests {
     fn t_copy_to_stdout() -> Result<(), failure::Error> {
         let mut f = fs::OpenOptions::new().open("fixtures/qrcode.png")?;
         // let mut buf = io::BufReader::new(f);
-        let mut u8_buf = [0; BUFF_LEN];
+        let mut u8_buf = [0; 8192];
         let len = f.read(&mut u8_buf)?;
         // let copied_length = io::copy(&mut buf, &mut io::sink())?;
         io::sink().write_all(&u8_buf[..len])?;
@@ -514,11 +518,19 @@ mod tests {
     fn t_buff_init() {
         let start = std::time::Instant::now();
         (0..1000).for_each(|i|{
-            let u8_buf = [0_u8; BUFF_LEN];
-            println!("{}, {}", u8_buf.len(), i);
+            let mut u8_buf = [0_u8; 8192];
+            u8_buf.last_mut().replace(&mut 1);
         });
 
-        println!("{:?}", start.elapsed().as_millis());
+        println!("array: {:?}", start.elapsed().as_millis());
+
+        let start = std::time::Instant::now();
+        (0..1000).for_each(|i|{
+            let mut u8_buf = vec![0_u8; 8192];
+            u8_buf.last_mut().replace(&mut 1);
+        });
+
+        println!("vec: {:?}", start.elapsed().as_millis())
     }
 }
 

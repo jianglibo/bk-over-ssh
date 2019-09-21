@@ -104,7 +104,7 @@ mod tests {
     }
 
     fn load_server_yml() -> Server {
-        Server::load_from_yml("data/servers", "data", "localhost.yml", None).unwrap()
+        Server::load_from_yml("data/servers", "data", "localhost.yml", None, None).unwrap()
     }
 
     #[test]
@@ -169,7 +169,7 @@ mod tests {
         let sess = server.get_ssh_session();
         let mut channel: ssh2::Channel = sess.channel_session().unwrap();
         channel.exec("ls").unwrap();
-        copy_stream_to_file_return_sha1(&mut channel, "not_in_git/t.txt", None)?;
+        copy_stream_to_file_return_sha1(&mut channel, "not_in_git/t.txt", 8192, None)?;
         Ok(())
     }
 
