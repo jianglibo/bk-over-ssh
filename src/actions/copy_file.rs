@@ -11,6 +11,8 @@ use std::io::prelude::Write;
 use std::path::Path;
 use std::{fs, io, io::Read};
 
+const BUFF_LEN: usize = 8192;
+
 #[allow(dead_code)]
 pub fn copy_file_to_stream(
     mut to: &mut impl std::io::Write,
@@ -22,12 +24,12 @@ pub fn copy_file_to_stream(
     Ok(())
 }
 
-pub fn copy_stream_to_file_with_cb<T: AsRef<Path>, F: Fn(u64) -> ()>(
+pub fn copy_stream_to_file_with_cb<T: AsRef<Path>, F: FnMut(u64) -> ()>(
     from: &mut impl std::io::Read,
     to_file: T,
-    cb: Option<F>,
+    mut cb: Option<F>,
 ) -> Result<u64, failure::Error> {
-    let mut u8_buf = [0; 1024];
+    let mut u8_buf = [0; 8192];
     let mut length = 0_u64;
     let path = to_file.as_ref();
     if let Some(pp) = path.parent() {
@@ -42,7 +44,7 @@ pub fn copy_stream_to_file_with_cb<T: AsRef<Path>, F: Fn(u64) -> ()>(
                 let nn = n as u64;
                 length += nn;
                 wf.write_all(&u8_buf[..n])?;
-                if let Some(cb) = cb.as_ref() {
+                if let Some(cb) = cb.as_mut() {
                     cb(nn);
                 }
             }
@@ -58,7 +60,7 @@ pub fn copy_stream_to_file<T: AsRef<Path>>(
     to_file: T,
     pb_op: Option<&ProgressBar>,
 ) -> Result<u64, failure::Error> {
-    let mut u8_buf = [0; 1024];
+    let mut u8_buf = [0; BUFF_LEN];
     let mut length = 0_u64;
     let path = to_file.as_ref();
     if let Some(pp) = path.parent() {
@@ -83,12 +85,12 @@ pub fn copy_stream_to_file<T: AsRef<Path>>(
     Ok(length)
 }
 
-pub fn copy_stream_to_file_return_sha1_with_cb<T: AsRef<Path>, F: Fn(u64) -> ()>(
+pub fn copy_stream_to_file_return_sha1_with_cb<T: AsRef<Path>, F: FnMut(u64) -> ()>(
     from: &mut impl std::io::Read,
     to_file: T,
-    cb: Option<F>,
+    mut cb: Option<F>,
 ) -> Result<(u64, String), failure::Error> {
-    let mut u8_buf = [0; 1024];
+    let mut u8_buf = [0; BUFF_LEN];
     let mut length = 0_u64;
     let mut hasher = Sha1::new();
     let path = to_file.as_ref();
@@ -104,7 +106,7 @@ pub fn copy_stream_to_file_return_sha1_with_cb<T: AsRef<Path>, F: Fn(u64) -> ()>
                 length += n as u64;
                 wf.write_all(&u8_buf[..n])?;
                 hasher.input(&u8_buf[..n]);
-                if let Some(cb) = cb.as_ref() {
+                if let Some(cb) = cb.as_mut() {
                     cb(length);
                 }
             }
@@ -121,7 +123,7 @@ pub fn copy_stream_to_file_return_sha1<T: AsRef<Path>>(
     to_file: T,
     mut fi_pb_op: Option<&ProgressBar>,
 ) -> Result<(u64, String), failure::Error> {
-    let mut u8_buf = [0; 1024];
+    let mut u8_buf = [0; BUFF_LEN];
     let mut length = 0_u64;
     let mut hasher = Sha1::new();
     let path = to_file.as_ref();
@@ -216,7 +218,7 @@ pub fn visit_dirs(dir: &Path, cb: &dyn Fn(&fs::DirEntry)) -> io::Result<()> {
 
 // https://stackoverflow.com/questions/32300132/why-cant-i-store-a-value-and-a-reference-to-that-value-in-the-same-struct
 
-pub fn copy_a_file_item_sftp<'a, F: Fn(u64) -> ()>(
+pub fn copy_a_file_item_sftp<'a, F: FnMut(u64) -> ()>(
     sftp: &ssh2::Sftp,
     local_file_path: String,
     file_item: &FileItem<'a>,
@@ -347,12 +349,14 @@ pub fn copy_a_file_item<'a>(
     file_item: FileItem<'a>,
     pb_op: Option<&ProgressBar>,
 ) -> FileItemProcessResult {
+    let mut received = 0_u64;
     if let Some(local_file_path) = file_item.get_local_path_str() {
         let cb = if pb_op.is_some() {
             Some(|length| {
+                received += length;
                 let message = format!(
                     "{}/{} - {}",
-                    HumanBytes(length),
+                    HumanBytes(received),
                     HumanBytes(file_item.get_remote_item().get_len()),
                     file_item.get_remote_item().get_path()
                 );
@@ -498,7 +502,7 @@ mod tests {
     fn t_copy_to_stdout() -> Result<(), failure::Error> {
         let mut f = fs::OpenOptions::new().open("fixtures/qrcode.png")?;
         // let mut buf = io::BufReader::new(f);
-        let mut u8_buf = [0; 1024];
+        let mut u8_buf = [0; BUFF_LEN];
         let len = f.read(&mut u8_buf)?;
         // let copied_length = io::copy(&mut buf, &mut io::sink())?;
         io::sink().write_all(&u8_buf[..len])?;
