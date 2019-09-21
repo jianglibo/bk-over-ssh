@@ -7,6 +7,10 @@ edition = "2018"
 # pick a binary for cargo run.
 default-run = "bk-over-ssh"
 
+
+# build = false
+# build = "custom_build_name.rs"
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
@@ -38,11 +42,23 @@ rayon = "1.2.0"
 lettre = "0.9"
 lettre_email = "0.9"
 askama = "0.8"
+
+
+time = "0.1"
 # https://docs.rs/crate/rustsync/0.2.3
 [dependencies.clap]
 version = "~2.33"
 default-features = false
 features = ["suggestions", "color", "yaml"]
+
+# https://docs.rs/vcpkg/0.2.7/vcpkg/
+# https://github.com/microsoft/vcpkg/blob/master/docs/examples/installing-and-using-packages.md
+# set env, export VCPKGRS_DYNAMIC=1, Set-Item -path env:TEAMS -value ($env:TEAMS + 'finance')
+# export VCPKG_ROOT=/home/jianglibo/ws/vcpkg
+# unset VCPKGRS_DYNAMIC
+# permanently system wide set environment variable, go /etc/environment
+[dependencies.rusqlite]
+version = "0.20.0"
 
 #https://stackoverflow.com/questions/41742046/is-there-a-list-of-all-cfg-features
 
@@ -56,8 +72,13 @@ features = ["suggestions", "color", "yaml"]
 sha2 = "0.8.0"
 
 
+# cargo build --bin name
 [[bin]]
 name = "bk-over-ssh"
+path = "src/main.rs"
+
+[[bin]]
+name = "bk-over-ssh-centos6"
 path = "src/main.rs"
 
 [lib]
@@ -69,3 +90,7 @@ path = "src/lib.rs"
 # add the lines below to ~/.bashrc
 # export RUSTUP_DIST_SERVER=https://mirrors.sjtug.sjtu.edu.cn/rust-static
 # export RUSTUP_UPDATE_ROOT=https://mirrors.sjtug.sjtu.edu.cn/rust-static/rustup
+
+[build-dependencies]
+vcpkg = "0.2.7"
+# vcpkg = { version = "0.2.7", path = "../vcpkg-rs/vcpkg" }

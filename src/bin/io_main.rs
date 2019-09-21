@@ -10,6 +10,7 @@ use std::{fs, io};
 // let h = kernel32::GetStdHandle(winapi::winbase::STD_OUTPUT_HANDLE);
 // let stdout = File::from_raw_handle(h);
 
+// cargo run --bin io_main
 
 pub fn main() -> Result<(), failure::Error> {
     let mut f = fs::OpenOptions::new().read(true).open("fixtures/qrcode.png")?;

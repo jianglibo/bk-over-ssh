@@ -69,7 +69,7 @@ impl Signature {
         let mut rr = record::RecordReader::<fs::File>::with_file_reader(file_name.as_ref())?;
         if let Some((_field_type, u8_vec)) = rr.read_field_slice()? {
             let mut chunks = HashMap::new();
-            let usize_size = std::mem::size_of::<usize>();
+            let _usize_size = std::mem::size_of::<usize>();
             let mut ary = [0_u8; 8];
             ary.copy_from_slice(&u8_vec[..8]);
             let window = usize::from_be_bytes(ary);

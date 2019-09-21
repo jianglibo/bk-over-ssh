@@ -9,6 +9,7 @@ extern crate clap;
 extern crate askama;
 extern crate rand;
 // extern crate rustsync;
+extern crate time;
 
 mod actions;
 mod data_shape;
