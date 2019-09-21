@@ -7,6 +7,11 @@ fn main() {
     // env::set_var("VCPKG_ROOT", "C:\\Users\\Administrator\\vcpkg");
     // env::set_var("TARGET", "x86_64-pc-windows-msvc");
     // vcpkg.exe install sqlite3:
+    let mut env_lines = String::new();
+    let env = env::vars().for_each(|(k,v)| {
+        env_lines.push_str(&format!("{}={}\n", k, v));
+    });
+    // panic!("{}", env_lines);
     vcpkg::find_package("sqlite3").unwrap();
 // output goes target/debug/build/<pkg>/output
                 for (key, value) in env::vars_os() {
@@ -14,6 +19,10 @@ fn main() {
             }
 
 }
+
+        // CARGO_CFG_TARGET_FEATURE is set in response to
+        // RUSTFLAGS=-Ctarget-feature=+crt-static. It would
+        //  be nice to test that also.
 
 // new-item -path env:RUSTFLAGS -Value "-Ctarget-feature=+crt-static"
 // when above flag set, will find sqlite3:x64-windows-static.
