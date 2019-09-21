@@ -697,7 +697,9 @@ impl Server {
         let mut consume_count = 0u64;
         let count_and_len_op = self.pb.as_ref().map(|pb| {
             pb.enable_steady_tick(250);
-            let cl = self.get_pb_count_and_len()
+            pb.tick();
+            let cl = self
+                .get_pb_count_and_len()
                 .expect("get_pb_count_and_len should success.");
             pb.disable_steady_tick();
             cl
@@ -705,7 +707,7 @@ impl Server {
         let total_count = count_and_len_op.map(|cl| cl.0).unwrap_or_default();
 
         if let Some(pb) = self.pb.as_ref() {
-            let style = ProgressStyle::default_bar().template("[{eta_precise}] {prefix:.bold.dim} {decimal_bytes}/{decimal_total_bytes} {bar:40.cyan/blue} {spinner} {wide_msg}");
+            let style = ProgressStyle::default_bar().template("[{eta_precise}] {prefix:.bold.dim} {bytes_per_sec} {decimal_bytes}/{decimal_total_bytes} {bar:30.cyan/blue} {spinner} {wide_msg}").progress_chars("#-");
             pb.set_length(count_and_len_op.map(|cl| cl.1).unwrap_or(0u64));
             pb.set_style(style);
         }
@@ -749,10 +751,9 @@ impl Server {
                                 };
                                 if let Some(pb) = self.pb.as_ref() {
                                     let prefix = format!(
-                                        "[{}]{}/{} , ",
+                                        "[{}]{}, ",
                                         self.host.as_str(),
-                                        consume_count,
-                                        total_count
+                                        total_count - consume_count,
                                     );
                                     pb.set_prefix(prefix.as_str());
                                     pb.inc(l);
