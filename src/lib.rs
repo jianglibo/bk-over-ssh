@@ -12,6 +12,9 @@ extern crate rand;
 
 extern crate adler32;
 extern crate blake2_rfc;
+extern crate time;
+
+
 // extern crate futures;
 // #[cfg(test)]
 // extern crate rand;
