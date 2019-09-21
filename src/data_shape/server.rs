@@ -225,7 +225,7 @@ impl Server {
         &mut self,
         remote: impl AsRef<Path>,
     ) -> Result<ssh2::FileStat, failure::Error> {
-        let sftp: ssh2::Sftp = self.session.as_ref().unwrap().sftp()?;
+        let sftp: ssh2::Sftp = self.session.as_ref().expect("server should already connected.").sftp()?;
         let stat = match sftp.stat(remote.as_ref()) {
             Ok(stat) => stat,
             Err(err) => {
@@ -1054,7 +1054,7 @@ mod tests {
         one_dir.compile_patterns()?;
         load_remote_item_owned(&one_dir, &mut cur, true)?;
         let num = tutil::count_cursor_lines(&mut cur);
-        assert_eq!(num, 7);
+        assert_eq!(num, 8);
         tutil::print_cursor_lines(&mut cur);
 
         let mut cur = tutil::get_a_cursor_writer();
@@ -1068,7 +1068,9 @@ mod tests {
         assert!(one_dir.excludes_patterns.is_none());
         load_remote_item_owned(&one_dir, &mut cur, true)?;
         let num = tutil::count_cursor_lines(&mut cur);
-        assert_eq!(num, 2);
+        assert_eq!(num, 2); // one dir line, one file line.
+
+
         let mut cur = tutil::get_a_cursor_writer();
         let mut one_dir = Directory {
             remote_dir: "fixtures/adir".to_string(),
@@ -1080,7 +1082,22 @@ mod tests {
         assert!(one_dir.includes_patterns.is_none());
         load_remote_item_owned(&one_dir, &mut cur, true)?;
         let num = tutil::count_cursor_lines(&mut cur);
-        assert_eq!(num, 6, "if exlude 1 file there should 6 left.");
+        assert_eq!(num, 7, "if exlude 1 file there should 7 left.");
+
+
+        let mut cur = tutil::get_a_cursor_writer();
+        let mut one_dir = Directory {
+            remote_dir: "fixtures/adir".to_string(),
+            excludes: vec!["**/Tomcat6/logs/**".to_string()],
+            ..Directory::default()
+        };
+
+        one_dir.compile_patterns()?;
+        assert!(one_dir.includes_patterns.is_none());
+        load_remote_item_owned(&one_dir, &mut cur, true)?;
+        let num = tutil::count_cursor_lines(&mut cur);
+        assert_eq!(num, 7, "if exlude logs file there should 7 left.");
+
 
         Ok(())
     }

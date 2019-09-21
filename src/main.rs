@@ -344,6 +344,7 @@ fn main() -> Result<(), failure::Error> {
                 server.yml_location.as_ref().unwrap()
             );
             println!("server content: {}", serde_yaml::to_string(&server)?);
+            server.connect()?;
             if let Err(err) = server.stats_remote_exec() {
                 println!(
                     "CAN'T FIND SERVER SIDE EXEC. {:?}\n{:?}",
