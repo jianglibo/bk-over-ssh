@@ -753,8 +753,10 @@ impl Server {
 
                                 let r = if local_item.had_changed() {
                                     remote_len = 0;
+                                    trace!("file had changed. start copy_a_file_item.");
                                     copy_a_file_item(&self, &sftp, local_item, &mut buff, self.pb.as_ref())
                                 } else {
+                                    trace!("file hadn't changed. skip.");
                                     FileItemProcessResult::Skipped(
                                         local_item.get_local_path_str().expect(
                                             "get_local_path_str should has some at thia point.",

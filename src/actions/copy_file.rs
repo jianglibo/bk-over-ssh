@@ -312,6 +312,7 @@ pub fn copy_a_file_item_rsync<'a>(
     file_item: &FileItem<'a>,
 ) -> Result<FileItemProcessResult, failure::Error> {
     let remote_path = file_item.get_remote_path();
+    trace!("start signature_a_file {}", &local_file_path);
     let mut sig = Signature::signature_a_file(&local_file_path, Some(4096))?;
     let remote_sig_file_path = format!("{}.sig", &remote_path);
     let sig_file = sftp.create(Path::new(&remote_sig_file_path))?;
@@ -429,6 +430,7 @@ pub fn copy_a_file_item<'a>(
 
         copy_result
     } else {
+        warn!("get_local_path_str failed: {:?}, ", file_item);
         FileItemProcessResult::GetLocalPathFailed
     }
 }
