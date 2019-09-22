@@ -28,9 +28,10 @@ pub fn copy_stream_to_file_with_cb<T: AsRef<Path>, F: FnMut(u64) -> ()>(
     buf_len: usize,
     mut cb: Option<F>,
 ) -> Result<u64, failure::Error> {
-    let  u8_buf = &mut vec![0; buf_len];
+    let u8_buf = &mut vec![0; buf_len];
     let mut length = 0_u64;
     let path = to_file.as_ref();
+    trace!("start copy_stream_to_file_with_cb: {:?}", path);
     if let Some(pp) = path.parent() {
         if !pp.exists() {
             fs::create_dir_all(pp)?;
@@ -47,7 +48,17 @@ pub fn copy_stream_to_file_with_cb<T: AsRef<Path>, F: FnMut(u64) -> ()>(
                     cb(nn);
                 }
             }
-            _ => break,
+            Ok(_) => {
+                trace!("end copy_stream_to_file_with_cb when readed zero byte.");
+                break;
+            }
+            Err(err) => {
+                trace!(
+                    "end copy_stream_to_file_with_cb when catch error. {:?}",
+                    err
+                );
+                break;
+            }
         }
     }
     Ok(length)
@@ -95,6 +106,7 @@ pub fn copy_stream_to_file_return_sha1_with_cb<T: AsRef<Path>, F: FnMut(u64) -> 
     let mut length = 0_u64;
     let mut hasher = Sha1::new();
     let path = to_file.as_ref();
+    trace!("start copy_stream_to_file_return_sha1_with_cb: {:?}", path);
     if let Some(pp) = path.parent() {
         if !pp.exists() {
             fs::create_dir_all(pp)?;
@@ -111,7 +123,17 @@ pub fn copy_stream_to_file_return_sha1_with_cb<T: AsRef<Path>, F: FnMut(u64) -> 
                     cb(length);
                 }
             }
-            _ => break,
+            Ok(_) => {
+                trace!("end copy_stream_to_file_return_sha1_with_cb when readed zero byte");
+                break;
+            }
+            Err(err) => {
+                trace!(
+                    "end copy_stream_to_file_return_sha1_with_cb catch error. {:?}",
+                    err
+                );
+                break;
+            }
         }
     }
     ensure!(path.exists(), "write_stream_to_file should be done.");
@@ -230,7 +252,12 @@ pub fn copy_a_file_item_sftp<'a, F: FnMut(u64) -> ()>(
     match sftp.open(Path::new(&file_item.get_remote_path())) {
         Ok(mut file) => {
             if let Some(_r_sha1) = file_item.get_remote_item().get_sha1() {
-                match copy_stream_to_file_return_sha1_with_cb(&mut file, &local_file_path, buf_len, cb) {
+                match copy_stream_to_file_return_sha1_with_cb(
+                    &mut file,
+                    &local_file_path,
+                    buf_len,
+                    cb,
+                ) {
                     Ok((length, sha1)) => {
                         if length != file_item.get_remote_item().get_len() {
                             error!("length didn't match: {:?}", file_item);
@@ -354,18 +381,22 @@ pub fn copy_a_file_item<'a>(
     pb_op: Option<&ProgressBar>,
 ) -> FileItemProcessResult {
     let mut received = 0_u64;
+    let item_len = file_item.get_remote_item().get_len();
+    let item_path = file_item.get_remote_item().get_path();
     if let Some(local_file_path) = file_item.get_local_path_str() {
         let cb = if pb_op.is_some() {
             Some(|length| {
                 received += length;
-                let message = format!(
-                    "{}/{} - {}",
-                    HumanBytes(received),
-                    HumanBytes(file_item.get_remote_item().get_len()),
-                    file_item.get_remote_item().get_path()
-                );
-                pb_op.unwrap().set_message(message.as_str());
-                pb_op.unwrap().inc(length);
+                if let Some(pb) = pb_op {
+                    let message = format!(
+                        "{}/{} - {}",
+                        HumanBytes(received),
+                        HumanBytes(item_len),
+                        item_path,
+                    );
+                    pb.set_message(message.as_str());
+                    pb.inc(length);
+                }
             })
         } else {
             None
@@ -443,7 +474,7 @@ mod tests {
     fn t_copy_a_file() -> Result<(), failure::Error> {
         log_util::setup_test_logger_only_self(vec!["actions::copy_file"]);
 
-        let mut server = Server::load_from_yml("servers", "data", "localhost",None, None)?;
+        let mut server = Server::load_from_yml("servers", "data", "localhost", None, None)?;
         server.connect()?;
         server.rsync_valve = 4;
         let test_dir1 = tutil::create_a_dir_and_a_filename("xx.txt")?;
@@ -517,7 +548,7 @@ mod tests {
     #[test]
     fn t_buff_init() {
         let start = std::time::Instant::now();
-        (0..1000).for_each(|i|{
+        (0..1000).for_each(|i| {
             let mut u8_buf = [0_u8; 8192];
             u8_buf.last_mut().replace(&mut 1);
         });
@@ -525,7 +556,7 @@ mod tests {
         println!("array: {:?}", start.elapsed().as_millis());
 
         let start = std::time::Instant::now();
-        (0..1000).for_each(|i|{
+        (0..1000).for_each(|i| {
             let mut u8_buf = vec![0_u8; 8192];
             u8_buf.last_mut().replace(&mut 1);
         });

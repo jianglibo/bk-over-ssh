@@ -66,41 +66,41 @@ impl Directory {
             .expect("directory pattern should compile.");
         o
     }
-    /// if has exclude items any matching will return None first,
-    /// if has include items, only matched item will return.
-    /// if no include patterns, any not excluded item mathes.
+    /// if has includes get includes first.
+    /// if has excludes exclude files.
     pub fn match_path(&self, path: PathBuf) -> Option<PathBuf> {
-        let no_exlucdes = self.excludes_patterns.is_none();
+        let has_includes = self.includes_patterns.is_some();
+        let keep_file = if has_includes {
+            self.includes_patterns
+                .as_ref()
+                .unwrap()
+                .iter()
+                .any(|ptn| ptn.matches_path(&path))
+        } else {
+            true
+        };
 
-        if !no_exlucdes {
-            if self
+        if !keep_file {
+            return None;
+        }
+
+        let has_exlucdes = self.excludes_patterns.is_some();
+
+        let keep_file = if has_exlucdes {
+            !self
                 .excludes_patterns
                 .as_ref()
                 .unwrap()
                 .iter()
                 .any(|p| p.matches_path(&path))
-            {
-                return None;
-            }
-        }
-
-        // not excluded files go here.
-        let no_includes = self.includes_patterns.is_none();
-        if !no_includes {
-            if self
-                .includes_patterns
-                .as_ref()
-                .unwrap()
-                .iter()
-                .any(|ptn| ptn.matches_path(&path))
-            {
-                Some(path)
-            } else {
-                None // not excluded and not included.
-            }
         } else {
-            // not excluded and no include patterns.
+            true
+        };
+
+        if keep_file {
             Some(path)
+        } else {
+            None
         }
     }
     /// When includes is empyt, includes_patterns will be None, excludes is the same.
@@ -226,7 +226,11 @@ impl Server {
         &mut self,
         remote: impl AsRef<Path>,
     ) -> Result<ssh2::FileStat, failure::Error> {
-        let sftp: ssh2::Sftp = self.session.as_ref().expect("server should already connected.").sftp()?;
+        let sftp: ssh2::Sftp = self
+            .session
+            .as_ref()
+            .expect("server should already connected.")
+            .sftp()?;
         let stat = match sftp.stat(remote.as_ref()) {
             Ok(stat) => stat,
             Err(err) => {
@@ -669,51 +673,21 @@ impl Server {
 
     /// Preparing file list includes invoking remote command to collect file list and downloading to local.
     pub fn prepare_file_list(&self, skip_sha1: bool) -> Result<(), failure::Error> {
-        let pb = if self.pb.is_some() {
-            Some(ProgressBar::new_spinner())
-        } else {
-            None
-        };
         if self.get_working_file_list_file().exists() {
-            if let Some(pb) = pb.as_ref() {
-                let message = format!(
-                    "uncompleted list file exists: {:?} continue processing",
-                    self.get_working_file_list_file()
-                );
-                pb.set_message(message.as_str());
-            }
+            println!(
+                "uncompleted list file exists: {:?} continue processing",
+                self.get_working_file_list_file()
+            );
         } else {
-            if let Some(pb) = pb.as_ref() {
-                let message = format!("start download file list from {}....", self.host);
-                pb.set_message(message.as_str());
-            }
             self.list_remote_file_sftp(skip_sha1)?;
-        }
-        if let Some(pb) = pb {
-            pb.finish_and_clear();
         }
         Ok(())
     }
 
     pub fn get_pb_count_and_len(&self) -> Result<(u64, u64), failure::Error> {
-        let pb = if self.pb.is_some() {
-            // show progress bar.
-            Some(ProgressBar::new_spinner())
-        } else {
-            None
-        };
-        if let Some(pb) = pb.as_ref() {
-            let message = format!("counting files in {} ...", self.host);
-            pb.enable_steady_tick(200);
-            pb.set_message(message.as_str());
-        }
         let working_file = &self.get_working_file_list_file();
         let mut wfb = io::BufReader::new(fs::File::open(working_file)?);
-        let v = Ok(self.count_and_len(&mut wfb));
-        if let Some(pb) = pb.as_ref() {
-            pb.finish_and_clear();
-        }
-        v
+        Ok(self.count_and_len(&mut wfb))
     }
 
     fn start_sync_working_file_list(
@@ -735,10 +709,8 @@ impl Server {
         let mut current_local_dir = Option::<&Path>::None;
         let mut consume_count = 0u64;
         let count_and_len_op = self.pb.as_ref().map(|_pb| {
-            let cl = self
-                .get_pb_count_and_len()
-                .expect("get_pb_count_and_len should success.");
-            cl
+            self.get_pb_count_and_len()
+                .expect("get_pb_count_and_len should success.")
         });
         let total_count = count_and_len_op.map(|cl| cl.0).unwrap_or_default();
 
@@ -786,7 +758,13 @@ impl Server {
                                     pb.set_prefix(prefix.as_str());
                                 }
                                 let r = if local_item.had_changed() {
-                                    copy_a_file_item(&self, &sftp, local_item, self.buf_len, self.pb.as_ref())
+                                    copy_a_file_item(
+                                        &self,
+                                        &sftp,
+                                        local_item,
+                                        self.buf_len,
+                                        self.pb.as_ref(),
+                                    )
                                 } else {
                                     FileItemProcessResult::Skipped(
                                         local_item.get_local_path_str().expect(
@@ -1078,7 +1056,6 @@ mod tests {
         let num = tutil::count_cursor_lines(&mut cur);
         assert_eq!(num, 2); // one dir line, one file line.
 
-
         let mut cur = tutil::get_a_cursor_writer();
         let mut one_dir = Directory {
             remote_dir: "fixtures/adir".to_string(),
@@ -1092,7 +1069,6 @@ mod tests {
         let num = tutil::count_cursor_lines(&mut cur);
         assert_eq!(num, 7, "if exlude 1 file there should 7 left.");
 
-
         let mut cur = tutil::get_a_cursor_writer();
         let mut one_dir = Directory {
             remote_dir: "fixtures/adir".to_string(),
@@ -1105,7 +1081,6 @@ mod tests {
         load_remote_item_owned(&one_dir, &mut cur, true)?;
         let num = tutil::count_cursor_lines(&mut cur);
         assert_eq!(num, 7, "if exlude logs file there should 7 left.");
-
 
         Ok(())
     }
