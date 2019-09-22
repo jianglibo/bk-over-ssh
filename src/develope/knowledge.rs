@@ -144,8 +144,8 @@ mod tests {
     fn t_sftp_resume_file() -> Result<(), failure::Error> {
         // log_util::setup_logger(vec![""], vec![]);
         // let (_tcp, mut sess, _dev_env) = develope_data::connect_to_ubuntu();
-        // let rdo = RemoteFileItemOwnedDirOwned::load_dir("fixtures/adir");
-        // let rd: RemoteFileItemOwnedDir = (&rdo).into();
+        // let rdo = RemoteFileItemDirOwned::load_dir("fixtures/adir");
+        // let rd: RemoteFileItemDir = (&rdo).into();
         // let remote_item = rd
         //     .get_items()
         //     .iter()

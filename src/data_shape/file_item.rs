@@ -1,5 +1,5 @@
 use super::string_path;
-use super::RemoteFileItemOwned;
+use super::RemoteFileItem;
 use crate::actions::hash_file_sha1;
 use filetime;
 use log::*;
@@ -47,7 +47,7 @@ pub struct FileItemProcessResultStats {
 
 #[derive(Debug)]
 pub struct FileItem<'a> {
-    pub remote_item: RemoteFileItemOwned,
+    pub remote_item: RemoteFileItem,
     base_dir: &'a Path,
     remote_base_dir: Option<&'a str>,
     pub sync_type: SyncType,
@@ -57,7 +57,7 @@ impl<'a> FileItem<'a> {
     pub fn new(
         base_dir: &'a Path,
         remote_base_dir: &'a str,
-        remote_item: RemoteFileItemOwned,
+        remote_item: RemoteFileItem,
         sync_type: SyncType,
     ) -> Self {
         Self {
@@ -104,7 +104,7 @@ impl<'a> FileItem<'a> {
             != self.remote_item.get_sha1().map(str::to_ascii_uppercase)
     }
 
-    pub fn get_remote_item(&self) -> &RemoteFileItemOwned {
+    pub fn get_remote_item(&self) -> &RemoteFileItem {
         &self.remote_item
     }
     pub fn get_local_path(&self) -> PathBuf {

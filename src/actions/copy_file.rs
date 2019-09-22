@@ -439,7 +439,7 @@ pub fn copy_a_file_item<'a>(
 mod tests {
     use super::*;
     use crate::data_shape::{
-        FileItem, FileItemProcessResult, RemoteFileItemOwned, Server, SyncType,
+        FileItem, FileItemProcessResult, RemoteFileItem, Server, SyncType,
     };
     use crate::develope::tutil;
     use crate::log_util;
@@ -468,7 +468,7 @@ mod tests {
         remote_file_len: u64,
         sync_type: SyncType,
     ) -> Result<FileItemProcessResult, failure::Error> {
-        let ri = RemoteFileItemOwned::new(remote_relative_path, remote_file_len);
+        let ri = RemoteFileItem::new(remote_relative_path, remote_file_len);
         let fi = FileItem::new(local_base_dir, remote_base_dir, ri, sync_type);
         let sftp = server.get_ssh_session().sftp()?;
         let mut buf = vec![0; 8192];
@@ -563,7 +563,7 @@ mod tests {
     #[test]
     fn t_buff_init() {
         let start = std::time::Instant::now();
-        (0..1000).for_each(|i| {
+        (0..1000).for_each(|_i| {
             let mut u8_buf = [0_u8; 8192];
             u8_buf.last_mut().replace(&mut 1);
         });
@@ -571,7 +571,7 @@ mod tests {
         println!("array: {:?}", start.elapsed().as_millis());
 
         let start = std::time::Instant::now();
-        (0..1000).for_each(|i| {
+        (0..1000).for_each(|_i| {
             let mut u8_buf = vec![0_u8; 8192];
             u8_buf.last_mut().replace(&mut 1);
         });
@@ -579,61 +579,3 @@ mod tests {
         println!("vec: {:?}", start.elapsed().as_millis())
     }
 }
-
-// fn hash_file_2(file_name: impl AsRef<str>) -> Result<String, failure::Error> {
-//     let start = Instant::now();
-
-//     let mut hasher = DefaultHasher::new();
-
-//     let mut file = fs::File::open(file_name.as_ref())?;
-//     let mut buffer = [0; 1024];
-//     let mut total = 0_usize;
-//     loop {
-//         let n = file.read(&mut buffer[..])?;
-//         if n == 0 {
-//             break
-//         } else {
-//             hasher.write(&buffer[..n]);
-//             total += n;
-//         }
-//     }
-//     let hash = hasher.finish();
-//     println!("Bytes processed: {}", total);
-//     let r = format!("{:x}", hash);
-//     println!("r: {:?}, elapsed: {}",r, start.elapsed().as_millis());
-//     Ok(r)
-// }
-
-// fn hash_file_1(file_name: impl AsRef<str>) -> Result<String, failure::Error> {
-//     let start = Instant::now();
-//     let mut file = fs::File::open(file_name.as_ref())?;
-//     let mut hasher = Sha224::new();
-//     let mut buffer = [0; 1024];
-//     let mut total = 0_usize;
-//     loop {
-//         let n = file.read(&mut buffer[..])?;
-//         if n == 0 {
-//             break
-//         } else {
-//             hasher.input(&buffer[..n]);
-//             total += n;
-//         }
-//     }
-//     let hash = hasher.result();
-//     println!("Bytes processed: {}", total);
-//     let r = format!("{:x}", hash);
-//     println!("r: {:?}, elapsed: {}",r, start.elapsed().as_millis());
-//     Ok(r)
-// }
-
-// fn hash_file(file_name: impl AsRef<str>) -> Result<String, failure::Error> {
-//     let start = Instant::now();
-//     let mut file = fs::File::open(file_name.as_ref())?;
-//     let mut hasher = Sha224::new();
-//     let n = io::copy(&mut file, &mut hasher)?;
-//     let hash = hasher.result();
-//     println!("Bytes processed: {}", n);
-//     let r = format!("{:x}", hash);
-//     println!("r: {:?}, elapsed: {}",r, start.elapsed().as_millis());
-//     Ok(r)
-// }

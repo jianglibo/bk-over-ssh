@@ -1,7 +1,5 @@
-use std::io;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc};
 use indicatif::{MultiProgress};
-use crate::data_shape::{FileItem, Server};
 
 pub type SharedMpb = Arc<MultiProgress>;
 

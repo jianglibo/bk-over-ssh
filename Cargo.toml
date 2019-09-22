@@ -59,6 +59,7 @@ features = ["suggestions", "color", "yaml"]
 # permanently system wide set environment variable, go /etc/environment
 [dependencies.rusqlite]
 version = "0.20.0"
+features = ["chrono"]
 
 #https://stackoverflow.com/questions/41742046/is-there-a-list-of-all-cfg-features
 

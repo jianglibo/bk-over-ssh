@@ -1,7 +1,7 @@
 use crate::actions::{copy_a_file_item, SyncDirReport};
 use crate::data_shape::{
     load_remote_item_owned, rolling_files, string_path, AppConf, FileItem, FileItemProcessResult,
-    FileItemProcessResultStats, RemoteFileItemOwned, SyncType,
+    FileItemProcessResultStats, RemoteFileItem, SyncType,
 };
 use crate::ioutil::SharedMpb;
 use bzip2::write::BzEncoder;
@@ -652,7 +652,7 @@ impl Server {
                 Ok(0) => break,
                 Ok(_length) => {
                     if buf.starts_with('{') {
-                        match serde_json::from_str::<RemoteFileItemOwned>(&buf) {
+                        match serde_json::from_str::<RemoteFileItem>(&buf) {
                             Ok(remote_item) => {
                                 count_and_len.0 += 1;
                                 count_and_len.1 += remote_item.get_len();
@@ -737,7 +737,7 @@ impl Server {
                 if line.starts_with('{') {
                     trace!("got item line {}", line);
                     if let (Some(rd), Some(ld)) = (current_remote_dir.as_ref(), current_local_dir) {
-                        match serde_json::from_str::<RemoteFileItemOwned>(&line) {
+                        match serde_json::from_str::<RemoteFileItem>(&line) {
                             Ok(remote_item) => {
                                 let mut remote_len = remote_item.get_len();
                                 let sync_type = if self.rsync_valve > 0

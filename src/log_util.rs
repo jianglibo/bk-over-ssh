@@ -2,10 +2,12 @@ use fern::colors::{Color, ColoredLevelConfig};
 use std::fs;
 use std::path::Path;
 
+#[allow(dead_code)]
 pub fn setup_logger_empty() {
     setup_test_logger_only_self(Vec::<String>::new());
 }
 
+#[allow(dead_code)]
 pub fn setup_test_logger<T, I>(verbose_modules: T, other_modules: T)
 where
     I: AsRef<str>,
@@ -16,6 +18,7 @@ where
     }
 }
 
+#[allow(dead_code)]
 pub fn setup_test_logger_only_self<T, I>(verbose_modules: T)
 where
     I: AsRef<str>,

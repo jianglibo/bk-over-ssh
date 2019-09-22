@@ -5,7 +5,6 @@ mod delta_mem;
 mod record;
 
 use indicatif::{ProgressBar, ProgressStyle};
-use log::*;
 use std::collections::HashMap;
 use std::path::Path;
 use std::{fs, io};
@@ -324,10 +323,10 @@ mod tests {
     use super::*;
     use crate::develope::tutil;
     use crate::log_util;
-    use log::*;
     use rand;
     use rand::distributions::Alphanumeric;
     use rand::Rng;
+    use log::*;
     use std::io;
     use std::io::{Read, Seek, Write};
     use std::time::Instant;
@@ -442,33 +441,6 @@ mod tests {
             start.elapsed().as_secs()
         );
         assert_eq!(sig, new_sig);
-        Ok(())
-    }
-
-    #[test]
-    fn t_other() -> Result<(), failure::Error> {
-        assert_eq!(std::mem::size_of::<usize>(), 8);
-        let a = 5_u64;
-        let b = 10_u64;
-        // assert_eq!(0.5_f32, a as f32 / b as f32);
-
-        let mut tf = tempfile::tempfile()?;
-        tf.write_all(b"hello")?;
-
-        assert_eq!(tf.metadata()?.len(), 5);
-        enum Aenum {
-            A(u8),
-            B(u32),
-        }
-
-        impl Aenum {
-            pub fn set_value(&mut self, _v: u8) {
-                match self {
-                    Self::A(_) => {}
-                    Self::B(_) => {}
-                }
-            }
-        }
         Ok(())
     }
 }

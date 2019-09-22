@@ -14,6 +14,9 @@ extern crate adler32;
 extern crate blake2_rfc;
 extern crate time;
 
+#[macro_use]
+extern crate rusqlite;
+
 
 // extern crate futures;
 // #[cfg(test)]
@@ -31,3 +34,4 @@ pub mod develope;
 pub mod log_util;
 pub mod rustsync;
 pub mod ioutil;
+pub mod sqlite_func;

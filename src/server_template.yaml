@@ -10,6 +10,7 @@ remote_server_yml: /home/osboxes/ws/ssh-client-demo/data/servers/localhost.yml
 file_list_file: /home/jianglibo/file_list_file.txt
 rsync_valve: 419430400
 buf_len: 8192
+rsync_window: 2048
 directories:
   - remote_dir: /home/jianglibo/ws/ssh-client-demo/fixtures/adir
     local_dir: ~
