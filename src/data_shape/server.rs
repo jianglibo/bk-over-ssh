@@ -721,6 +721,7 @@ impl Server {
         }
 
         let sftp = self.session.as_ref().unwrap().sftp()?;
+        let mut buff = vec![0_u8; self.buf_len];
 
         let result = file_item_lines
             .lines()
@@ -737,7 +738,7 @@ impl Server {
                     if let (Some(rd), Some(ld)) = (current_remote_dir.as_ref(), current_local_dir) {
                         match serde_json::from_str::<RemoteFileItemOwned>(&line) {
                             Ok(remote_item) => {
-                                let l = remote_item.get_len();
+                                let mut remote_len = remote_item.get_len();
                                 let sync_type = if self.rsync_valve > 0
                                     && remote_item.get_len() > self.rsync_valve
                                 {
@@ -749,22 +750,10 @@ impl Server {
                                     FileItem::new(ld, rd.as_str(), remote_item, sync_type);
                                 consume_count += 1;
 
-                                if let Some(pb) = self.pb.as_ref() {
-                                    let prefix = format!(
-                                        "[{}]{}, ",
-                                        self.host.as_str(),
-                                        total_count - consume_count,
-                                    );
-                                    pb.set_prefix(prefix.as_str());
-                                }
+
                                 let r = if local_item.had_changed() {
-                                    copy_a_file_item(
-                                        &self,
-                                        &sftp,
-                                        local_item,
-                                        self.buf_len,
-                                        self.pb.as_ref(),
-                                    )
+                                    remote_len = 0;
+                                    copy_a_file_item(&self, &sftp, local_item, &mut buff, self.pb.as_ref())
                                 } else {
                                     FileItemProcessResult::Skipped(
                                         local_item.get_local_path_str().expect(
@@ -772,6 +761,17 @@ impl Server {
                                         ),
                                     )
                                 };
+                                if let Some(pb) = self.pb.as_ref() {
+                                    let prefix = format!(
+                                        "[{}]{}, ",
+                                        self.host.as_str(),
+                                        total_count - consume_count,
+                                    );
+                                    pb.set_prefix(prefix.as_str());
+                                    if remote_len > 0 {
+                                        pb.inc(remote_len)
+                                    }
+                                }
                                 r
                             }
                             Err(err) => {
