@@ -280,7 +280,7 @@ mod tests {
                                       // total size: 78
         let modified = source.clone();
         let buf = [0; WINDOW];
-        let source_sig = Signature::signature(&source[..], buf)?;
+        let source_sig = Signature::signature(&source[..], buf, None)?;
         let delta_file = "target/cc.delta";
         DeltaFileWriter::<fs::File>::create_delta_file(delta_file, WINDOW, Some(10))?
             .compare(&source_sig, &modified[..])?;
@@ -311,7 +311,7 @@ mod tests {
                     ((source.as_bytes()[index] as usize + 1) & 255) as u8
             }
             let buf = [0; WINDOW];
-            let source_sig = Signature::signature(source.as_bytes(), buf)?;
+            let source_sig = Signature::signature(source.as_bytes(), buf, None)?;
             let delta_file = "target/cc.delta";
             DeltaFileWriter::<fs::File>::create_delta_file(delta_file, WINDOW, Some(3))?
                 .compare(&source_sig, modified.as_bytes())?;

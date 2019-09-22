@@ -168,6 +168,7 @@ pub struct Server {
     pub archive_postfix: String,
     pub compress_archive: Option<CompressionImpl>,
     pub buf_len: usize,
+    pub rsync_window: usize,
     #[serde(skip)]
     _tcp_stream: Option<TcpStream>,
     #[serde(skip)]

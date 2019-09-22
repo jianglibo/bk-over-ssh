@@ -4,12 +4,13 @@ mod delta_file;
 mod delta_mem;
 mod record;
 
+use indicatif::{ProgressBar, ProgressStyle};
 use log::*;
 use std::collections::HashMap;
 use std::path::Path;
 use std::{fs, io};
 
-pub use delta_file::{DeltaFileWriter, DeltaFileReader};
+pub use delta_file::{DeltaFileReader, DeltaFileWriter};
 // use tokio_io::{AsyncRead, AsyncWrite};
 // use tokio_io::io::{write_all, WriteAll};
 // use futures::{Async, Future, Poll};
@@ -103,12 +104,12 @@ impl Signature {
     /// map of blocks. The first step of the protocol is to run this
     /// function on the "source" (the remote file when downloading, the
     /// local file while uploading).
-    pub fn signature<R: io::Read, B: AsRef<[u8]> + AsMut<[u8]>>(
+    pub fn signature<R: io::BufRead, B: AsRef<[u8]> + AsMut<[u8]>>(
         mut r: R,
         mut buff: B,
+        pb: Option<&ProgressBar>,
     ) -> Result<Signature, failure::Error> {
         let mut chunks = HashMap::new();
-
         let mut i = 0;
         let buff = buff.as_mut();
         let mut eof = false;
@@ -117,6 +118,9 @@ impl Signature {
             while j < buff.len() {
                 // full fill the block. for the last block, maybe not full.
                 let r = r.read(&mut buff[j..])?;
+                if let Some(pb) = pb.as_ref() {
+                    pb.inc(r as u64);
+                }
                 if r == 0 {
                     eof = true;
                     break;
@@ -147,11 +151,27 @@ impl Signature {
     pub fn signature_a_file(
         file_name: impl AsRef<Path>,
         buf_size: Option<usize>,
+        show_pb: bool,
     ) -> Result<Signature, failure::Error> {
-        let f = fs::OpenOptions::new().read(true).open(file_name.as_ref())?;
+        let file_name = file_name.as_ref();
+        let f = fs::OpenOptions::new().read(true).open(file_name)?;
+        let total_bytes = f.metadata()?.len();
+        let pb = if show_pb {
+            let style = ProgressStyle::default_bar().template("[{eta_precise}] {bytes_per_sec} {decimal_bytes}/{decimal_total_bytes} {bar:30.cyan/blue} {wide_msg}").progress_chars("#-");
+            let pb1 = ProgressBar::new(total_bytes).with_style(style);
+            pb1.set_message(&format!("start signature file: {:?}", file_name));
+            Some(pb1)
+        } else {
+            None
+        };
         let mut br = io::BufReader::new(f);
         let mut buf = vec![0_u8; buf_size.unwrap_or(2048)];
-        Signature::signature(&mut br, &mut buf[..])
+        let r = Signature::signature(&mut br, &mut buf[..], pb.as_ref());
+
+        if let Some(pb) = pb.as_ref() {
+            pb.finish_and_clear();
+        }
+        r
     }
 }
 
@@ -175,7 +195,6 @@ impl State {
 
 pub trait DeltaReader {
     fn block_count(&mut self) -> Result<(usize, usize), failure::Error>;
-    
     fn restore_seekable(
         &mut self,
         out: impl io::Write,
@@ -216,11 +235,7 @@ pub trait DeltaWriter {
     fn push_byte(&mut self, byte: u8) -> Result<(), failure::Error>;
     fn finishup(&mut self) -> Result<(), failure::Error>;
 
-    fn compare<R: io::Read>(
-        &mut self,
-        sig: &Signature,
-        mut r: R,
-    ) -> Result<(), failure::Error> {
+    fn compare<R: io::Read>(&mut self, sig: &Signature, mut r: R) -> Result<(), failure::Error> {
         let mut st = State::new();
         let mut buff = vec![0_u8; sig.window];
         while st.block_content_len > 0 {
@@ -302,11 +317,7 @@ pub trait DeltaWriter {
     }
 }
 
-pub trait Delta {
-
-
-
-}
+pub trait Delta {}
 
 #[cfg(test)]
 mod tests {
@@ -342,7 +353,7 @@ mod tests {
                     ((source.as_bytes()[index] as usize + 1) & 255) as u8
             }
             let block = [0; WINDOW];
-            let source_sig = Signature::signature(source.as_bytes(), block)?;
+            let source_sig = Signature::signature(source.as_bytes(), block, None)?;
             // println!("source_sig: {:?}", source_sig);
             // let mut blocks = Vec::new();
             let mut delta = delta_mem::DeltaMem::new(WINDOW);
@@ -408,9 +419,9 @@ mod tests {
     fn t_signature_large_file() -> Result<(), failure::Error> {
         log_util::setup_logger_empty();
         let start = Instant::now();
-        let test_dir = tutil::create_a_dir_and_a_file_with_len("xx.bin", 1024*1024*4)?;
+        let test_dir = tutil::create_a_dir_and_a_file_with_len("xx.bin", 1024 * 1024 * 4)?;
         let demo_file = test_dir.tmp_file_str()?;
-        let mut sig = Signature::signature_a_file(&demo_file, Some(4096))?;
+        let mut sig = Signature::signature_a_file(&demo_file, Some(4096), false)?;
 
         let sig_out = "target/cc.sig";
         sig.write_to_file(sig_out)?;

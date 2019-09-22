@@ -444,7 +444,7 @@ fn main() -> Result<(), failure::Error> {
                     .value_of("out")
                     .unwrap_or_else(|| sig_file.as_str());
                 let start = Instant::now();
-                match rustsync::Signature::signature_a_file(file, block_size) {
+                match rustsync::Signature::signature_a_file(file, block_size, true) {
                     Ok(mut sig) => {
                         if let Err(err) = sig.write_to_file(out) {
                             error!("rsync signature write_to_file failed: {:?}", err);
