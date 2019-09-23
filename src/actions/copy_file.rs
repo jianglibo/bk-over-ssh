@@ -342,7 +342,7 @@ pub fn copy_a_file_item<'a>(
     sftp: &ssh2::Sftp,
     file_item: FileItem<'a>,
     buf: &mut [u8],
-    pb_op: Option<&ProgressBar>,
+    pb_op: Option<&(ProgressBar, ProgressBar)>,
 ) -> FileItemProcessResult {
     let mut received = 0_u64;
     let item_len = file_item.get_remote_item().get_len();
@@ -351,15 +351,15 @@ pub fn copy_a_file_item<'a>(
         let cb = if pb_op.is_some() {
             Some(|length| {
                 received += length;
-                if let Some(pb) = pb_op {
+                if let Some((_pb_total, pb_item)) = pb_op {
                     let message = format!(
                         "{}/{} - {}",
                         HumanBytes(received),
                         HumanBytes(item_len),
                         item_path,
                     );
-                    pb.set_message(message.as_str());
-                    pb.inc(length);
+                    pb_item.set_message(message.as_str());
+                    pb_item.inc(length);
                 }
             })
         } else {

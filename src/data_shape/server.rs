@@ -184,7 +184,7 @@ pub struct Server {
     #[serde(skip)]
     pub multi_bar: Option<SharedMpb>,
     #[serde(skip)]
-    pub pb: Option<ProgressBar>,
+    pub pb: Option<(ProgressBar, ProgressBar)>,
 }
 
 impl Server {
@@ -210,6 +210,13 @@ impl Server {
             );
         }
         Ok(())
+    }
+
+    pub fn pb_finish(&self) {
+        if let Some((pb_total, pb_item)) = self.pb.as_ref() {
+            pb_total.finish();
+            pb_item.finish_and_clear();
+        }
     }
 
     pub fn dir_equals(&self, another: &Server) -> bool {
@@ -341,11 +348,17 @@ impl Server {
         }
 
         if let Some(mb) = server.multi_bar.as_ref() {
-            let pb = ProgressBar::new(!0);
+            let pb_total = ProgressBar::new(!0);
             let ps = ProgressStyle::default_spinner(); // {spinner} {msg}
-            pb.set_style(ps);
-            let pb = mb.add(pb);
-            server.pb = Some(pb);
+            pb_total.set_style(ps);
+            let pb_total = mb.add(pb_total);
+
+            let pb_item = ProgressBar::new(!0);
+            let ps = ProgressStyle::default_spinner(); // {spinner} {msg}
+            pb_item.set_style(ps);
+            let pb_item = mb.add(pb_item);
+
+            server.pb = Some((pb_total, pb_item));
         }
         let data_dir = data_dir.as_ref();
         let maybe_local_server_base_dir = data_dir.join(&server.host);
@@ -715,10 +728,14 @@ impl Server {
         });
         let total_count = count_and_len_op.map(|cl| cl.0).unwrap_or_default();
 
-        if let Some(pb) = self.pb.as_ref() {
-            let style = ProgressStyle::default_bar().template("[{eta_precise}] {prefix:.bold.dim} {bytes_per_sec} {decimal_bytes}/{decimal_total_bytes} {bar:30.cyan/blue} {spinner} {wide_msg}").progress_chars("#-");
-            pb.set_length(count_and_len_op.map(|cl| cl.1).unwrap_or(0u64));
-            pb.set_style(style);
+        if let Some((pb_total, pb_item)) = self.pb.as_ref() {
+            // let style = ProgressStyle::default_bar().template("[{eta_precise}] {prefix:.bold.dim} {bytes_per_sec} {decimal_bytes}/{decimal_total_bytes} {bar:30.cyan/blue} {spinner} {wide_msg}").progress_chars("#-");
+            let style = ProgressStyle::default_bar().template("[{eta_precise}] {prefix:.bold.dim} {bytes_per_sec} {decimal_bytes}/{decimal_total_bytes} {bar:30.cyan/blue} {wide_msg}").progress_chars("#-");
+            pb_total.set_length(count_and_len_op.map(|cl| cl.1).unwrap_or(0u64));
+            pb_total.set_style(style);
+
+            let style = ProgressStyle::default_bar().template("[{eta_precise}] {bytes_per_sec} {decimal_bytes}/{decimal_total_bytes} {bar:30.cyan/blue} {percent}").progress_chars("#-");
+            pb_item.set_style(style);
         }
 
         let sftp = self.session.as_ref().unwrap().sftp()?;
@@ -750,20 +767,22 @@ impl Server {
                                 let local_item =
                                     FileItem::new(ld, rd.as_str(), remote_item, sync_type);
                                 consume_count += 1;
-
-                                if let Some(pb) = self.pb.as_ref() {
-                                    let prefix = format!(
-                                        "[{}]{}, ",
-                                        self.host.as_str(),
-                                        total_count - consume_count,
-                                    );
-                                    pb.set_prefix(prefix.as_str());
+                                if let Some((_pb_total, pb_item)) = self.pb.as_ref() {
+                                    pb_item.reset();
+                                    pb_item.set_length(remote_len);
+                                    pb_item.set_message(local_item.get_remote_item().get_path());
                                 }
 
                                 let r = if local_item.had_changed() {
                                     remote_len = 0;
                                     trace!("file had changed. start copy_a_file_item.");
-                                    copy_a_file_item(&self, &sftp, local_item, &mut buff, self.pb.as_ref())
+                                    copy_a_file_item(
+                                        &self,
+                                        &sftp,
+                                        local_item,
+                                        &mut buff,
+                                        self.pb.as_ref(),
+                                    )
                                 } else {
                                     trace!("file hadn't changed. skip.");
                                     FileItemProcessResult::Skipped(
@@ -772,10 +791,14 @@ impl Server {
                                         ),
                                     )
                                 };
-                                if let Some(pb) = self.pb.as_ref() {
-                                    if remote_len > 0 {
-                                        pb.inc(remote_len)
-                                    }
+                                if let Some((pb_total, _pb_item)) = self.pb.as_ref() {
+                                    let prefix = format!(
+                                        "[{}]{}, ",
+                                        self.host.as_str(),
+                                        total_count - consume_count,
+                                    );
+                                    pb_total.set_prefix(prefix.as_str());
+                                    pb_total.inc(remote_len);
                                 }
                                 r
                             }
@@ -842,9 +865,7 @@ impl Server {
         self.connect()?;
         let rs = self.start_sync_working_file_list(skip_sha1)?;
         self.remove_working_file_list_file();
-        if let Some(pb) = self.pb.as_ref() {
-            pb.finish_and_clear();
-        }
+        self.pb_finish();
         Ok(SyncDirReport::new(start.elapsed(), rs))
     }
 
