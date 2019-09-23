@@ -19,6 +19,9 @@ mod log_util;
 mod mail;
 mod rustsync;
 
+#[macro_use]
+extern crate rusqlite;
+
 use crate::rustsync::DeltaWriter;
 // use std::borrow::Cow::{self, Borrowed, Owned};
 

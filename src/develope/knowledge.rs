@@ -321,7 +321,7 @@ mod tests1 {
         conn.execute(
             "INSERT INTO person (name, time_created, data)
                   VALUES (?1, ?2, ?3)",
-            &[&me.name as &ToSql, &me.time_created, &me.data],
+            params![me.name, me.time_created, me.data]
         )?;
 
         let mut stmt = conn.prepare("SELECT id, name, time_created, data FROM person")?;

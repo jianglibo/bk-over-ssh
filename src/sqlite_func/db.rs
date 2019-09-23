@@ -59,7 +59,7 @@ mod tests {
             sha1: None,
             len: 55,
             time_modified: None,
-            time_created: Some(now.clone()),
+            time_created: Some(now),
         };
 
     let count  = conn.execute(

@@ -18,8 +18,6 @@ use std::time::Instant;
 use std::{fs, io, io::Seek};
 use tar::Builder;
 
-// pub type FileItemPb = ProgressBar<Pipe>;
-
 #[derive(Deserialize, Serialize, Debug)]
 #[serde(rename_all(deserialize = "snake_case"))]
 pub enum ServerRole {
@@ -152,7 +150,7 @@ pub enum CompressionImpl {
 #[derive(Deserialize, Serialize)]
 pub struct Server {
     pub id_rsa: String,
-    pub id_rsa_pub: String,
+    pub id_rsa_pub: Option<String>,
     pub auth_method: AuthMethod,
     pub host: String,
     pub port: u16,
@@ -563,7 +561,7 @@ impl Server {
                     );
                     sess.userauth_pubkey_file(
                         &self.username,
-                        Some(Path::new(&self.id_rsa_pub)),
+                        self.id_rsa_pub.as_ref().map(Path::new),
                         Path::new(&self.id_rsa),
                         None,
                     )?;
