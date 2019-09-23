@@ -735,7 +735,7 @@ impl Server {
             pb_total.set_length(count_and_len_op.map(|cl| cl.1).unwrap_or(0u64));
             pb_total.set_style(style);
 
-            let style = ProgressStyle::default_bar().template("{bytes_per_sec} {decimal_bytes}/{decimal_total_bytes} {bar:30.cyan/blue} {wide_msg} {percent}% {eta}").progress_chars("#-");
+            let style = ProgressStyle::default_bar().template("{bytes_per_sec} {decimal_bytes}/{decimal_total_bytes} {spinner} {percent}% {eta} {wide_msg}").progress_chars("#-");
             pb_item.set_style(style);
         }
 
@@ -773,7 +773,7 @@ impl Server {
                                     pb_item.set_length(remote_len);
                                     pb_item.set_message(local_item.get_remote_item().get_path());
                                 }
-
+                                let mut skiped = false;
                                 let r = if local_item.had_changed() {
                                     trace!("file had changed. start copy_a_file_item.");
                                     copy_a_file_item(
@@ -784,13 +784,14 @@ impl Server {
                                         self.pb.as_ref(),
                                     )
                                 } else {
+                                    skiped = true;
                                     FileItemProcessResult::Skipped(
                                         local_item.get_local_path_str().expect(
                                             "get_local_path_str should has some at thia point.",
                                         ),
                                     )
                                 };
-                                if let Some((pb_total, _pb_item)) = self.pb.as_ref() {
+                                if let Some((pb_total, pb_item)) = self.pb.as_ref() {
                                     let prefix = format!(
                                         "[{}] {}/{} ",
                                         self.host.as_str(),
@@ -798,7 +799,10 @@ impl Server {
                                         total_count
                                     );
                                     pb_total.set_prefix(prefix.as_str());
-                                    pb_total.inc(remote_len);
+                                    pb_total.inc(remote_len); // no matter skiped or processed.
+                                    if skiped {
+                                        pb_item.inc(remote_len);
+                                    }
                                 }
                                 r
                             }
