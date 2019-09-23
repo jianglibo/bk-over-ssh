@@ -47,6 +47,10 @@ mod tests {
         } else {
             assert!(false, "should throw exception.");
         }
+
+        // 2019-09-22 13:56:08.410951111 UTC
+        let now = Utc::now();
+        // 2019-09-22T14:07:21.722444951Z
         
         // https://sqlite.org/autoinc.html
         let me = RemoteFileItemInDb {
@@ -55,7 +59,7 @@ mod tests {
             sha1: None,
             len: 55,
             time_modified: None,
-            time_created: Some(Utc::now()),
+            time_created: Some(now.clone()),
         };
 
     let count  = conn.execute(
@@ -67,12 +71,13 @@ mod tests {
 
     assert_eq!(count, 1, "should effect one item.");
     let mut stmt = conn
-        .prepare("SELECT id, path FROM remote_file_item")?;
+        .prepare("SELECT id, path, time_created FROM remote_file_item")?;
 
     let person_iter = stmt.query_map(NO_PARAMS, |row|
          Ok(RemoteFileItemInDb {
             id: row.get(0)?,
             path: row.get(1)?,
+            time_created: row.get(2)?,
             ..RemoteFileItemInDb::default()
             // sha1: row.get(2)?,
             // len: row.get(3)?,
@@ -80,26 +85,28 @@ mod tests {
             // time_created: row.get(5)?,
         })
     )?;
-        // 2019-09-22 13:56:08.410951111 UTC
-        let now = Utc::now();
-        // 2019-09-22T14:07:21.722444951Z
 
-        let ts = format!("{:?}", now);
-        assert_ne!(ts, now.to_rfc3339());
-        assert_eq!(ts, now.to_rfc3339_opts(SecondsFormat::Nanos, true));
-        println!("{}", ts);
 
-        let now1 = DateTime::<Utc>::from_str(ts.as_str());
+        let ts_debug = format!("{:?}", now); // equal to to_rfc3339_opts.
+        assert_ne!(ts_debug, now.to_rfc3339());
+        assert_eq!(ts_debug, now.to_rfc3339_opts(SecondsFormat::Nanos, true));
+        println!("{}", ts_debug);
+
+        let now1 = DateTime::<Utc>::from_str(ts_debug.as_str());
 
         assert_eq!(Ok(now), now1);
-        
 
-        let c = person_iter.filter_map(|pp|pp.ok()).collect::<Vec<RemoteFileItemInDb>>();
+        let c = person_iter.filter_map(|pp|{match pp {
+            Ok(pp) => Some(pp),
+            Err(err) => {println!("{:?}", err); None}
+        }}).collect::<Vec<RemoteFileItemInDb>>();
         assert_eq!(c.len(), 1, "should exist one item.");
 
-        assert_eq!(c.get(0).unwrap().id, 1, "id should automatically increased to 1.");
+        assert_eq!(c.get(0).as_ref().unwrap().id, 1, "id should automatically increased to 1.");
 
-        assert_eq!(c.get(0).unwrap().path, "abc");
+        assert_eq!(c.get(0).as_ref().unwrap().path, "abc");
+
+        assert_eq!(c.get(0).as_ref().unwrap().time_created, Some(now), "archive from db should be same.");
         
 
         Ok(())

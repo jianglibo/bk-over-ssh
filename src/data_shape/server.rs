@@ -751,6 +751,14 @@ impl Server {
                                     FileItem::new(ld, rd.as_str(), remote_item, sync_type);
                                 consume_count += 1;
 
+                                if let Some(pb) = self.pb.as_ref() {
+                                    let prefix = format!(
+                                        "[{}]{}, ",
+                                        self.host.as_str(),
+                                        total_count - consume_count,
+                                    );
+                                    pb.set_prefix(prefix.as_str());
+                                }
 
                                 let r = if local_item.had_changed() {
                                     remote_len = 0;
@@ -765,12 +773,6 @@ impl Server {
                                     )
                                 };
                                 if let Some(pb) = self.pb.as_ref() {
-                                    let prefix = format!(
-                                        "[{}]{}, ",
-                                        self.host.as_str(),
-                                        total_count - consume_count,
-                                    );
-                                    pb.set_prefix(prefix.as_str());
                                     if remote_len > 0 {
                                         pb.inc(remote_len)
                                     }

@@ -141,43 +141,6 @@ pub fn copy_stream_to_file_return_sha1_with_cb<T: AsRef<Path>, F: FnMut(u64) -> 
 }
 
 #[allow(dead_code)]
-pub fn copy_stream_to_file_return_sha1<T: AsRef<Path>>(
-    from: &mut impl std::io::Read,
-    to_file: T,
-    buf_len: usize,
-    mut fi_pb_op: Option<&ProgressBar>,
-) -> Result<(u64, String), failure::Error> {
-    let u8_buf = &mut vec![0; buf_len];
-    let mut length = 0_u64;
-    let mut hasher = Sha1::new();
-    let path = to_file.as_ref();
-    if let Some(pp) = path.parent() {
-        if !pp.exists() {
-            fs::create_dir_all(pp)?;
-        }
-    }
-    let mut wf = fs::OpenOptions::new().create(true).write(true).open(path)?;
-    loop {
-        match from.read(&mut u8_buf[..]) {
-            Ok(n) if n > 0 => {
-                length += n as u64;
-                wf.write_all(&u8_buf[..n])?;
-                hasher.input(&u8_buf[..n]);
-                if let Some(mypb) = fi_pb_op.as_mut() {
-                    mypb.inc(n.try_into().unwrap())
-                }
-            }
-            _ => break,
-        }
-    }
-    ensure!(path.exists(), "write_stream_to_file should be done.");
-    if let Some(fpo) = fi_pb_op {
-        fpo.finish();
-    }
-    Ok((length, format!("{:X}", hasher.result())))
-}
-
-#[allow(dead_code)]
 pub fn write_str_to_file(
     content: impl AsRef<str>,
     to_file: impl AsRef<OsStr>,

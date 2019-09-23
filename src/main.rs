@@ -149,6 +149,7 @@ fn process_app_config(
 fn sync_dirs<'a>(
     app_conf: &AppConf,
     sub_matches: &'a clap::ArgMatches<'a>,
+    console_log: bool,
 ) -> Result<(), failure::Error> {
     let mut servers: Vec<Server> = Vec::new();
     let skip_sha1 = sub_matches.is_present("skip-sha1");
@@ -201,9 +202,11 @@ fn sync_dirs<'a>(
         .for_each(|mut server| match server.sync_dirs(skip_sha1) {
             Ok(result) => {
                 actions::write_dir_sync_result(&server, &result);
-                let result_yml = serde_yaml::to_string(&result)
-                    .expect("SyncDirReport should deserialize success.");
-                println!("{}:\n{}", server.host, result_yml);
+                if console_log {
+                    let result_yml = serde_yaml::to_string(&result)
+                        .expect("SyncDirReport should deserialize success.");
+                    println!("{}:\n{}", server.host, result_yml);
+                }
             }
             Err(err) => println!("sync-dirs failed: {:?}", err),
         });
@@ -235,7 +238,7 @@ fn main() -> Result<(), failure::Error> {
             send_test_mail(&app_conf.mail_conf, to)?;
         }
         ("sync-dirs", Some(sub_matches)) => {
-            sync_dirs(&app_conf, sub_matches)?;
+            sync_dirs(&app_conf, sub_matches, console_log)?;
         }
         ("copy-executable", Some(sub_matches)) => {
             let mut server = app_conf.load_server_yml(parse_server_yml(sub_matches), None, None)?;
