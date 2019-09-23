@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
-    use super::super::super::log_util;
-    use crate::actions::copy_stream_to_file_return_sha1;
+    use crate::actions::copy_stream_to_file_return_sha1_with_cb;
+use super::super::super::log_util;
     use crate::data_shape::Server;
     use crate::develope::tutil;
     use askama::Template;
@@ -169,7 +169,9 @@ mod tests {
         let sess = server.get_ssh_session();
         let mut channel: ssh2::Channel = sess.channel_session().unwrap();
         channel.exec("ls").unwrap();
-        copy_stream_to_file_return_sha1(&mut channel, "not_in_git/t.txt", 8192, None)?;
+        let mut buf = vec![0;8192];
+        let cb = |_i: u64|{};
+        copy_stream_to_file_return_sha1_with_cb(&mut channel, "not_in_git/t.txt", &mut buf, Some(cb))?;
         Ok(())
     }
 
