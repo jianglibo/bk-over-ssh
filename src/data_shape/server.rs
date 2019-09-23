@@ -215,7 +215,8 @@ impl Server {
     pub fn pb_finish(&self) {
         if let Some((pb_total, pb_item)) = self.pb.as_ref() {
             pb_total.finish();
-            pb_item.finish_and_clear();
+            pb_item.finish();
+            // pb_item.finish_and_clear();
         }
     }
 
@@ -730,11 +731,11 @@ impl Server {
 
         if let Some((pb_total, pb_item)) = self.pb.as_ref() {
             // let style = ProgressStyle::default_bar().template("[{eta_precise}] {prefix:.bold.dim} {bytes_per_sec} {decimal_bytes}/{decimal_total_bytes} {bar:30.cyan/blue} {spinner} {wide_msg}").progress_chars("#-");
-            let style = ProgressStyle::default_bar().template("[{eta_precise}] {prefix:.bold.dim} {bytes_per_sec} {decimal_bytes}/{decimal_total_bytes} {bar:30.cyan/blue} {wide_msg}").progress_chars("#-");
+            let style = ProgressStyle::default_bar().template("{prefix} {bytes_per_sec} {decimal_bytes}/{decimal_total_bytes} {bar:30.cyan/blue} {percent}% {eta}").progress_chars("#-");
             pb_total.set_length(count_and_len_op.map(|cl| cl.1).unwrap_or(0u64));
             pb_total.set_style(style);
 
-            let style = ProgressStyle::default_bar().template("[{eta_precise}] {bytes_per_sec} {decimal_bytes}/{decimal_total_bytes} {bar:30.cyan/blue} {percent}").progress_chars("#-");
+            let style = ProgressStyle::default_bar().template("{bytes_per_sec} {decimal_bytes}/{decimal_total_bytes} {bar:30.cyan/blue} {wide_msg} {percent}% {eta}").progress_chars("#-");
             pb_item.set_style(style);
         }
 
@@ -756,7 +757,7 @@ impl Server {
                     if let (Some(rd), Some(ld)) = (current_remote_dir.as_ref(), current_local_dir) {
                         match serde_json::from_str::<RemoteFileItem>(&line) {
                             Ok(remote_item) => {
-                                let mut remote_len = remote_item.get_len();
+                                let remote_len = remote_item.get_len();
                                 let sync_type = if self.rsync_valve > 0
                                     && remote_item.get_len() > self.rsync_valve
                                 {
@@ -774,7 +775,6 @@ impl Server {
                                 }
 
                                 let r = if local_item.had_changed() {
-                                    remote_len = 0;
                                     trace!("file had changed. start copy_a_file_item.");
                                     copy_a_file_item(
                                         &self,
@@ -784,7 +784,6 @@ impl Server {
                                         self.pb.as_ref(),
                                     )
                                 } else {
-                                    trace!("file hadn't changed. skip.");
                                     FileItemProcessResult::Skipped(
                                         local_item.get_local_path_str().expect(
                                             "get_local_path_str should has some at thia point.",
@@ -793,9 +792,10 @@ impl Server {
                                 };
                                 if let Some((pb_total, _pb_item)) = self.pb.as_ref() {
                                     let prefix = format!(
-                                        "[{}]{}, ",
+                                        "[{}] {}/{} ",
                                         self.host.as_str(),
                                         total_count - consume_count,
+                                        total_count
                                     );
                                     pb_total.set_prefix(prefix.as_str());
                                     pb_total.inc(remote_len);
