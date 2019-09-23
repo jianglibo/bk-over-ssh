@@ -215,8 +215,8 @@ impl Server {
     pub fn pb_finish(&self) {
         if let Some((pb_total, pb_item)) = self.pb.as_ref() {
             pb_total.finish();
-            pb_item.finish();
-            // pb_item.finish_and_clear();
+            // pb_item.finish();
+            pb_item.finish_and_clear();
         }
     }
 
