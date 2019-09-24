@@ -42,9 +42,10 @@ use std::env;
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
-use std::{fs, io, io::Write};
+use std::{fs, io, io::Write, io::BufRead};
 
 use data_shape::{AppConf, Server, CONF_FILE_NAME};
+use actions::{SyncDirReport};
 
 fn parse_server_yml<'a>(sub_sub_matches: &'a clap::ArgMatches<'a>) -> &'a str {
     sub_sub_matches.value_of("server-yml").unwrap()
@@ -254,6 +255,18 @@ fn main() -> Result<(), failure::Error> {
                 server.host.as_str(),
                 remote
             );
+        }
+        ("print-report", Some(sub_matches)) => {
+            let server = app_conf.load_server_yml(parse_server_yml(sub_matches), None, None)?;
+            let fbuf = io::BufReader::new(fs::OpenOptions::new().read(true).open(server.get_dir_sync_report_file())?);
+
+            if let Some(line) = fbuf.lines().last() {
+                let line = line?;
+                let sdr: SyncDirReport = serde_json::from_str(line.as_str())?;
+                println!("{}", serde_yaml::to_string(&sdr)?);
+            } else {
+                println!("empty report file.");
+            }
         }
         ("copy-server-yml", Some(sub_matches)) => {
             let mut server = app_conf.load_server_yml(parse_server_yml(sub_matches), None, None)?;

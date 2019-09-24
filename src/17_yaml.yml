@@ -117,6 +117,12 @@ subcommands:
             - server-yml:
                 required: true
                 index: 1
+    - print-report:
+        about: print out last execution report.
+        args:
+            - server-yml:
+                required: true
+                index: 1
     - verify-server-yml:
         about: verify if remote executable exists and remote server yml configuration file exists.
         args:

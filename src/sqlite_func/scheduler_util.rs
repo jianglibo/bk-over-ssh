@@ -99,4 +99,17 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn t_n_sort() {
+        let mut vs = vec!["data_20190826.tar.gz", "data_20190923.tar.gz", "data_20190901.tar.gz"];
+        vs.sort();
+        assert_eq!(Some("data_20190826.tar.gz").as_ref(), vs.first());
+        assert_eq!(Some("data_20190923.tar.gz").as_ref(), vs.last());
+
+        let mut vs = vec!["data_20190826.tar.gz", "data_20190923.tar.gz", "data_20190901.tar.gz"];
+        vs.reverse(); // reverse just reverse, don't sort.
+        assert_eq!(Some("data_20190901.tar.gz").as_ref(), vs.first());
+        assert_eq!(Some("data_20190826.tar.gz").as_ref(), vs.last());
+    }
+
 }
