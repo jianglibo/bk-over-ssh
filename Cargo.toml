@@ -42,6 +42,7 @@ rayon = "1.2.0"
 lettre = "0.9"
 lettre_email = "0.9"
 askama = "0.8"
+cron = "0.6.0"
 
 
 time = "0.1"
