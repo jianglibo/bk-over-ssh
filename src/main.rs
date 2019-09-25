@@ -42,10 +42,10 @@ use std::env;
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
-use std::{fs, io, io::Write, io::BufRead};
+use std::{fs, io, io::BufRead, io::Write};
 
+use actions::SyncDirReport;
 use data_shape::{AppConf, Server, CONF_FILE_NAME};
-use actions::{SyncDirReport};
 
 fn parse_server_yml<'a>(sub_sub_matches: &'a clap::ArgMatches<'a>) -> &'a str {
     sub_sub_matches.value_of("server-yml").unwrap()
@@ -150,6 +150,26 @@ fn process_app_config(
     Ok(app_conf)
 }
 
+fn delay<'a>(sub_matches: &'a clap::ArgMatches<'a>) {
+    let delay = sub_matches.value_of("delay");
+    if let Some(delay) = delay {
+        let delay = delay.parse::<u64>().expect("delay must be an integer.");
+        let style = ProgressStyle::default_bar().template("{bar:40} counting down {wide_msg}.").progress_chars("##-");
+        let pb = ProgressBar::new(delay).with_style(style);
+        thread::spawn(move || loop {
+            pb.inc(1);
+            let message = format!("{}", delay - pb.position());
+            pb.set_message(message.as_str());
+            thread::sleep(Duration::from_secs(1));
+            if pb.position() >= delay {
+                pb.finish_and_clear();
+                break
+            }
+        });
+        thread::sleep(Duration::from_secs(delay));
+    }
+}
+
 fn sync_dirs<'a>(
     app_conf: &AppConf,
     sub_matches: &'a clap::ArgMatches<'a>,
@@ -225,14 +245,27 @@ fn main() -> Result<(), failure::Error> {
     let yml = load_yaml!("17_yaml.yml");
     let app = App::from_yaml(yml);
     let m: ArgMatches = app.get_matches();
-
-    let mut app1 = App::from_yaml(yml);
-
-    let conf = m.value_of("conf");
+    let app1 = App::from_yaml(yml);
     let console_log = m.is_present("console-log");
 
-    let app_conf = process_app_config(conf, console_log, false)?;
+    let conf = m.value_of("conf");
 
+    let app_conf = process_app_config(conf, console_log, false)?;
+    app_conf.lock_working_file()?;
+    delay(&m);
+    if let Err(err) = main_entry(app1, &app_conf, &m, console_log) {
+        error!("main return error: {:?}", err);
+    }
+    app_conf.unlock_working_file();
+    Ok(())
+}
+
+fn main_entry<'a>(
+    mut app1: App,
+    app_conf: &AppConf,
+    m: &'a clap::ArgMatches<'a>,
+    console_log: bool,
+) -> Result<(), failure::Error> {
     match m.subcommand() {
         ("pbr", Some(_sub_matches)) => {
             demonstrate_pbr()?;
@@ -258,7 +291,11 @@ fn main() -> Result<(), failure::Error> {
         }
         ("print-report", Some(sub_matches)) => {
             let server = app_conf.load_server_yml(parse_server_yml(sub_matches), None, None)?;
-            let fbuf = io::BufReader::new(fs::OpenOptions::new().read(true).open(server.get_dir_sync_report_file())?);
+            let fbuf = io::BufReader::new(
+                fs::OpenOptions::new()
+                    .read(true)
+                    .open(server.get_dir_sync_report_file())?,
+            );
 
             if let Some(line) = fbuf.lines().last() {
                 let line = line?;

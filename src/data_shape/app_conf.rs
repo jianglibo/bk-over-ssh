@@ -101,6 +101,28 @@ impl AppConf {
             .expect("data_dir_full_path should always available.")
     }
 
+    fn get_working_lock_file(&self) -> PathBuf {
+        self.get_data_dir().join("working.lock")
+    }
+
+    pub fn lock_working_file(&self) -> Result<(), failure::Error> {
+        let lof = self.get_working_lock_file();
+        if  lof.exists() {
+            bail!("create lock file failed: {:?}, if you can sure app isn't running, you can delete it manually.", lof);
+        } else {
+            fs::OpenOptions::new().write(true).create(true).open(lof)?;
+        }
+        Ok(())
+    }
+    pub fn unlock_working_file(&self) {
+        let lof = self.get_working_lock_file();
+        if  lof.exists() {
+            if let Err(err) = fs::remove_file(lof.as_path()) {
+                warn!("remove lock file failed: {:?}, {:?}", lof, err);
+            }
+        }
+    }
+
     pub fn validate_conf(&mut self) -> Result<(), failure::Error> {
         if self.data_dir.trim().is_empty() {
             self.data_dir = "data".to_string();

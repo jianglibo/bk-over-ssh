@@ -34,6 +34,11 @@ args:
         help: enable console log output.
         long: console-log
         required: false
+    - delay:
+        help: delay seconds before execute command. for test purpose.
+        long: delay
+        takes_value: true
+        required: false
     # - flag:
     #     help: demo flag argument
     #     short: F
