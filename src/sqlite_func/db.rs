@@ -2,6 +2,15 @@ use crate::data_shape::RemoteFileItem;
 use failure;
 use rusqlite::{Connection, Result as SqliteResult, NO_PARAMS, types::Null};
 use chrono::{DateTime, Datelike, Utc, SecondsFormat};
+use r2d2_sqlite::SqliteConnectionManager;
+use r2d2;
+use rusqlite::params;
+
+pub fn create_sqlite_pool(db_file: impl AsRef<str>) -> r2d2::Pool<SqliteConnectionManager> {
+    let db_file = db_file.as_ref();
+    let manager = SqliteConnectionManager::file(db_file);
+    r2d2::Pool::new(manager).unwrap()
+}
 
 #[derive(Debug, Default)]
 pub struct RemoteFileItemInDb {

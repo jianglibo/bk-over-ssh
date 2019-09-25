@@ -17,6 +17,8 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 use std::{fs, io, io::Seek};
 use tar::Builder;
+use r2d2;
+use r2d2_sqlite::SqliteConnectionManager;
 
 #[derive(Deserialize, Serialize, Debug)]
 #[serde(rename_all(deserialize = "snake_case"))]
@@ -148,7 +150,7 @@ pub enum CompressionImpl {
 }
 
 #[derive(Deserialize, Serialize)]
-pub struct Server {
+pub struct Server<M> {
     pub id_rsa: String,
     pub id_rsa_pub: Option<String>,
     pub auth_method: AuthMethod,
@@ -183,6 +185,8 @@ pub struct Server {
     pub multi_bar: Option<SharedMpb>,
     #[serde(skip)]
     pub pb: Option<(ProgressBar, ProgressBar)>,
+    #[serde(skip)]
+    pub pool: r2d2::Pool<M>,
 }
 
 impl Server {
