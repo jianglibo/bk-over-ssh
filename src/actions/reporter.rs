@@ -1,7 +1,8 @@
 use crate::data_shape::{FileItemProcessResultStats, Server};
 use log::*;
-use serde::{Serialize, Deserialize};
-use std::time::{Duration};
+use r2d2;
+use serde::{Deserialize, Serialize};
+use std::time::Duration;
 use std::{fs, io::Write};
 // fn ser_instant<S>(inst: &Instant, serer: S) -> Result<S::Ok, S::Error> where S: Serializer {
 //     let s = format!("{}", date.format(FORMAT));
@@ -51,7 +52,10 @@ impl SyncDirReport {
     }
 }
 
-pub fn write_dir_sync_result(server: &Server, result: &SyncDirReport) {
+pub fn write_dir_sync_result<M>(server: &Server<M>, result: &SyncDirReport)
+where
+    M: r2d2::ManageConnection,
+{
     let rp = &server.get_dir_sync_report_file();
     match fs::OpenOptions::new()
         .create(true)

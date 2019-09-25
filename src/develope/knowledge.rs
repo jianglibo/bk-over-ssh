@@ -11,6 +11,7 @@ use super::super::super::log_util;
     use std::net::TcpStream;
     use std::path::Path;
     use walkdir::WalkDir; // bring trait in scope
+use r2d2_sqlite::SqliteConnectionManager;
 
     #[derive(Template)] // this will generate the code...
     #[template(path = "hello.html")] // using the template in this path, relative
@@ -103,8 +104,8 @@ use super::super::super::log_util;
         }
     }
 
-    fn load_server_yml() -> Server {
-        Server::load_from_yml("data/servers", "data", "localhost.yml", None, None).unwrap()
+    fn load_server_yml() -> Server<SqliteConnectionManager> {
+        Server::<SqliteConnectionManager>::load_from_yml("data/servers", "data", "localhost.yml", None, None, None).unwrap()
     }
 
     #[test]

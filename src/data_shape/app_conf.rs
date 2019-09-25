@@ -1,10 +1,12 @@
 use crate::data_shape::Server;
-use crate::ioutil::{SharedMpb};
+use crate::ioutil::SharedMpb;
 use log::*;
+use r2d2_sqlite::SqliteConnectionManager;
 use serde::{Deserialize, Serialize};
 use std::env;
+use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc};
+use std::sync::Arc;
 use std::{fs, io::Read, io::Write};
 
 pub const CONF_FILE_NAME: &str = "bk_over_ssh.yml";
@@ -25,7 +27,10 @@ pub struct MailConf {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct AppConf {
+pub struct AppConf<M>
+where
+    M: r2d2::ManageConnection,
+{
     data_dir: String,
     log_conf: LogConf,
     pub mail_conf: MailConf,
@@ -35,10 +40,15 @@ pub struct AppConf {
     data_dir_full_path: Option<PathBuf>,
     #[serde(skip_deserializing)]
     log_full_path: Option<PathBuf>,
+    #[serde(skip)]
+    mc_type: PhantomData<M>,
 }
 
-impl AppConf {
-    fn read_app_conf(file: impl AsRef<Path>) -> Result<Option<AppConf>, failure::Error> {
+impl<M> AppConf<M>
+where
+    M: r2d2::ManageConnection,
+{
+    fn read_app_conf(file: impl AsRef<Path>) -> Result<Option<AppConf<M>>, failure::Error> {
         if !file.as_ref().exists() {
             return Ok(None);
         }
@@ -46,7 +56,7 @@ impl AppConf {
         if let Ok(mut f) = fs::OpenOptions::new().read(true).open(file) {
             let mut buf = String::new();
             if f.read_to_string(&mut buf).is_ok() {
-                match serde_yaml::from_str::<AppConf>(&buf) {
+                match serde_yaml::from_str::<AppConf<M>>(&buf) {
                     Ok(mut app_conf) => {
                         app_conf.config_file_path.replace(file.to_path_buf());
                         Ok(Some(app_conf))
@@ -70,7 +80,9 @@ impl AppConf {
     }
 
     /// If no conf file provided, first look at the same directory as execuable, then current working directory.
-    pub fn guess_conf_file(app_conf_file: Option<&str>) -> Result<Option<AppConf>, failure::Error> {
+    pub fn guess_conf_file(
+        app_conf_file: Option<&str>,
+    ) -> Result<Option<AppConf<M>>, failure::Error> {
         if let Some(af) = app_conf_file {
             return AppConf::read_app_conf(af);
         } else {
@@ -107,7 +119,7 @@ impl AppConf {
 
     pub fn lock_working_file(&self) -> Result<(), failure::Error> {
         let lof = self.get_working_lock_file();
-        if  lof.exists() {
+        if lof.exists() {
             bail!("create lock file failed: {:?}, if you can sure app isn't running, you can delete it manually.", lof);
         } else {
             fs::OpenOptions::new().write(true).create(true).open(lof)?;
@@ -116,7 +128,7 @@ impl AppConf {
     }
     pub fn unlock_working_file(&self) {
         let lof = self.get_working_lock_file();
-        if  lof.exists() {
+        if lof.exists() {
             if let Err(err) = fs::remove_file(lof.as_path()) {
                 warn!("remove lock file failed: {:?}, {:?}", lof, err);
             }
@@ -168,9 +180,15 @@ impl AppConf {
         yml_file_name: impl AsRef<str>,
         buf_len: Option<usize>,
         multi_bar: Option<SharedMpb>,
-    ) -> Result<Server, failure::Error> {
-        let server =
-            Server::load_from_yml_with_app_config(&self, yml_file_name.as_ref(), buf_len, multi_bar)?;
+        pool: Option<r2d2::Pool<M>>,
+    ) -> Result<Server<M>, failure::Error> {
+        let server = Server::<M>::load_from_yml_with_app_config(
+            &self,
+            yml_file_name.as_ref(),
+            buf_len,
+            multi_bar,
+            pool,
+        )?;
         println!(
             "load server yml from: {}",
             server
@@ -185,7 +203,8 @@ impl AppConf {
         &self,
         buf_len: Option<usize>,
         multi_bar: Option<SharedMpb>,
-    ) -> Vec<Server> {
+        mut pool: Option<r2d2::Pool<M>>,
+    ) -> Vec<Server<M>> {
         if let Ok(rd) = self.get_servers_dir().read_dir() {
             rd.filter_map(|ery| match ery {
                 Err(err) => {
@@ -201,7 +220,14 @@ impl AppConf {
                 }
                 Ok(astr) => Some(astr),
             })
-            .map(|astr| self.load_server_yml(astr, buf_len, multi_bar.as_ref().map(Arc::clone)))
+            .map(|astr| {
+                self.load_server_yml(
+                    astr,
+                    buf_len,
+                    multi_bar.as_ref().map(Arc::clone),
+                    pool.as_mut().cloned(),
+                )
+            })
             .filter_map(|rr| match rr {
                 Err(err) => {
                     warn!("load_server_yml failed: {:?}", err);
@@ -242,7 +268,7 @@ mod tests {
     fn t_app_conf_deserd() -> Result<(), failure::Error> {
         let yml = r##"---
 servers_dir: abc"##;
-        let app_conf = serde_yaml::from_str::<AppConf>(&yml)?;
+        let app_conf = serde_yaml::from_str::<AppConf<SqliteConnectionManager>>(&yml)?;
         assert_eq!(app_conf.get_servers_dir(), Path::new("abc"));
 
         let ymld = serde_yaml::to_string(&app_conf)?;

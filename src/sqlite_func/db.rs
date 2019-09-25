@@ -1,10 +1,10 @@
 use crate::data_shape::RemoteFileItem;
+use chrono::{DateTime, Datelike, SecondsFormat, Utc};
 use failure;
-use rusqlite::{Connection, Result as SqliteResult, NO_PARAMS, types::Null};
-use chrono::{DateTime, Datelike, Utc, SecondsFormat};
-use r2d2_sqlite::SqliteConnectionManager;
 use r2d2;
+use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::params;
+use rusqlite::{types::Null, Connection, Result as SqliteResult, NO_PARAMS};
 
 pub fn create_sqlite_pool(db_file: impl AsRef<str>) -> r2d2::Pool<SqliteConnectionManager> {
     let db_file = db_file.as_ref();
@@ -60,7 +60,6 @@ mod tests {
         // 2019-09-22 13:56:08.410951111 UTC
         let now = Utc::now();
         // 2019-09-22T14:07:21.722444951Z
-        
         // https://sqlite.org/autoinc.html
         let me = RemoteFileItemInDb {
             id: 0,
@@ -71,30 +70,27 @@ mod tests {
             time_created: Some(now),
         };
 
-    let count  = conn.execute(
-        "INSERT INTO remote_file_item (path, time_created)
+        let count = conn.execute(
+            "INSERT INTO remote_file_item (path, time_created)
                   VALUES (?1, ?2)",
-        // &[&me.path, &me.sha1 as &ToSql, &Null, &Null, &me.time_created as &ToSql],
-        params![me.path, me.time_created]
-    )?;
+            // &[&me.path, &me.sha1 as &ToSql, &Null, &Null, &me.time_created as &ToSql],
+            params![me.path, me.time_created],
+        )?;
 
-    assert_eq!(count, 1, "should effect one item.");
-    let mut stmt = conn
-        .prepare("SELECT id, path, time_created FROM remote_file_item")?;
+        assert_eq!(count, 1, "should effect one item.");
+        let mut stmt = conn.prepare("SELECT id, path, time_created FROM remote_file_item")?;
 
-    let person_iter = stmt.query_map(NO_PARAMS, |row|
-         Ok(RemoteFileItemInDb {
-            id: row.get(0)?,
-            path: row.get(1)?,
-            time_created: row.get(2)?,
-            ..RemoteFileItemInDb::default()
-            // sha1: row.get(2)?,
-            // len: row.get(3)?,
-            // time_modified: row.get(4)?,
-            // time_created: row.get(5)?,
-        })
-    )?;
-
+        let person_iter = stmt.query_map(NO_PARAMS, |row| {
+            Ok(RemoteFileItemInDb {
+                id: row.get(0)?,
+                path: row.get(1)?,
+                time_created: row.get(2)?,
+                ..RemoteFileItemInDb::default() // sha1: row.get(2)?,
+                                                // len: row.get(3)?,
+                                                // time_modified: row.get(4)?,
+                                                // time_created: row.get(5)?,
+            })
+        })?;
 
         let ts_debug = format!("{:?}", now); // equal to to_rfc3339_opts.
         assert_ne!(ts_debug, now.to_rfc3339());
@@ -105,18 +101,30 @@ mod tests {
 
         assert_eq!(Ok(now), now1);
 
-        let c = person_iter.filter_map(|pp|{match pp {
-            Ok(pp) => Some(pp),
-            Err(err) => {println!("{:?}", err); None}
-        }}).collect::<Vec<RemoteFileItemInDb>>();
+        let c = person_iter
+            .filter_map(|pp| match pp {
+                Ok(pp) => Some(pp),
+                Err(err) => {
+                    println!("{:?}", err);
+                    None
+                }
+            })
+            .collect::<Vec<RemoteFileItemInDb>>();
         assert_eq!(c.len(), 1, "should exist one item.");
 
-        assert_eq!(c.get(0).as_ref().unwrap().id, 1, "id should automatically increased to 1.");
+        assert_eq!(
+            c.get(0).as_ref().unwrap().id,
+            1,
+            "id should automatically increased to 1."
+        );
 
         assert_eq!(c.get(0).as_ref().unwrap().path, "abc");
 
-        assert_eq!(c.get(0).as_ref().unwrap().time_created, Some(now), "archive from db should be same.");
-        
+        assert_eq!(
+            c.get(0).as_ref().unwrap().time_created,
+            Some(now),
+            "archive from db should be same."
+        );
 
         Ok(())
     }

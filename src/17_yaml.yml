@@ -39,6 +39,10 @@ args:
         long: delay
         takes_value: true
         required: false
+    - lock-file:
+        help: write a lock file so only one running instance is allowed.
+        long: lock-file
+        required: false
     # - flag:
     #     help: demo flag argument
     #     short: F

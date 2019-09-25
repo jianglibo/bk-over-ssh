@@ -45,7 +45,8 @@ use std::time::{Duration, Instant};
 use std::{fs, io, io::BufRead, io::Write};
 
 use actions::SyncDirReport;
-use data_shape::{AppConf, Server, CONF_FILE_NAME};
+use data_shape::{AppConf, Server, ServerYml, CONF_FILE_NAME};
+use r2d2_sqlite::SqliteConnectionManager;
 
 fn parse_server_yml<'a>(sub_sub_matches: &'a clap::ArgMatches<'a>) -> &'a str {
     sub_sub_matches.value_of("server-yml").unwrap()
@@ -94,11 +95,14 @@ fn demonstrate_pbr() -> Result<(), failure::Error> {
     Ok(())
 }
 
-fn process_app_config(
+fn process_app_config<M>(
     conf: Option<&str>,
     console_log: bool,
     re_try: bool,
-) -> Result<AppConf, failure::Error> {
+) -> Result<AppConf<M>, failure::Error>
+where
+    M: r2d2::ManageConnection,
+{
     let message_pb = ProgressBar::new_spinner();
     message_pb.enable_steady_tick(200);
     let mut app_conf = match AppConf::guess_conf_file(conf) {
@@ -150,32 +154,35 @@ fn process_app_config(
     Ok(app_conf)
 }
 
-fn delay<'a>(sub_matches: &'a clap::ArgMatches<'a>) {
-    let delay = sub_matches.value_of("delay");
-    if let Some(delay) = delay {
-        let delay = delay.parse::<u64>().expect("delay must be an integer.");
-        let style = ProgressStyle::default_bar().template("{bar:40} counting down {wide_msg}.").progress_chars("##-");
-        let pb = ProgressBar::new(delay).with_style(style);
-        thread::spawn(move || loop {
-            pb.inc(1);
-            let message = format!("{}", delay - pb.position());
-            pb.set_message(message.as_str());
-            thread::sleep(Duration::from_secs(1));
-            if pb.position() >= delay {
-                pb.finish_and_clear();
-                break
-            }
-        });
-        thread::sleep(Duration::from_secs(delay));
-    }
+fn delay_exec(delay: &str) {
+    let delay = delay.parse::<u64>().expect("delay must be an integer.");
+    let style = ProgressStyle::default_bar()
+        .template("{bar:40} counting down {wide_msg}.")
+        .progress_chars("##-");
+    let pb = ProgressBar::new(delay).with_style(style);
+    thread::spawn(move || loop {
+        pb.inc(1);
+        let message = format!("{}", delay - pb.position());
+        pb.set_message(message.as_str());
+        thread::sleep(Duration::from_secs(1));
+        if pb.position() >= delay {
+            pb.finish_and_clear();
+            break;
+        }
+    });
+    thread::sleep(Duration::from_secs(delay));
 }
 
-fn sync_dirs<'a>(
-    app_conf: &AppConf,
+fn sync_dirs<'a, M>(
+    app_conf: &AppConf<M>,
     sub_matches: &'a clap::ArgMatches<'a>,
     console_log: bool,
-) -> Result<(), failure::Error> {
-    let mut servers: Vec<Server> = Vec::new();
+    pool: Option<r2d2::Pool<M>>,
+) -> Result<(), failure::Error>
+where
+    M: r2d2::ManageConnection,
+{
+    let mut servers: Vec<Server<M>> = Vec::new();
     let skip_sha1 = sub_matches.is_present("skip-sha1");
     let no_pb = sub_matches.is_present("no-pb");
     let buf_len = sub_matches.value_of("buf-len").and_then(|v| {
@@ -197,10 +204,15 @@ fn sync_dirs<'a>(
             parse_server_yml(sub_matches),
             buf_len,
             mb_op.as_ref().map(Arc::clone),
+            pool,
         )?;
         servers.push(server);
     } else {
-        servers.append(&mut app_conf.load_all_server_yml(buf_len, mb_op.as_ref().map(Arc::clone)));
+        servers.append(&mut app_conf.load_all_server_yml(
+            buf_len,
+            mb_op.as_ref().map(Arc::clone),
+            pool,
+        ));
     }
 
     // all progress bars already create from here on.
@@ -229,7 +241,7 @@ fn sync_dirs<'a>(
                 if console_log {
                     let result_yml = serde_yaml::to_string(&result)
                         .expect("SyncDirReport should deserialize success.");
-                    println!("{}:\n{}", server.host, result_yml);
+                    println!("{}:\n{}", server.get_host(), result_yml);
                 }
             }
             Err(err) => println!("sync-dirs failed: {:?}", err),
@@ -250,22 +262,36 @@ fn main() -> Result<(), failure::Error> {
 
     let conf = m.value_of("conf");
 
-    let app_conf = process_app_config(conf, console_log, false)?;
-    app_conf.lock_working_file()?;
-    delay(&m);
+    let app_conf = process_app_config::<SqliteConnectionManager>(conf, console_log, false)?;
+
+    let lock_file = m.is_present("lock-file");
+
+    if lock_file {
+        app_conf.lock_working_file()?;
+    }
+
+    let delay = m.value_of("delay");
+    if let Some(delay) = delay {
+        delay_exec(delay);
+    }
     if let Err(err) = main_entry(app1, &app_conf, &m, console_log) {
         error!("main return error: {:?}", err);
     }
-    app_conf.unlock_working_file();
+    if lock_file {
+        app_conf.unlock_working_file();
+    }
     Ok(())
 }
 
-fn main_entry<'a>(
+fn main_entry<'a, M>(
     mut app1: App,
-    app_conf: &AppConf,
+    app_conf: &AppConf<M>,
     m: &'a clap::ArgMatches<'a>,
     console_log: bool,
-) -> Result<(), failure::Error> {
+) -> Result<(), failure::Error>
+where
+    M: r2d2::ManageConnection,
+{
     match m.subcommand() {
         ("pbr", Some(_sub_matches)) => {
             demonstrate_pbr()?;
@@ -275,22 +301,24 @@ fn main_entry<'a>(
             send_test_mail(&app_conf.mail_conf, to)?;
         }
         ("sync-dirs", Some(sub_matches)) => {
-            sync_dirs(&app_conf, sub_matches, console_log)?;
+            sync_dirs(&app_conf, sub_matches, console_log, None)?;
         }
         ("copy-executable", Some(sub_matches)) => {
-            let mut server = app_conf.load_server_yml(parse_server_yml(sub_matches), None, None)?;
+            let mut server =
+                app_conf.load_server_yml(parse_server_yml(sub_matches), None, None, None)?;
             let executable = sub_matches.value_of("executable").unwrap();
-            let remote = server.remote_exec.clone();
+            let remote = server.server_yml.remote_exec.clone();
             server.copy_a_file(executable, &remote)?;
             println!(
                 "copy from {} to {} {} successed.",
                 executable,
-                server.host.as_str(),
+                server.get_host(),
                 remote
             );
         }
         ("print-report", Some(sub_matches)) => {
-            let server = app_conf.load_server_yml(parse_server_yml(sub_matches), None, None)?;
+            let server =
+                app_conf.load_server_yml(parse_server_yml(sub_matches), None, None, None)?;
             let fbuf = io::BufReader::new(
                 fs::OpenOptions::new()
                     .read(true)
@@ -306,8 +334,9 @@ fn main_entry<'a>(
             }
         }
         ("copy-server-yml", Some(sub_matches)) => {
-            let mut server = app_conf.load_server_yml(parse_server_yml(sub_matches), None, None)?;
-            let remote = server.remote_server_yml.clone();
+            let mut server =
+                app_conf.load_server_yml(parse_server_yml(sub_matches), None, None, None)?;
+            let remote = server.server_yml.remote_server_yml.clone();
             let local = server
                 .yml_location
                 .as_ref()
@@ -318,7 +347,7 @@ fn main_entry<'a>(
             println!(
                 "copy from {} to {} {} successed.",
                 local,
-                server.host.as_str(),
+                server.get_host(),
                 remote
             );
         }
@@ -348,7 +377,8 @@ fn main_entry<'a>(
             }
         }
         ("archive-local", Some(sub_matches)) => {
-            let server = app_conf.load_server_yml(parse_server_yml(sub_matches), None, None)?;
+            let server =
+                app_conf.load_server_yml(parse_server_yml(sub_matches), None, None, None)?;
             let prune_op = sub_matches.value_of("prune");
             let prune_only_op = sub_matches.value_of("prune-only");
             if prune_op.is_some() {
@@ -363,7 +393,8 @@ fn main_entry<'a>(
         ("list-remote-files", Some(sub_matches)) => {
             let skip_sha1 = sub_matches.is_present("skip-sha1");
             let start = Instant::now();
-            let mut server = app_conf.load_server_yml(parse_server_yml(sub_matches), None, None)?;
+            let mut server =
+                app_conf.load_server_yml(parse_server_yml(sub_matches), None, None, None)?;
             server.list_remote_file_exec(skip_sha1)?;
 
             if let Some(out) = sub_matches.value_of("out") {
@@ -387,7 +418,8 @@ fn main_entry<'a>(
         }
         ("list-local-files", Some(sub_matches)) => {
             let skip_sha1 = sub_matches.is_present("skip-sha1");
-            let server = &app_conf.load_server_yml(parse_server_yml(sub_matches), None, None)?;
+            let server =
+                &app_conf.load_server_yml(parse_server_yml(sub_matches), None, None, None)?;
             if let Some(out) = sub_matches.value_of("out") {
                 let mut out = fs::OpenOptions::new()
                     .create(true)
@@ -408,27 +440,30 @@ fn main_entry<'a>(
                 }
             });
             let mut server =
-                app_conf.load_server_yml(parse_server_yml(sub_matches), buf_len, None)?;
+                app_conf.load_server_yml(parse_server_yml(sub_matches), buf_len, None, None)?;
             println!(
                 "found server configuration yml at: {:?}",
                 server.yml_location.as_ref().unwrap()
             );
-            println!("server content: {}", serde_yaml::to_string(&server)?);
+            println!(
+                "server content: {}",
+                serde_yaml::to_string(&server.server_yml)?
+            );
             server.connect()?;
             if let Err(err) = server.stats_remote_exec() {
                 println!(
                     "CAN'T FIND SERVER SIDE EXEC. {:?}\n{:?}",
-                    server.remote_exec, err
+                    server.server_yml.remote_exec, err
                 );
             } else {
-                let rp = server.remote_server_yml.clone();
+                let rp = server.server_yml.remote_server_yml.clone();
                 match server.get_remote_file_content(&rp) {
                     Ok(content) => {
-                        let ss: Server = serde_yaml::from_str(content.as_str())?;
-                        if !server.dir_equals(&ss) {
+                        let ss: ServerYml = serde_yaml::from_str(content.as_str())?;
+                        if !server.dir_equals(&ss.directories) {
                             println!(
                                 "SERVER DIRS DIDN'T EQUAL TO.\nlocal: {:?} vs remote: {:?}",
-                                server.directories, ss.directories
+                                server.server_yml.directories, ss.directories
                             );
                         } else {
                             println!("SERVER SIDE CONFIGURATION IS OK!");

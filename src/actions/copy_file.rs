@@ -3,6 +3,8 @@ use crate::rustsync::{DeltaFileReader, DeltaReader, Signature};
 use indicatif::HumanBytes;
 use indicatif::ProgressBar;
 use log::*;
+use r2d2;
+use r2d2_sqlite::SqliteConnectionManager;
 use sha1::{Digest, Sha1};
 use ssh2;
 use std::convert::TryInto;
@@ -209,18 +211,14 @@ pub fn copy_a_file_item_sftp<'a, F: FnMut(u64) -> ()>(
     sftp: &ssh2::Sftp,
     local_file_path: String,
     file_item: &FileItem<'a>,
-    buf: &mut[u8],
+    buf: &mut [u8],
     cb: Option<F>,
 ) -> FileItemProcessResult {
     match sftp.open(Path::new(&file_item.get_remote_path())) {
         Ok(mut file) => {
             if let Some(_r_sha1) = file_item.get_remote_item().get_sha1() {
-                match copy_stream_to_file_return_sha1_with_cb(
-                    &mut file,
-                    &local_file_path,
-                    buf,
-                    cb,
-                ) {
+                match copy_stream_to_file_return_sha1_with_cb(&mut file, &local_file_path, buf, cb)
+                {
                     Ok((length, sha1)) => {
                         if length != file_item.get_remote_item().get_len() {
                             error!("length didn't match: {:?}", file_item);
@@ -268,22 +266,29 @@ pub fn copy_a_file_item_sftp<'a, F: FnMut(u64) -> ()>(
     }
 }
 
-pub fn copy_a_file_item_rsync<'a>(
-    server: &Server,
+pub fn copy_a_file_item_rsync<'a, M>(
+    server: &Server<M>,
     sftp: &ssh2::Sftp,
     local_file_path: String,
     file_item: &FileItem<'a>,
-) -> Result<FileItemProcessResult, failure::Error> {
+) -> Result<FileItemProcessResult, failure::Error>
+where
+    M: r2d2::ManageConnection,
+{
     let remote_path = file_item.get_remote_path();
     trace!("start signature_a_file {}", &local_file_path);
-    let mut sig = Signature::signature_a_file(&local_file_path, Some(server.rsync_window), server.pb.is_some())?;
+    let mut sig = Signature::signature_a_file(
+        &local_file_path,
+        Some(server.server_yml.rsync_window),
+        server.pb.is_some(),
+    )?;
     let remote_sig_file_path = format!("{}.sig", &remote_path);
     let sig_file = sftp.create(Path::new(&remote_sig_file_path))?;
     sig.write_to_stream(sig_file)?;
     let delta_file_name = format!("{}.delta", &remote_path);
     let cmd = format!(
         "{} rsync delta-a-file --new-file {} --sig-file {} --out-file {}",
-        server.remote_exec, &remote_path, &remote_sig_file_path, &delta_file_name,
+        server.server_yml.remote_exec, &remote_path, &remote_sig_file_path, &delta_file_name,
     );
     trace!("about to invoke command: {:?}", cmd);
     let mut channel: ssh2::Channel = server.create_channel()?;
@@ -337,13 +342,16 @@ fn update_local_file_from_restored(local_file_path: impl AsRef<str>) -> Result<(
     Ok(())
 }
 
-pub fn copy_a_file_item<'a>(
-    server: &Server,
+pub fn copy_a_file_item<'a, M>(
+    server: &Server<M>,
     sftp: &ssh2::Sftp,
     file_item: FileItem<'a>,
     buf: &mut [u8],
     pb_op: Option<&(ProgressBar, ProgressBar)>,
-) -> FileItemProcessResult {
+) -> FileItemProcessResult
+where
+    M: r2d2::ManageConnection,
+{
     let mut received = 0_u64;
     let item_len = file_item.get_remote_item().get_len();
     let item_path = file_item.get_remote_item().get_path();
@@ -401,9 +409,7 @@ pub fn copy_a_file_item<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data_shape::{
-        FileItem, FileItemProcessResult, RemoteFileItem, Server, SyncType,
-    };
+    use crate::data_shape::{FileItem, FileItemProcessResult, RemoteFileItem, Server, SyncType};
     use crate::develope::tutil;
     use crate::log_util;
     use std::panic;
@@ -419,18 +425,29 @@ mod tests {
         .expect("init log should success.");
     }
 
-    fn load_server_yml() -> Server {
-        Server::load_from_yml("data/servers", "data", "localhost.yml", None, None).unwrap()
+    fn load_server_yml() -> Server<SqliteConnectionManager> {
+        Server::<SqliteConnectionManager>::load_from_yml(
+            "data/servers",
+            "data",
+            "localhost.yml",
+            None,
+            None,
+            None,
+        )
+        .unwrap()
     }
 
-    fn copy_a_file<'a>(
-        server: &mut Server,
+    fn copy_a_file<'a, M>(
+        server: &mut Server<M>,
         local_base_dir: &'a Path,
         remote_base_dir: &'a str,
         remote_relative_path: &'a str,
         remote_file_len: u64,
         sync_type: SyncType,
-    ) -> Result<FileItemProcessResult, failure::Error> {
+    ) -> Result<FileItemProcessResult, failure::Error>
+    where
+        M: r2d2::ManageConnection,
+    {
         let ri = RemoteFileItem::new(remote_relative_path, remote_file_len);
         let fi = FileItem::new(local_base_dir, remote_base_dir, ri, sync_type);
         let sftp = server.get_ssh_session().sftp()?;
@@ -456,7 +473,7 @@ mod tests {
 
         let mut server = load_server_yml();
         server.connect()?;
-        server.rsync_valve = 4;
+        server.server_yml.rsync_valve = 4;
         let test_dir1 = tutil::create_a_dir_and_a_filename("xx.txt")?;
         let local_file_name = test_dir1.tmp_dir.path().join("yy.txt");
         let test_dir2 = tutil::create_a_dir_and_a_file_with_content("yy.txt", "hello")?;
@@ -476,7 +493,8 @@ mod tests {
                 true
             } else {
                 false
-            }, "by sftp should success."
+            },
+            "by sftp should success."
         );
         assert!(local_file_name.exists());
 
@@ -496,7 +514,8 @@ mod tests {
                 true
             } else {
                 false
-            }, "by rsync should success."
+            },
+            "by rsync should success."
         );
 
         tutil::change_file_content(&local_file_name)?;
