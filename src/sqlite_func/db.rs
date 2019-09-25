@@ -22,7 +22,8 @@ pub struct RemoteFileItemInDb {
     time_created: Option<DateTime<Utc>>,
 }
 
-pub fn create_database(conn: &Connection) -> Result<usize, failure::Error> {
+pub fn create_sqlite_database(pool: &r2d2::Pool<SqliteConnectionManager>) -> Result<usize, failure::Error> {
+    let conn = pool.get().unwrap();
     let r = conn.execute(
         "CREATE TABLE remote_file_item (
                   id              INTEGER PRIMARY KEY,
@@ -37,10 +38,27 @@ pub fn create_database(conn: &Connection) -> Result<usize, failure::Error> {
     Ok(r)
 }
 
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::str::FromStr;
+
+    pub fn create_sqlite_database_1(conn: &Connection) -> Result<usize, failure::Error> {
+    let r = conn.execute(
+        "CREATE TABLE remote_file_item (
+                  id              INTEGER PRIMARY KEY,
+                  path            TEXT NOT NULL UNIQUE,
+                  sha1            TEXT,
+                  len             INTEGER DEFAULT 0,
+                  time_modified   TEXT,
+                  time_created    TEXT
+                  )",
+        NO_PARAMS,
+    )?;
+    Ok(r)
+}
+
 
     #[test]
     fn t_create_database() -> Result<(), failure::Error> {
@@ -48,10 +66,10 @@ mod tests {
 
         println!("auto_commit: {}", conn.is_autocommit());
 
-        let r = create_database(&conn)?;
+        let r = create_sqlite_database_1(&conn)?;
         assert_eq!(r, 0, "first execution should return 0");
 
-        if let Err(_err) = create_database(&conn) {
+        if let Err(_err) = create_sqlite_database_1(&conn) {
             println!("already exists");
         } else {
             assert!(false, "should throw exception.");

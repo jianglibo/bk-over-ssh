@@ -1,6 +1,7 @@
 use crate::data_shape::Server;
 use crate::ioutil::SharedMpb;
-use log::*;
+
+use log::{trace, warn};
 use r2d2_sqlite::SqliteConnectionManager;
 use serde::{Deserialize, Serialize};
 use std::env;
@@ -8,6 +9,7 @@ use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::{fs, io::Read, io::Write};
+
 
 pub const CONF_FILE_NAME: &str = "bk_over_ssh.yml";
 
@@ -132,6 +134,15 @@ where
             if let Err(err) = fs::remove_file(lof.as_path()) {
                 warn!("remove lock file failed: {:?}, {:?}", lof, err);
             }
+        }
+    }
+
+    pub fn create_sqlite_pool(&self) -> Result<r2d2::Pool<SqliteConnectionManager>, failure::Error> {
+        let db_file = self.get_data_dir().join("db.db");
+        let manager = SqliteConnectionManager::file(db_file);
+        match r2d2::Pool::new(manager) {
+            Ok(p) => Ok(p),
+            Err(err) => bail!("create db pool failed: {:?}", err)
         }
     }
 

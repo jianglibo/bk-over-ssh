@@ -18,6 +18,7 @@ mod ioutil;
 mod log_util;
 mod mail;
 mod rustsync;
+mod sqlite_func;
 
 #[macro_use]
 extern crate rusqlite;
@@ -47,6 +48,7 @@ use std::{fs, io, io::BufRead, io::Write};
 use actions::SyncDirReport;
 use data_shape::{AppConf, Server, ServerYml, CONF_FILE_NAME};
 use r2d2_sqlite::SqliteConnectionManager;
+use sqlite_func::create_sqlite_database;
 
 fn parse_server_yml<'a>(sub_sub_matches: &'a clap::ArgMatches<'a>) -> &'a str {
     sub_sub_matches.value_of("server-yml").unwrap()
@@ -264,7 +266,22 @@ fn main() -> Result<(), failure::Error> {
 
     let app_conf = process_app_config::<SqliteConnectionManager>(conf, console_log, false)?;
 
-    let lock_file = m.is_present("lock-file");
+    if let ("create-db", Some(sub_matches)) = m.subcommand() {
+        let db_type = sub_matches.value_of("db-type").unwrap_or("sqlite");
+        if "sqlite" == db_type {
+            let pool = app_conf.create_sqlite_pool()?;
+            create_sqlite_database(&pool)?;
+        } else {
+            println!("unsupported database: {}", db_type);
+        }
+        return Ok(());
+    }
+
+    let use_db = m.value_of("use-db").unwrap_or("none");
+
+    
+
+    let lock_file = !m.is_present("no-lock-file");
 
     if lock_file {
         app_conf.lock_working_file()?;
@@ -274,6 +291,7 @@ fn main() -> Result<(), failure::Error> {
     if let Some(delay) = delay {
         delay_exec(delay);
     }
+    
     if let Err(err) = main_entry(app1, &app_conf, &m, console_log) {
         error!("main return error: {:?}", err);
     }

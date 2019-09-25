@@ -39,10 +39,16 @@ args:
         long: delay
         takes_value: true
         required: false
-    - lock-file:
-        help: write a lock file so only one running instance is allowed.
-        long: lock-file
+    - no-lock-file:
+        help: don't write a lock file so multiple running instance is allowed, may cause errors.
+        long: no-lock-file
         required: false
+    - use-db:
+        help: use database to store inermediate values.
+        long: use-db
+        possible_values: [ sqlite, none ]
+        takes_value: true
+
     # - flag:
     #     help: demo flag argument
     #     short: F
@@ -104,7 +110,14 @@ subcommands:
         about: print out the current configuration of application.
     - print-env:
         about: print out environment variables.
-
+    - create-db:
+        about: create database.
+        args:
+            - db-type:
+                help: create database.
+                long: db-type
+                possible_values: [ sqlite ]
+                takes_value: true
     - pbr:
         about: demonstrate bpr usage.
     - repl:
