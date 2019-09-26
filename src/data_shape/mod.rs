@@ -7,5 +7,5 @@ pub mod string_path;
 
 pub use app_conf::{AppConf, MailConf, CONF_FILE_NAME};
 pub use file_item::{FileItem, FileItemProcessResult, FileItemProcessResultStats, SyncType};
-pub use remote_file_item::{load_remote_item_owned, RemoteFileItem};
+pub use remote_file_item::{load_remote_item, RemoteFileItem, load_remote_item_to_sqlite};
 pub use server::{Directory, PruneStrategy, PruneStrategyBuilder, Server, ServerYml};

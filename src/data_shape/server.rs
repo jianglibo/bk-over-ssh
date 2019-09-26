@@ -1,8 +1,9 @@
 use crate::actions::{copy_a_file_item, SyncDirReport};
 use crate::data_shape::{
-    load_remote_item_owned, rolling_files, string_path, AppConf, FileItem, FileItemProcessResult,
-    FileItemProcessResultStats, RemoteFileItem, SyncType,
+    load_remote_item, rolling_files, string_path, AppConf, FileItem, FileItemProcessResult,
+    FileItemProcessResultStats, RemoteFileItem, SyncType,load_remote_item_to_sqlite
 };
+use crate::sqlite_db::db::{create_sqlite_database};
 use crate::ioutil::SharedMpb;
 use crate::rustsync::{DeltaFileReader, DeltaReader, Signature};
 use bzip2::write::BzEncoder;
@@ -48,6 +49,9 @@ pub struct Directory {
 }
 
 impl Directory {
+    pub fn get_remote_dir(&self) -> &str {
+        self.remote_dir.as_str()
+    }
     /// for test purpose.
     #[allow(dead_code)]
     pub fn new(
@@ -911,7 +915,7 @@ where
         skip_sha1: bool,
     ) -> Result<(), failure::Error> {
         for one_dir in self.server_yml.directories.iter() {
-            load_remote_item_owned(one_dir, out, skip_sha1)?;
+            load_remote_item(one_dir, out, skip_sha1)?;
         }
         Ok(())
     }
@@ -1167,6 +1171,19 @@ mod tests {
     }
 
     #[test]
+    fn t_load_from_path_into_db() -> Result<(), failure::Error> {
+        let mut one_dir = Directory {
+            remote_dir: "fixtures/adir".to_string(),
+            ..Directory::default()
+        };
+        let pool = tutil::create_sqlite_mem_pool();
+        create_sqlite_database(pool.clone())?;
+        load_remote_item_to_sqlite(&one_dir, pool, true)?;
+
+        Ok(())
+    }
+
+    #[test]
     fn t_from_path() -> Result<(), failure::Error> {
         log_util::setup_logger_empty();
         let mut cur = tutil::get_a_cursor_writer();
@@ -1176,7 +1193,7 @@ mod tests {
         };
 
         one_dir.compile_patterns()?;
-        load_remote_item_owned(&one_dir, &mut cur, true)?;
+        load_remote_item(&one_dir, &mut cur, true)?;
         let num = tutil::count_cursor_lines(&mut cur);
         assert_eq!(num, 8);
         tutil::print_cursor_lines(&mut cur);
@@ -1190,7 +1207,7 @@ mod tests {
 
         one_dir.compile_patterns()?;
         assert!(one_dir.excludes_patterns.is_none());
-        load_remote_item_owned(&one_dir, &mut cur, true)?;
+        load_remote_item(&one_dir, &mut cur, true)?;
         let num = tutil::count_cursor_lines(&mut cur);
         assert_eq!(num, 2); // one dir line, one file line.
 
@@ -1203,7 +1220,7 @@ mod tests {
 
         one_dir.compile_patterns()?;
         assert!(one_dir.includes_patterns.is_none());
-        load_remote_item_owned(&one_dir, &mut cur, true)?;
+        load_remote_item(&one_dir, &mut cur, true)?;
         let num = tutil::count_cursor_lines(&mut cur);
         assert_eq!(num, 7, "if exlude 1 file there should 7 left.");
 
@@ -1216,7 +1233,7 @@ mod tests {
 
         one_dir.compile_patterns()?;
         assert!(one_dir.includes_patterns.is_none());
-        load_remote_item_owned(&one_dir, &mut cur, true)?;
+        load_remote_item(&one_dir, &mut cur, true)?;
         let num = tutil::count_cursor_lines(&mut cur);
         assert_eq!(num, 7, "if exlude logs file there should 7 left.");
 

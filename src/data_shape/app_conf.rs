@@ -1,6 +1,6 @@
 use crate::data_shape::Server;
 use crate::ioutil::SharedMpb;
-
+use crate::sqlite_db::db::{create_sqlite_pool, SqlitePool};
 use log::{trace, warn};
 use r2d2_sqlite::SqliteConnectionManager;
 use serde::{Deserialize, Serialize};
@@ -210,15 +210,9 @@ where
         }
     }
 
-    pub fn create_sqlite_pool(
-        &self,
-    ) -> Result<r2d2::Pool<SqliteConnectionManager>, failure::Error> {
+    pub fn create_sqlite_pool(&self) -> SqlitePool {
         let db_file = self.data_dir_full_path.as_path().join("db.db");
-        let manager = SqliteConnectionManager::file(db_file);
-        match r2d2::Pool::new(manager) {
-            Ok(p) => Ok(p),
-            Err(err) => bail!("create db pool failed: {:?}", err),
-        }
+        create_sqlite_pool(db_file)
     }
 
     // pub fn validate_conf(&mut self) -> Result<(), failure::Error> {
@@ -289,7 +283,7 @@ where
         &self,
         buf_len: Option<usize>,
         multi_bar: Option<SharedMpb>,
-        mut pool: Option<r2d2::Pool<M>>,
+        pool: Option<r2d2::Pool<M>>,
     ) -> Vec<Server<M>> {
         if let Ok(rd) = self.servers_dir.read_dir() {
             rd.filter_map(|ery| match ery {
@@ -311,7 +305,7 @@ where
                     astr,
                     buf_len,
                     multi_bar.as_ref().map(Arc::clone),
-                    pool.as_mut().cloned(),
+                    pool.as_ref().cloned(),
                 )
             })
             .filter_map(|rr| match rr {

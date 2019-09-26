@@ -48,7 +48,7 @@ use std::{fs, io, io::BufRead, io::Write};
 use actions::SyncDirReport;
 use data_shape::{AppConf, Server, ServerYml, CONF_FILE_NAME};
 use r2d2_sqlite::SqliteConnectionManager;
-use sqlite_db::create_sqlite_database;
+use sqlite_db::db::create_sqlite_database;
 
 fn parse_server_yml<'a>(sub_sub_matches: &'a clap::ArgMatches<'a>) -> &'a str {
     sub_sub_matches.value_of("server-yml").unwrap()
@@ -263,7 +263,7 @@ fn main() -> Result<(), failure::Error> {
     if let ("create-db", Some(sub_matches)) = m.subcommand() {
         let db_type = sub_matches.value_of("db-type").unwrap_or("sqlite");
         if "sqlite" == db_type {
-            let pool = app_conf.create_sqlite_pool()?;
+            let pool = app_conf.create_sqlite_pool();
             create_sqlite_database(pool.clone())?;
         } else {
             println!("unsupported database: {}", db_type);
@@ -271,7 +271,11 @@ fn main() -> Result<(), failure::Error> {
         return Ok(());
     }
 
-    let use_db = m.value_of("use-db").unwrap_or("none");
+    let pool = if let Some(_use_db) = m.value_of("use-db") {
+        Some(app_conf.create_sqlite_pool())
+    } else {
+        None
+    };
 
     let lock_file = !m.is_present("no-lock-file");
 
@@ -283,7 +287,7 @@ fn main() -> Result<(), failure::Error> {
     if let Some(delay) = delay {
         delay_exec(delay);
     }
-    if let Err(err) = main_entry(app1, &app_conf, &m, console_log) {
+    if let Err(err) = main_entry(app1, &app_conf, &m, console_log, pool) {
         error!("main return error: {:?}", err);
     }
     if lock_file {
@@ -293,6 +297,26 @@ fn main() -> Result<(), failure::Error> {
 }
 
 fn main_entry<'a, M>(
+    app1: App,
+    app_conf: &AppConf<M>,
+    m: &'a clap::ArgMatches<'a>,
+    console_log: bool,
+    pool: Option<r2d2::Pool<M>>,
+) -> Result<(), failure::Error>
+where
+    M: r2d2::ManageConnection,
+{
+    if let ("sync-dirs", Some(sub_matches)) = m.subcommand() {
+        if let Some(pool) = pool {
+            return sync_dirs(&app_conf, sub_matches, console_log, Some(pool.clone()));
+        } else {
+            return sync_dirs(&app_conf, sub_matches, console_log, None);
+        }
+    }
+    main_entry_1(app1, app_conf, m, console_log)
+}
+
+fn main_entry_1<'a, M>(
     mut app1: App,
     app_conf: &AppConf<M>,
     m: &'a clap::ArgMatches<'a>,
@@ -309,9 +333,9 @@ where
             let to = sub_matches.value_of("to").unwrap();
             send_test_mail(&app_conf.get_mail_conf(), to)?;
         }
-        ("sync-dirs", Some(sub_matches)) => {
-            sync_dirs(&app_conf, sub_matches, console_log, None)?;
-        }
+        // ("sync-dirs", Some(sub_matches)) => {
+        //     sync_dirs(&app_conf, sub_matches, console_log, None)?;
+        // }
         ("copy-executable", Some(sub_matches)) => {
             let mut server =
                 app_conf.load_server_yml(parse_server_yml(sub_matches), None, None, None)?;

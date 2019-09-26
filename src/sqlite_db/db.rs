@@ -1,15 +1,15 @@
-use crate::data_shape::RemoteFileItem;
-use crate::develope::tutil;
-use chrono::{DateTime, Datelike, SecondsFormat, Utc};
+use crate::actions::hash_file_sha1;
+use chrono::{DateTime, Utc};
 use failure;
+use log::*;
 use r2d2;
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::params;
-use rusqlite::{types::Null, Connection, Result as SqliteResult, NO_PARAMS};
+use std::path::{Path, PathBuf};
 
 pub type SqlitePool = r2d2::Pool<SqliteConnectionManager>;
 
-pub fn create_sqlite_pool(db_file: impl AsRef<str>) -> SqlitePool {
+pub fn create_sqlite_pool(db_file: impl AsRef<Path>) -> SqlitePool {
     let db_file = db_file.as_ref();
     let manager = SqliteConnectionManager::file(db_file)
         .with_init(|c| c.execute_batch("PRAGMA foreign_keys=1;"));
@@ -22,8 +22,75 @@ pub struct RemoteFileItemInDb {
     path: String,
     sha1: Option<String>,
     len: i64,
-    time_modified: Option<DateTime<Utc>>,
-    time_created: Option<DateTime<Utc>>,
+    modified: Option<DateTime<Utc>>,
+    created: Option<DateTime<Utc>>,
+    dir_id: i64,
+}
+
+impl RemoteFileItemInDb {
+    pub fn from_path(
+        base_path: impl AsRef<Path>,
+        path: PathBuf,
+        skip_sha1: bool,
+        dir_id: i64,
+    ) -> Option<Self> {
+        let metadata_r = path.metadata();
+        match metadata_r {
+            Ok(metadata) => {
+                let sha1 = if !skip_sha1 {
+                    hash_file_sha1(&path)
+                } else {
+                    Option::<String>::None
+                };
+                let relative_o = path.strip_prefix(&base_path).ok().and_then(|p| p.to_str());
+                if let Some(relative) = relative_o {
+                    return Some(Self {
+                        id: 0,
+                        path: relative.to_string(),
+                        sha1,
+                        len: metadata.len() as i64,
+                        modified: metadata.modified().ok().map(Into::into),
+                        created: metadata.created().ok().map(Into::into),
+                        dir_id,
+                    });
+                } else {
+                    error!("RemoteFileItem path name to_str() failed. {:?}", path);
+                }
+                // }
+            }
+            Err(err) => {
+                error!("RemoteFileItem from_path failed: {:?}, {:?}", path, err);
+            }
+        }
+        None
+    }
+}
+
+pub fn insert_directory(pool: SqlitePool, path: impl AsRef<str>) -> Result<i64, failure::Error> {
+    let conn = pool.get().unwrap();
+    let count = conn.execute(
+        "INSERT INTO directory (path) VALUES (?1)",
+        params![path.as_ref()],
+    )?;
+    if count != 1 {
+        bail!("insert directory failed, execute return not eq to 1.");
+    }
+    Ok(conn.last_insert_rowid())
+}
+
+pub fn insert_remote_file_item(pool: SqlitePool, rfi: RemoteFileItemInDb) {
+    let conn = pool.get().unwrap();
+    match conn.execute(
+            "INSERT INTO directory (path, sha1, len, time_modified, time_created, dir_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![rfi.path, rfi.sha1, rfi.len, rfi.modified, rfi.created, rfi.dir_id],
+        ) {
+            Ok(count) => {
+                if count != 1 {
+                    error!("insert directory failed, execute return not eq to 1. {:?}", rfi);
+                }
+            },
+            Err(e) => error!("insert remote file failed: {:?}, {:?}", rfi, e)
+        }
 }
 
 pub fn create_sqlite_database(pool: SqlitePool) -> Result<(), failure::Error> {
@@ -53,7 +120,10 @@ pub fn create_sqlite_database(pool: SqlitePool) -> Result<(), failure::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::develope::tutil;
     use std::str::FromStr;
+    use rusqlite::{NO_PARAMS};
+    use chrono::{DateTime, SecondsFormat, Utc};
 
     pub fn create_sqlite_database_1(pool: &SqlitePool) -> Result<usize, failure::Error> {
         let r = pool.get().unwrap().execute(
@@ -75,11 +145,13 @@ mod tests {
         let pool = tutil::create_sqlite_mem_pool();
         create_sqlite_database(pool.clone())?;
 
-        let count = pool.get().unwrap().execute(
+        let insert_result = pool.get().unwrap().execute(
             "INSERT INTO remote_file_item (path, time_created, dir_id)
                   VALUES (?1, ?2, ?3)",
             params!["abc", Utc::now(), 66],
-        )?;
+        );
+
+        assert!(insert_result.is_err(), "insert should be failed.");
 
         let last_row_id = pool.get().unwrap().last_insert_rowid();
         let c = pool.get().unwrap();
@@ -118,15 +190,16 @@ mod tests {
             path: "abc".to_string(),
             sha1: None,
             len: 55,
-            time_modified: None,
-            time_created: Some(now),
+            modified: None,
+            created: Some(now),
+            dir_id: 0,
         };
 
         let count = pool.get().unwrap().execute(
             "INSERT INTO remote_file_item (path, time_created)
                   VALUES (?1, ?2)",
             // &[&me.path, &me.sha1 as &ToSql, &Null, &Null, &me.time_created as &ToSql],
-            params![me.path, me.time_created],
+            params![me.path, me.created],
         )?;
 
         assert_eq!(count, 1, "should effect one item.");
@@ -137,7 +210,7 @@ mod tests {
             Ok(RemoteFileItemInDb {
                 id: row.get(0)?,
                 path: row.get(1)?,
-                time_created: row.get(2)?,
+                created: row.get(2)?,
                 ..RemoteFileItemInDb::default() // sha1: row.get(2)?,
                                                 // len: row.get(3)?,
                                                 // time_modified: row.get(4)?,
@@ -174,7 +247,7 @@ mod tests {
         assert_eq!(c.get(0).as_ref().unwrap().path, "abc");
 
         assert_eq!(
-            c.get(0).as_ref().unwrap().time_created,
+            c.get(0).as_ref().unwrap().created,
             Some(now),
             "archive from db should be same."
         );

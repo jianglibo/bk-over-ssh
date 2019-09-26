@@ -1,5 +1,6 @@
 use super::server::Directory;
 use crate::actions::hash_file_sha1;
+use crate::sqlite_db::db::{SqlitePool, insert_directory, insert_remote_file_item, RemoteFileItemInDb};
 use log::*;
 use serde::{Deserialize, Serialize};
 use std::io;
@@ -87,12 +88,47 @@ impl RemoteFileItem {
     }
 }
 
-pub fn load_remote_item_owned<O: io::Write>(
+pub fn load_remote_item_to_sqlite(
+    directory: &Directory,
+    pool: SqlitePool,
+    skip_sha1: bool,
+) -> Result<(), failure::Error> {
+    let bp = Path::new(directory.get_remote_dir()).canonicalize();
+
+    match bp {
+        Ok(base_path) => {
+            let dir_id = if let Some(path_str) = base_path.to_str() {
+                insert_directory(pool.clone(), path_str)?
+            } else {
+                bail!("base_path to_str failed: {:?}", base_path);
+            };
+
+            WalkDir::new(&base_path)
+                .follow_links(false)
+                .into_iter()
+                .filter_map(|e| e.ok())
+                .filter(|d| d.file_type().is_file())
+                .filter_map(|d| d.path().canonicalize().ok())
+                .filter_map(|d| directory.match_path(d))
+                .filter_map(|d| RemoteFileItemInDb::from_path(&base_path, d, skip_sha1, dir_id))
+                .for_each(|rfi| {
+                    insert_remote_file_item(pool.clone(), rfi);
+                });
+        }
+        Err(err) => {
+            error!("load_dir resolve path failed: {:?}", err);
+        }
+    }
+    Ok(())
+}
+
+pub fn load_remote_item<O>(
     directory: &Directory,
     out: &mut O,
     skip_sha1: bool,
-) -> Result<(), failure::Error> {
-    let bp = Path::new(directory.remote_dir.as_str()).canonicalize();
+) -> Result<(), failure::Error> where O: io::Write, {
+    let bp = Path::new(directory.get_remote_dir()).canonicalize();
+
     match bp {
         Ok(base_path) => {
             if let Some(path_str) = base_path.to_str() {
@@ -108,8 +144,8 @@ pub fn load_remote_item_owned<O: io::Write>(
                 .filter_map(|d| d.path().canonicalize().ok())
                 .filter_map(|d| directory.match_path(d))
                 .filter_map(|d| RemoteFileItem::from_path(&base_path, d, skip_sha1))
-                .for_each(|owned| {
-                    match serde_json::to_string(&owned) {
+                .for_each(|rfi| {
+                    match serde_json::to_string(&rfi) {
                         Ok(line) => {
                             if let Err(err) = writeln!(out, "{}", line) {
                                 error!("write item line failed: {:?}, {:?}", err, line);

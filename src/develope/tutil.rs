@@ -1,4 +1,4 @@
-use crate::sqlite_db::SqlitePool;
+use crate::sqlite_db::db::SqlitePool;
 use r2d2;
 use r2d2_sqlite::SqliteConnectionManager;
 use rand::Rng;
