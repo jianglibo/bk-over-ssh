@@ -18,7 +18,7 @@ mod ioutil;
 mod log_util;
 mod mail;
 mod rustsync;
-mod sqlite_func;
+mod sqlite_db;
 
 #[macro_use]
 extern crate rusqlite;
@@ -48,7 +48,7 @@ use std::{fs, io, io::BufRead, io::Write};
 use actions::SyncDirReport;
 use data_shape::{AppConf, Server, ServerYml, CONF_FILE_NAME};
 use r2d2_sqlite::SqliteConnectionManager;
-use sqlite_func::create_sqlite_database;
+use sqlite_db::create_sqlite_database;
 
 fn parse_server_yml<'a>(sub_sub_matches: &'a clap::ArgMatches<'a>) -> &'a str {
     sub_sub_matches.value_of("server-yml").unwrap()
@@ -107,7 +107,7 @@ where
 {
     let message_pb = ProgressBar::new_spinner();
     message_pb.enable_steady_tick(200);
-    let mut app_conf = match AppConf::guess_conf_file(conf) {
+    let app_conf = match AppConf::guess_conf_file(conf) {
         Ok(cfg) => {
             if let Some(cfg) = cfg {
                 cfg
@@ -134,22 +134,16 @@ where
     };
 
     let message = format!(
-        "using configuration file: {}",
-        app_conf
-            .config_file_path
-            .as_ref()
-            .expect("configuration file should exist at this point.")
-            .to_str()
-            .unwrap_or("to_str failed.")
+        "using configuration file: {:?}",
+        app_conf.config_file_path.as_path()
     );
 
     message_pb.set_message(message.as_str());
 
-    app_conf.validate_conf()?;
     log_util::setup_logger_for_this_app(
         console_log,
-        app_conf.get_log_file().as_str(),
-        &app_conf.get_log_conf().verbose_modules,
+        app_conf.log_full_path.as_path(),
+        app_conf.get_log_conf().get_verbose_modules(),
     )?;
 
     message_pb.finish_and_clear();
@@ -270,7 +264,7 @@ fn main() -> Result<(), failure::Error> {
         let db_type = sub_matches.value_of("db-type").unwrap_or("sqlite");
         if "sqlite" == db_type {
             let pool = app_conf.create_sqlite_pool()?;
-            create_sqlite_database(&pool)?;
+            create_sqlite_database(pool.clone())?;
         } else {
             println!("unsupported database: {}", db_type);
         }
@@ -278,8 +272,6 @@ fn main() -> Result<(), failure::Error> {
     }
 
     let use_db = m.value_of("use-db").unwrap_or("none");
-
-    
 
     let lock_file = !m.is_present("no-lock-file");
 
@@ -291,7 +283,6 @@ fn main() -> Result<(), failure::Error> {
     if let Some(delay) = delay {
         delay_exec(delay);
     }
-    
     if let Err(err) = main_entry(app1, &app_conf, &m, console_log) {
         error!("main return error: {:?}", err);
     }
@@ -316,7 +307,7 @@ where
         }
         ("send-test-mail", Some(sub_matches)) => {
             let to = sub_matches.value_of("to").unwrap();
-            send_test_mail(&app_conf.mail_conf, to)?;
+            send_test_mail(&app_conf.get_mail_conf(), to)?;
         }
         ("sync-dirs", Some(sub_matches)) => {
             sync_dirs(&app_conf, sub_matches, console_log, None)?;
@@ -384,9 +375,9 @@ where
         ("list-server-yml", Some(_sub_matches)) => {
             println!(
                 "list files name under directory: {:?}",
-                app_conf.get_servers_dir()
+                app_conf.servers_dir
             );
-            for entry in app_conf.get_servers_dir().read_dir()? {
+            for entry in app_conf.servers_dir.read_dir()? {
                 if let Ok(ery) = entry {
                     println!("{:?}", ery.file_name());
                 } else {
@@ -582,8 +573,8 @@ where
         ("print-conf", Some(_)) => {
             println!(
                 "The configuration file is located at: {:?}, content:\n{}",
-                app_conf.config_file_path.as_ref().unwrap(),
-                serde_yaml::to_string(&app_conf)?
+                app_conf.config_file_path,
+                serde_yaml::to_string(&app_conf.get_inner())?
             );
         }
         (_, _) => unimplemented!(), // for brevity

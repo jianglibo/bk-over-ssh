@@ -1,3 +1,6 @@
+use crate::sqlite_db::SqlitePool;
+use r2d2;
+use r2d2_sqlite::SqliteConnectionManager;
 use rand::Rng;
 use std::path::{Path, PathBuf};
 use std::{fs, io, io::BufRead, io::BufWriter, io::Seek, io::Write};
@@ -7,6 +10,12 @@ use tempfile::TempDir;
 pub fn get_a_cursor_writer() -> io::Cursor<Vec<u8>> {
     let v = Vec::<u8>::new();
     io::Cursor::new(v)
+}
+
+pub fn create_sqlite_mem_pool() -> SqlitePool {
+    let manager =
+        SqliteConnectionManager::memory().with_init(|c| c.execute_batch("PRAGMA foreign_keys=1;"));
+    r2d2::Pool::new(manager).unwrap()
 }
 
 #[allow(dead_code)]
@@ -36,7 +45,11 @@ impl TestDir {
     }
     #[allow(dead_code)]
     pub fn count_files(&self) -> usize {
-        self.tmp_dir.path().read_dir().expect("tmp_dir read_dir should success.").count()
+        self.tmp_dir
+            .path()
+            .read_dir()
+            .expect("tmp_dir read_dir should success.")
+            .count()
     }
 
     #[allow(dead_code)]
@@ -84,12 +97,18 @@ impl TestDir {
         assert!(f.exists() && f.is_file());
     }
 
-    pub fn open_a_file_for_read(&self, file_name: impl AsRef<str>) -> Result<impl io::Read, failure::Error> {
+    pub fn open_a_file_for_read(
+        &self,
+        file_name: impl AsRef<str>,
+    ) -> Result<impl io::Read, failure::Error> {
         let f = self.tmp_dir_path().join(file_name.as_ref());
         Ok(fs::OpenOptions::new().read(true).open(f)?)
     }
 
-    pub fn open_an_empty_file_for_write(&self, file_name: impl AsRef<str>,) -> Result<impl io::Write, failure::Error> {
+    pub fn open_an_empty_file_for_write(
+        &self,
+        file_name: impl AsRef<str>,
+    ) -> Result<impl io::Write, failure::Error> {
         let f = self.tmp_dir_path().join(file_name.as_ref());
         Ok(fs::OpenOptions::new().create(true).write(true).open(f)?)
     }

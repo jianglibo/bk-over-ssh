@@ -10,13 +10,18 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::{fs, io::Read, io::Write};
 
-
 pub const CONF_FILE_NAME: &str = "bk_over_ssh.yml";
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct LogConf {
     pub log_file: String,
-    pub verbose_modules: Vec<String>,
+    verbose_modules: Vec<String>,
+}
+
+impl LogConf {
+    pub fn get_verbose_modules(&self) -> &Vec<String> {
+        &self.verbose_modules
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -29,20 +34,48 @@ pub struct MailConf {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+pub struct AppConfYml {
+    data_dir: String,
+    log_conf: LogConf,
+    pub mail_conf: MailConf,
+}
+
+fn guesss_data_dir(data_dir: impl AsRef<str>) -> Result<PathBuf, failure::Error> {
+    let data_dir = data_dir.as_ref();
+    let data_dir = if data_dir.is_empty() {
+        "data"
+    } else {
+        data_dir
+    };
+
+    let mut path_buf = Path::new(data_dir).to_path_buf();
+
+    if !&path_buf.is_absolute() {
+        path_buf = env::current_exe()?
+            .parent()
+            .expect("current_exe parent should exists.")
+            .join(path_buf);
+    }
+    if !&path_buf.exists() {
+        if let Err(err) = fs::create_dir_all(&path_buf) {
+            bail!("create data_dir {:?}, failed: {:?}", &path_buf, err);
+        }
+    }
+    match path_buf.canonicalize() {
+        Ok(ab) => Ok(ab),
+        Err(err) => bail!("path_buf {:?} canonicalize failed: {:?}", &path_buf, err),
+    }
+}
+
 pub struct AppConf<M>
 where
     M: r2d2::ManageConnection,
 {
-    data_dir: String,
-    log_conf: LogConf,
-    pub mail_conf: MailConf,
-    #[serde(skip_deserializing)]
-    pub config_file_path: Option<PathBuf>,
-    #[serde(skip_deserializing)]
-    data_dir_full_path: Option<PathBuf>,
-    #[serde(skip_deserializing)]
-    log_full_path: Option<PathBuf>,
-    #[serde(skip)]
+    inner: AppConfYml,
+    pub config_file_path: PathBuf,
+    pub data_dir_full_path: PathBuf,
+    pub log_full_path: PathBuf,
+    pub servers_dir: PathBuf,
     mc_type: PhantomData<M>,
 }
 
@@ -50,6 +83,9 @@ impl<M> AppConf<M>
 where
     M: r2d2::ManageConnection,
 {
+    pub fn get_inner(&self) -> &AppConfYml {
+        &self.inner
+    }
     fn read_app_conf(file: impl AsRef<Path>) -> Result<Option<AppConf<M>>, failure::Error> {
         if !file.as_ref().exists() {
             return Ok(None);
@@ -58,9 +94,42 @@ where
         if let Ok(mut f) = fs::OpenOptions::new().read(true).open(file) {
             let mut buf = String::new();
             if f.read_to_string(&mut buf).is_ok() {
-                match serde_yaml::from_str::<AppConf<M>>(&buf) {
-                    Ok(mut app_conf) => {
-                        app_conf.config_file_path.replace(file.to_path_buf());
+                match serde_yaml::from_str::<AppConfYml>(&buf) {
+                    Ok(app_conf_yml) => {
+                        let data_dir_full_path = guesss_data_dir(app_conf_yml.data_dir.trim())?;
+
+                        let log_full_path = {
+                            let log_file = &app_conf_yml.log_conf.log_file;
+                            let path = Path::new(log_file);
+                            if path.is_absolute() {
+                                log_file.clone()
+                            } else {
+                                data_dir_full_path
+                                    .as_path()
+                                    .join(path)
+                                    .to_str()
+                                    .expect("log_file should be a valid string.")
+                                    .to_string()
+                            }
+                        };
+
+                        let log_full_path = Path::new(&log_full_path).to_path_buf();
+                        let servers_dir = data_dir_full_path.as_path().join("servers");
+
+                        if !servers_dir.exists() {
+                            if let Err(err) = fs::create_dir_all(&servers_dir) {
+                                bail!("create servers_dir {:?}, failed: {:?}", &servers_dir, err);
+                            }
+                        }
+
+                        let app_conf = AppConf {
+                            inner: app_conf_yml,
+                            config_file_path: file.to_path_buf(),
+                            data_dir_full_path,
+                            log_full_path,
+                            servers_dir,
+                            mc_type: PhantomData,
+                        };
                         Ok(Some(app_conf))
                     }
                     Err(err) => bail!("deserialize failed: {:?}, {:?}", file, err),
@@ -72,9 +141,13 @@ where
             bail!("open conf file failed: {:?}", file);
         }
     }
+
+    pub fn get_mail_conf(&self) -> &MailConf {
+        &self.inner.mail_conf
+    }
     #[allow(dead_code)]
     pub fn write_to_working_dir(&self) -> Result<(), failure::Error> {
-        let ymld = serde_yaml::to_string(self)?;
+        let ymld = serde_yaml::to_string(&self.inner)?;
         let path = env::current_dir()?.join(CONF_FILE_NAME);
         let mut file = fs::OpenOptions::new().write(true).create(true).open(path)?;
         write!(file, "{}", ymld)?;
@@ -108,19 +181,19 @@ where
         bail!("read app_conf failed.")
     }
 
-    pub fn get_data_dir(&self) -> &Path {
-        self.data_dir_full_path
-            .as_ref()
-            .map(|pb| pb.as_path())
-            .expect("data_dir_full_path should always available.")
-    }
+    // pub fn get_data_dir(&self) -> &Path {
+    //     self.data_dir_full_path
+    //         .as_ref()
+    //         .map(|pb| pb.as_path())
+    //         .expect("data_dir_full_path should always available.")
+    // }
 
-    fn get_working_lock_file(&self) -> PathBuf {
-        self.get_data_dir().join("working.lock")
-    }
+    // fn get_working_lock_file(&self) -> PathBuf {
+    //     self.data_dir_full_path.as_path().join("working.lock")
+    // }
 
     pub fn lock_working_file(&self) -> Result<(), failure::Error> {
-        let lof = self.get_working_lock_file();
+        let lof = self.data_dir_full_path.as_path().join("working.lock");
         if lof.exists() {
             bail!("create lock file failed: {:?}, if you can sure app isn't running, you can delete it manually.", lof);
         } else {
@@ -129,7 +202,7 @@ where
         Ok(())
     }
     pub fn unlock_working_file(&self) {
-        let lof = self.get_working_lock_file();
+        let lof = self.data_dir_full_path.as_path().join("working.lock");
         if lof.exists() {
             if let Err(err) = fs::remove_file(lof.as_path()) {
                 warn!("remove lock file failed: {:?}, {:?}", lof, err);
@@ -137,54 +210,56 @@ where
         }
     }
 
-    pub fn create_sqlite_pool(&self) -> Result<r2d2::Pool<SqliteConnectionManager>, failure::Error> {
-        let db_file = self.get_data_dir().join("db.db");
+    pub fn create_sqlite_pool(
+        &self,
+    ) -> Result<r2d2::Pool<SqliteConnectionManager>, failure::Error> {
+        let db_file = self.data_dir_full_path.as_path().join("db.db");
         let manager = SqliteConnectionManager::file(db_file);
         match r2d2::Pool::new(manager) {
             Ok(p) => Ok(p),
-            Err(err) => bail!("create db pool failed: {:?}", err)
+            Err(err) => bail!("create db pool failed: {:?}", err),
         }
     }
 
-    pub fn validate_conf(&mut self) -> Result<(), failure::Error> {
-        if self.data_dir.trim().is_empty() {
-            self.data_dir = "data".to_string();
-        } else {
-            self.data_dir = self.data_dir.trim().to_string();
-        }
+    // pub fn validate_conf(&mut self) -> Result<(), failure::Error> {
+    //     // if self.data_dir.trim().is_empty() {
+    //     //     self.data_dir = "data".to_string();
+    //     // } else {
+    //     //     self.data_dir = self.data_dir.trim().to_string();
+    //     // }
 
-        let mut path_buf = Path::new(&self.data_dir).to_path_buf();
-        if !&path_buf.is_absolute() {
-            path_buf = env::current_exe()?
-                .parent()
-                .expect("current_exe parent should exists.")
-                .join(path_buf);
-        }
-        if !&path_buf.exists() {
-            if let Err(err) = fs::create_dir_all(&path_buf) {
-                bail!("create data_dir {:?}, failed: {:?}", &path_buf, err);
-            }
-        }
-        match path_buf.canonicalize() {
-            Ok(ab) => self.data_dir_full_path.replace(ab),
-            Err(err) => bail!("path_buf {:?} canonicalize failed: {:?}", &path_buf, err),
-        };
+    //     // let mut path_buf = Path::new(&self.data_dir).to_path_buf();
+    //     // if !&path_buf.is_absolute() {
+    //     //     path_buf = env::current_exe()?
+    //     //         .parent()
+    //     //         .expect("current_exe parent should exists.")
+    //     //         .join(path_buf);
+    //     // }
+    //     // if !&path_buf.exists() {
+    //     //     if let Err(err) = fs::create_dir_all(&path_buf) {
+    //     //         bail!("create data_dir {:?}, failed: {:?}", &path_buf, err);
+    //     //     }
+    //     // }
+    //     // match path_buf.canonicalize() {
+    //     //     Ok(ab) => self.data_dir_full_path.replace(ab),
+    //     //     Err(err) => bail!("path_buf {:?} canonicalize failed: {:?}", &path_buf, err),
+    //     // };
 
-        self.log_full_path
-            .replace(Path::new(&self.get_log_file()).to_path_buf());
+    //     // self.log_full_path
+    //     //     .replace(Path::new(&self.get_log_file()).to_path_buf());
 
-        let servers_dir = self.get_servers_dir();
-        if !servers_dir.exists() {
-            if let Err(err) = fs::create_dir_all(&servers_dir) {
-                bail!("create servers_dir {:?}, failed: {:?}", &servers_dir, err);
-            }
-        }
-        Ok(())
-    }
+    //     let servers_dir = self.get_servers_dir();
+    //     if !servers_dir.exists() {
+    //         if let Err(err) = fs::create_dir_all(&servers_dir) {
+    //             bail!("create servers_dir {:?}, failed: {:?}", &servers_dir, err);
+    //         }
+    //     }
+    //     Ok(())
+    // }
 
-    pub fn get_servers_dir(&self) -> PathBuf {
-        self.get_data_dir().join("servers")
-    }
+    // pub fn get_servers_dir(&self) -> PathBuf {
+    //     self.get_data_dir().join("servers")
+    // }
 
     pub fn load_server_yml(
         &self,
@@ -216,7 +291,7 @@ where
         multi_bar: Option<SharedMpb>,
         mut pool: Option<r2d2::Pool<M>>,
     ) -> Vec<Server<M>> {
-        if let Ok(rd) = self.get_servers_dir().read_dir() {
+        if let Ok(rd) = self.servers_dir.read_dir() {
             rd.filter_map(|ery| match ery {
                 Err(err) => {
                     warn!("read_dir entry return error: {:?}", err);
@@ -248,21 +323,22 @@ where
             })
             .collect()
         } else {
-            warn!("read_dir failed: {:?}", self.get_servers_dir());
+            warn!("read_dir failed: {:?}", self.servers_dir);
             Vec::new()
         }
     }
 
     pub fn get_log_conf(&self) -> &LogConf {
-        &self.log_conf
+        &self.inner.log_conf
     }
 
-    pub fn get_log_file(&self) -> String {
-        let path = Path::new(&self.log_conf.log_file);
+    fn get_log_file(data_dir: &Path, inner: &AppConfYml) -> String {
+        let log_file = &inner.log_conf.log_file;
+        let path = Path::new(log_file);
         if path.is_absolute() {
-            self.log_conf.log_file.clone()
+            log_file.clone()
         } else {
-            self.get_data_dir()
+            data_dir
                 .join(path)
                 .to_str()
                 .expect("log_file should be a valid string.")
@@ -279,8 +355,8 @@ mod tests {
     fn t_app_conf_deserd() -> Result<(), failure::Error> {
         let yml = r##"---
 servers_dir: abc"##;
-        let app_conf = serde_yaml::from_str::<AppConf<SqliteConnectionManager>>(&yml)?;
-        assert_eq!(app_conf.get_servers_dir(), Path::new("abc"));
+        let app_conf = serde_yaml::from_str::<AppConfYml>(&yml)?;
+        // assert_eq!(app_conf.get_servers_dir(), Path::new("abc"));
 
         let ymld = serde_yaml::to_string(&app_conf)?;
         println!("{}", ymld);

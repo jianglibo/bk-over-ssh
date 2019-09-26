@@ -1,4 +1,5 @@
 use crate::data_shape::RemoteFileItem;
+use crate::develope::tutil;
 use chrono::{DateTime, Datelike, SecondsFormat, Utc};
 use failure;
 use r2d2;
@@ -6,9 +7,12 @@ use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::params;
 use rusqlite::{types::Null, Connection, Result as SqliteResult, NO_PARAMS};
 
-pub fn create_sqlite_pool(db_file: impl AsRef<str>) -> r2d2::Pool<SqliteConnectionManager> {
+pub type SqlitePool = r2d2::Pool<SqliteConnectionManager>;
+
+pub fn create_sqlite_pool(db_file: impl AsRef<str>) -> SqlitePool {
     let db_file = db_file.as_ref();
-    let manager = SqliteConnectionManager::file(db_file);
+    let manager = SqliteConnectionManager::file(db_file)
+        .with_init(|c| c.execute_batch("PRAGMA foreign_keys=1;"));
     r2d2::Pool::new(manager).unwrap()
 }
 
@@ -22,31 +26,38 @@ pub struct RemoteFileItemInDb {
     time_created: Option<DateTime<Utc>>,
 }
 
-pub fn create_sqlite_database(pool: &r2d2::Pool<SqliteConnectionManager>) -> Result<usize, failure::Error> {
+pub fn create_sqlite_database(pool: SqlitePool) -> Result<(), failure::Error> {
     let conn = pool.get().unwrap();
-    let r = conn.execute(
-        "CREATE TABLE remote_file_item (
-                  id              INTEGER PRIMARY KEY,
-                  path            TEXT NOT NULL UNIQUE,
-                  sha1            TEXT,
-                  len             INTEGER DEFAULT 0,
-                  time_modified   TEXT,
-                  time_created    TEXT
-                  )",
-        NO_PARAMS,
+    conn.execute_batch(
+        "BEGIN;
+            CREATE TABLE directory (
+                id  INTEGER PRIMARY KEY,
+                path TEXT NOT NULL UNIQUE
+            );
+             CREATE TABLE remote_file_item (
+                   id              INTEGER PRIMARY KEY,
+                   path            TEXT NOT NULL,
+                   sha1            TEXT,
+                   len             INTEGER DEFAULT 0,
+                   time_modified   TEXT,
+                   time_created    TEXT,
+                   dir_id          INTEGER NOT NULL,
+                   FOREIGN KEY(dir_id) REFERENCES directory(id)
+                   );
+             CREATE UNIQUE INDEX dir_path ON remote_file_item (path, dir_id);
+                COMMIT;",
     )?;
-    Ok(r)
+    Ok(())
 }
-
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::str::FromStr;
 
-    pub fn create_sqlite_database_1(conn: &Connection) -> Result<usize, failure::Error> {
-    let r = conn.execute(
-        "CREATE TABLE remote_file_item (
+    pub fn create_sqlite_database_1(pool: &SqlitePool) -> Result<usize, failure::Error> {
+        let r = pool.get().unwrap().execute(
+            "CREATE TABLE remote_file_item (
                   id              INTEGER PRIMARY KEY,
                   path            TEXT NOT NULL UNIQUE,
                   sha1            TEXT,
@@ -54,22 +65,45 @@ mod tests {
                   time_modified   TEXT,
                   time_created    TEXT
                   )",
-        NO_PARAMS,
-    )?;
-    Ok(r)
-}
-
+            NO_PARAMS,
+        )?;
+        Ok(r)
+    }
 
     #[test]
     fn t_create_database() -> Result<(), failure::Error> {
-        let conn = Connection::open_in_memory()?;
+        let pool = tutil::create_sqlite_mem_pool();
+        create_sqlite_database(pool.clone())?;
 
-        println!("auto_commit: {}", conn.is_autocommit());
+        let count = pool.get().unwrap().execute(
+            "INSERT INTO remote_file_item (path, time_created, dir_id)
+                  VALUES (?1, ?2, ?3)",
+            params!["abc", Utc::now(), 66],
+        )?;
 
-        let r = create_sqlite_database_1(&conn)?;
+        let last_row_id = pool.get().unwrap().last_insert_rowid();
+        let c = pool.get().unwrap();
+        let mut stmt = c.prepare("SELECT id, path, dir_id, time_created FROM remote_file_item")?;
+        let rows: Vec<(String, i64, i64)> = stmt
+            .query_map(NO_PARAMS, |row| Ok((row.get(1)?, row.get(0)?, row.get(2)?)))?
+            .filter_map(|r| r.ok())
+            .collect();
+        rows.iter().for_each(|p| println!("{:?}", p));
+
+        assert!(last_row_id > 0);
+        Ok(())
+    }
+
+    #[test]
+    fn t_create_database_1() -> Result<(), failure::Error> {
+        let pool = tutil::create_sqlite_mem_pool();
+
+        println!("auto_commit: {}", pool.get().unwrap().is_autocommit());
+
+        let r = create_sqlite_database_1(&pool)?;
         assert_eq!(r, 0, "first execution should return 0");
 
-        if let Err(_err) = create_sqlite_database_1(&conn) {
+        if let Err(_err) = create_sqlite_database_1(&pool) {
             println!("already exists");
         } else {
             assert!(false, "should throw exception.");
@@ -88,7 +122,7 @@ mod tests {
             time_created: Some(now),
         };
 
-        let count = conn.execute(
+        let count = pool.get().unwrap().execute(
             "INSERT INTO remote_file_item (path, time_created)
                   VALUES (?1, ?2)",
             // &[&me.path, &me.sha1 as &ToSql, &Null, &Null, &me.time_created as &ToSql],
@@ -96,7 +130,8 @@ mod tests {
         )?;
 
         assert_eq!(count, 1, "should effect one item.");
-        let mut stmt = conn.prepare("SELECT id, path, time_created FROM remote_file_item")?;
+        let c = pool.get().unwrap();
+        let mut stmt = c.prepare("SELECT id, path, time_created FROM remote_file_item")?;
 
         let person_iter = stmt.query_map(NO_PARAMS, |row| {
             Ok(RemoteFileItemInDb {

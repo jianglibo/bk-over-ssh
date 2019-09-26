@@ -34,4 +34,4 @@ pub mod develope;
 pub mod log_util;
 pub mod rustsync;
 pub mod ioutil;
-pub mod sqlite_func;
+pub mod sqlite_db;

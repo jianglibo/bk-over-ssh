@@ -321,8 +321,8 @@ where
         MC: r2d2::ManageConnection,
     {
         Server::<MC>::load_from_yml(
-            app_conf.get_servers_dir(),
-            app_conf.get_data_dir(),
+            app_conf.servers_dir.as_path(),
+            app_conf.data_dir_full_path.as_path(),
             name,
             buf_len,
             multi_bar,
