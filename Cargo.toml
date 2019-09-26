@@ -82,9 +82,9 @@ sha2 = "0.8.0"
 name = "bk-over-ssh"
 path = "src/main.rs"
 
-[[bin]]
-name = "bk-over-ssh-centos6"
-path = "src/main.rs"
+#[[bin]]
+#name = "bk-over-ssh-centos6"
+#path = "src/main.rs"
 
 [lib]
 name = "bk_over_ssh"

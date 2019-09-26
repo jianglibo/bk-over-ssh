@@ -271,7 +271,7 @@ fn main() -> Result<(), failure::Error> {
         return Ok(());
     }
 
-    let pool = if let Some(_use_db) = m.value_of("use-db") {
+    let pool_op = if let Some(_use_db) = m.value_of("use-db") {
         Some(app_conf.create_sqlite_pool())
     } else {
         None
@@ -287,7 +287,7 @@ fn main() -> Result<(), failure::Error> {
     if let Some(delay) = delay {
         delay_exec(delay);
     }
-    if let Err(err) = main_entry(app1, &app_conf, &m, console_log, pool) {
+    if let Err(err) = main_entry(app1, &app_conf, &m, console_log, pool_op) {
         error!("main return error: {:?}", err);
     }
     if lock_file {
@@ -301,19 +301,19 @@ fn main_entry<'a, M>(
     app_conf: &AppConf<M>,
     m: &'a clap::ArgMatches<'a>,
     console_log: bool,
-    pool: Option<r2d2::Pool<M>>,
+    pool_op: Option<r2d2::Pool<M>>,
 ) -> Result<(), failure::Error>
 where
     M: r2d2::ManageConnection,
 {
     if let ("sync-dirs", Some(sub_matches)) = m.subcommand() {
-        if let Some(pool) = pool {
+        if let Some(pool) = pool_op {
             return sync_dirs(&app_conf, sub_matches, console_log, Some(pool.clone()));
         } else {
             return sync_dirs(&app_conf, sub_matches, console_log, None);
         }
     }
-    main_entry_1(app1, app_conf, m, console_log)
+    main_entry_1(app1, app_conf, m, console_log, pool_op.clone())
 }
 
 fn main_entry_1<'a, M>(
@@ -321,6 +321,7 @@ fn main_entry_1<'a, M>(
     app_conf: &AppConf<M>,
     m: &'a clap::ArgMatches<'a>,
     console_log: bool,
+    pool_op: Option<r2d2::Pool<M>>,
 ) -> Result<(), failure::Error>
 where
     M: r2d2::ManageConnection,
@@ -452,7 +453,7 @@ where
         ("list-local-files", Some(sub_matches)) => {
             let skip_sha1 = sub_matches.is_present("skip-sha1");
             let server =
-                &app_conf.load_server_yml(parse_server_yml(sub_matches), None, None, None)?;
+                &app_conf.load_server_yml(parse_server_yml(sub_matches), None, None, pool_op)?;
             if let Some(out) = sub_matches.value_of("out") {
                 let mut out = fs::OpenOptions::new()
                     .create(true)

@@ -66,7 +66,7 @@ impl RemoteFileItemInDb {
     }
 }
 
-pub fn insert_directory(pool: SqlitePool, path: impl AsRef<str>) -> Result<i64, failure::Error> {
+pub fn insert_directory<M>(pool: r2d2::Pool<M>, path: impl AsRef<str>) -> Result<i64, failure::Error> where M: r2d2::ManageConnection, {
     let conn = pool.get().unwrap();
     let count = conn.execute(
         "INSERT INTO directory (path) VALUES (?1)",
@@ -78,7 +78,7 @@ pub fn insert_directory(pool: SqlitePool, path: impl AsRef<str>) -> Result<i64, 
     Ok(conn.last_insert_rowid())
 }
 
-pub fn insert_remote_file_item(pool: SqlitePool, rfi: RemoteFileItemInDb) {
+pub fn insert_remote_file_item<M>(pool: r2d2::Pool<M>, rfi: RemoteFileItemInDb) where M: r2d2::ManageConnection,{
     let conn = pool.get().unwrap();
     match conn.execute(
             "INSERT INTO directory (path, sha1, len, time_modified, time_created, dir_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",

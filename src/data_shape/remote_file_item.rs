@@ -1,6 +1,8 @@
 use super::server::Directory;
 use crate::actions::hash_file_sha1;
-use crate::sqlite_db::db::{SqlitePool, insert_directory, insert_remote_file_item, RemoteFileItemInDb};
+use crate::sqlite_db::db::{
+    insert_directory, insert_remote_file_item, RemoteFileItemInDb, SqlitePool,
+};
 use log::*;
 use serde::{Deserialize, Serialize};
 use std::io;
@@ -10,7 +12,7 @@ use std::time::SystemTime;
 use walkdir::WalkDir;
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct RemoteFileItem{
+pub struct RemoteFileItem {
     path: String,
     sha1: Option<String>,
     len: u64,
@@ -18,7 +20,7 @@ pub struct RemoteFileItem{
     created: Option<u64>,
 }
 
-impl RemoteFileItem{
+impl RemoteFileItem {
     pub fn from_path(base_path: impl AsRef<Path>, path: PathBuf, skip_sha1: bool) -> Option<Self> {
         let metadata_r = path.metadata();
         match metadata_r {
@@ -84,40 +86,29 @@ impl RemoteFileItem {
     }
 
     pub fn get_sha1(&self) -> Option<&str> {
-        self.sha1.as_ref().map(|s|s.as_str())
+        self.sha1.as_ref().map(|s| s.as_str())
     }
 }
 
-pub fn load_remote_item_to_sqlite(
+pub fn load_remote_item_to_sqlite<M>(
     directory: &Directory,
-    pool: SqlitePool,
+    pool: r2d2::Pool<M>,
     skip_sha1: bool,
-) -> Result<(), failure::Error> {
-    let bp = Path::new(directory.get_remote_dir()).canonicalize();
-
-    match bp {
-        Ok(base_path) => {
-            let dir_id = if let Some(path_str) = base_path.to_str() {
-                insert_directory(pool.clone(), path_str)?
-            } else {
-                bail!("base_path to_str failed: {:?}", base_path);
-            };
-
-            WalkDir::new(&base_path)
-                .follow_links(false)
-                .into_iter()
-                .filter_map(|e| e.ok())
-                .filter(|d| d.file_type().is_file())
-                .filter_map(|d| d.path().canonicalize().ok())
-                .filter_map(|d| directory.match_path(d))
-                .filter_map(|d| RemoteFileItemInDb::from_path(&base_path, d, skip_sha1, dir_id))
-                .for_each(|rfi| {
-                    insert_remote_file_item(pool.clone(), rfi);
-                });
-        }
-        Err(err) => {
-            error!("load_dir resolve path failed: {:?}", err);
-        }
+) -> Result<(), failure::Error> where
+    M: r2d2::ManageConnection, {
+    if let Some(base_path) = directory.get_remote_canonicalized_dir_str() {
+        let dir_id = insert_directory(pool.clone(), base_path.as_str())?;
+        WalkDir::new(&base_path)
+            .follow_links(false)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|d| d.file_type().is_file())
+            .filter_map(|d| d.path().canonicalize().ok())
+            .filter_map(|d| directory.match_path(d))
+            .filter_map(|d| RemoteFileItemInDb::from_path(&base_path, d, skip_sha1, dir_id))
+            .for_each(|rfi| {
+                insert_remote_file_item(pool.clone(), rfi);
+            });
     }
     Ok(())
 }
@@ -126,40 +117,30 @@ pub fn load_remote_item<O>(
     directory: &Directory,
     out: &mut O,
     skip_sha1: bool,
-) -> Result<(), failure::Error> where O: io::Write, {
-    let bp = Path::new(directory.get_remote_dir()).canonicalize();
-
-    match bp {
-        Ok(base_path) => {
-            if let Some(path_str) = base_path.to_str() {
-                writeln!(out, "{}", path_str)?;
-            } else {
-                bail!("base_path to_str failed: {:?}", base_path);
-            }
-            WalkDir::new(&base_path)
-                .follow_links(false)
-                .into_iter()
-                .filter_map(|e| e.ok())
-                .filter(|d| d.file_type().is_file())
-                .filter_map(|d| d.path().canonicalize().ok())
-                .filter_map(|d| directory.match_path(d))
-                .filter_map(|d| RemoteFileItem::from_path(&base_path, d, skip_sha1))
-                .for_each(|rfi| {
-                    match serde_json::to_string(&rfi) {
-                        Ok(line) => {
-                            if let Err(err) = writeln!(out, "{}", line) {
-                                error!("write item line failed: {:?}, {:?}", err, line);
-                            }
-                        }
-                        Err(err) => {
-                            error!("serialize item line failed: {:?}", err);
-                        }
+) -> Result<(), failure::Error>
+where
+    O: io::Write,
+{
+    if let Some(base_path) = directory.get_remote_canonicalized_dir_str() {
+        writeln!(out, "{}", base_path)?;
+        WalkDir::new(&base_path)
+            .follow_links(false)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|d| d.file_type().is_file())
+            .filter_map(|d| d.path().canonicalize().ok())
+            .filter_map(|d| directory.match_path(d))
+            .filter_map(|d| RemoteFileItem::from_path(&base_path, d, skip_sha1))
+            .for_each(|rfi| match serde_json::to_string(&rfi) {
+                Ok(line) => {
+                    if let Err(err) = writeln!(out, "{}", line) {
+                        error!("write item line failed: {:?}, {:?}", err, line);
                     }
-                });
-        }
-        Err(err) => {
-            error!("load_dir resolve path failed: {:?}", err);
-        }
+                }
+                Err(err) => {
+                    error!("serialize item line failed: {:?}", err);
+                }
+            });
     }
     Ok(())
 }
@@ -172,7 +153,12 @@ mod tests {
 
     #[test]
     fn t_deserialize_item() -> Result<(), failure::Error> {
-        log_util::setup_logger_detail(true, "output.log", vec!["data_shape::remote_file_item"], Some(vec!["ssh2"]))?;
+        log_util::setup_logger_detail(
+            true,
+            "output.log",
+            vec!["data_shape::remote_file_item"],
+            Some(vec!["ssh2"]),
+        )?;
         let item = RemoteFileItem {
             path: "b b\\b b.txt".to_string(),
             sha1: None,

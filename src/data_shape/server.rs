@@ -1,11 +1,11 @@
 use crate::actions::{copy_a_file_item, SyncDirReport};
 use crate::data_shape::{
-    load_remote_item, rolling_files, string_path, AppConf, FileItem, FileItemProcessResult,
-    FileItemProcessResultStats, RemoteFileItem, SyncType,load_remote_item_to_sqlite
+    load_remote_item, load_remote_item_to_sqlite, rolling_files, string_path, AppConf, FileItem,
+    FileItemProcessResult, FileItemProcessResultStats, RemoteFileItem, SyncType,
 };
-use crate::sqlite_db::db::{create_sqlite_database};
 use crate::ioutil::SharedMpb;
 use crate::rustsync::{DeltaFileReader, DeltaReader, Signature};
+use crate::sqlite_db::db::create_sqlite_database;
 use bzip2::write::BzEncoder;
 use bzip2::Compression;
 use glob::Pattern;
@@ -51,6 +51,23 @@ pub struct Directory {
 impl Directory {
     pub fn get_remote_dir(&self) -> &str {
         self.remote_dir.as_str()
+    }
+
+    pub fn get_remote_canonicalized_dir_str(&self) -> Option<String> {
+        let bp = Path::new(self.get_remote_dir()).canonicalize();
+        match bp {
+            Ok(base_path) => {
+                if let Some(path_str) = base_path.to_str() {
+                    return Some(path_str.to_owned());
+                } else {
+                    error!("base_path to_str failed: {:?}", base_path);
+                }
+            }
+            Err(err) => {
+                error!("load_dir resolve path failed: {:?}", err);
+            }
+        }
+        None
     }
     /// for test purpose.
     #[allow(dead_code)]
@@ -914,8 +931,14 @@ where
         out: &mut O,
         skip_sha1: bool,
     ) -> Result<(), failure::Error> {
-        for one_dir in self.server_yml.directories.iter() {
-            load_remote_item(one_dir, out, skip_sha1)?;
+        if let Some(pool) = self.pool.as_ref().cloned() {
+            for one_dir in self.server_yml.directories.iter() {
+            load_remote_item_to_sqlite(one_dir, pool, skip_sha1)?;
+            }
+        } else {
+            for one_dir in self.server_yml.directories.iter() {
+                load_remote_item(one_dir, out, skip_sha1)?;
+            }
         }
         Ok(())
     }
