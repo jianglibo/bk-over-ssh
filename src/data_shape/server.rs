@@ -5,14 +5,13 @@ use crate::data_shape::{
 };
 use crate::ioutil::SharedMpb;
 use crate::rustsync::{DeltaFileReader, DeltaReader, Signature};
-use crate::sqlite_db::db::create_sqlite_database;
+use crate::db_accesses::{DbAccess};
 use bzip2::write::BzEncoder;
 use bzip2::Compression;
 use glob::Pattern;
 use indicatif::{ProgressBar, ProgressStyle};
 use log::*;
 use r2d2;
-use r2d2_sqlite::SqliteConnectionManager;
 use serde::{Deserialize, Serialize};
 use ssh2;
 use std::io::prelude::{BufRead, Read};
@@ -20,6 +19,7 @@ use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 use std::{fs, io, io::Seek};
+use std::marker::PhantomData;
 use tar::Builder;
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -195,9 +195,10 @@ pub struct ServerYml {
     pub yml_location: Option<PathBuf>,
 }
 
-pub struct Server<M>
+pub struct Server<M, D>
 where
     M: r2d2::ManageConnection,
+    D: DbAccess<M>,
 {
     pub server_yml: ServerYml,
     _tcp_stream: Option<TcpStream>,
@@ -208,12 +209,14 @@ where
     pub yml_location: Option<PathBuf>,
     pub multi_bar: Option<SharedMpb>,
     pub pb: Option<(ProgressBar, ProgressBar)>,
-    pub pool: Option<r2d2::Pool<M>>,
+    pub db_access: Option<D>,
+    _m: PhantomData<M>,
 }
 
-impl<M> Server<M>
+impl<M, D> Server<M, D>
 where
     M: r2d2::ManageConnection,
+    D: DbAccess<M>,
 {
     pub fn get_host(&self) -> &str {
         self.server_yml.host.as_str()
@@ -331,36 +334,32 @@ where
         }
     }
 
-    pub fn load_from_yml_with_app_config<MC>(
-        app_conf: &AppConf<MC>,
+    pub fn load_from_yml_with_app_config(
+        app_conf: &AppConf<M, D>,
         name: impl AsRef<str>,
         buf_len: Option<usize>,
         multi_bar: Option<SharedMpb>,
-        pool: Option<r2d2::Pool<MC>>,
-    ) -> Result<Server<MC>, failure::Error>
-    where
-        MC: r2d2::ManageConnection,
+        db_access: Option<D>,
+    ) -> Result<Server<M, D>, failure::Error>
     {
-        Server::<MC>::load_from_yml(
+        Server::<M, D>::load_from_yml(
             app_conf.servers_dir.as_path(),
             app_conf.data_dir_full_path.as_path(),
             name,
             buf_len,
             multi_bar,
-            pool,
+            db_access,
         )
     }
 
-    pub fn load_from_yml<MC>(
+    pub fn load_from_yml(
         servers_dir: impl AsRef<Path>,
         data_dir: impl AsRef<Path>,
         name: impl AsRef<str>,
         buf_len: Option<usize>,
         multi_bar: Option<SharedMpb>,
-        pool: Option<r2d2::Pool<MC>>,
-    ) -> Result<Server<MC>, failure::Error>
-    where
-        MC: r2d2::ManageConnection,
+        db_access: Option<D>,
+    ) -> Result<Server<M, D>, failure::Error>
     {
         let name = name.as_ref();
         trace!("got server yml name: {:?}", name);
@@ -402,14 +401,11 @@ where
         if !working_dir.exists() {
             fs::create_dir_all(&working_dir)?;
         }
-        // server.report_dir.replace(report_dir);
-        // server.tar_dir.replace(tar_dir);
-        // server.working_dir.replace(working_dir);
 
         let mut server = Server {
             server_yml,
             multi_bar,
-            pool,
+            db_access,
             pb: None,
             _tcp_stream: None,
             report_dir,
@@ -417,6 +413,7 @@ where
             tar_dir,
             working_dir,
             yml_location: None,
+            _m: PhantomData,
         };
 
         if let Some(buf_len) = buf_len {
@@ -931,9 +928,9 @@ where
         out: &mut O,
         skip_sha1: bool,
     ) -> Result<(), failure::Error> {
-        if let Some(pool) = self.pool.as_ref().cloned() {
+        if let Some(db_access) = self.db_access.as_ref().cloned() {
             for one_dir in self.server_yml.directories.iter() {
-            load_remote_item_to_sqlite(one_dir, pool, skip_sha1)?;
+            load_remote_item_to_sqlite(one_dir, db_access.clone(), skip_sha1)?;
             }
         } else {
             for one_dir in self.server_yml.directories.iter() {
@@ -1023,6 +1020,9 @@ mod tests {
     use std::sync::Arc;
     use std::thread;
     use std::time::Duration;
+    use crate::db_accesses::{SqliteDbAccess};
+    use r2d2_sqlite::SqliteConnectionManager;
+    
 
     fn log() {
         log_util::setup_logger_detail(
@@ -1034,8 +1034,8 @@ mod tests {
         .expect("init log should success.");
     }
 
-    fn load_server_yml() -> Server<SqliteConnectionManager> {
-        Server::<SqliteConnectionManager>::load_from_yml(
+    fn load_server_yml() -> Server<SqliteConnectionManager, SqliteDbAccess> {
+        Server::<SqliteConnectionManager, SqliteDbAccess>::load_from_yml(
             "data/servers",
             "data",
             "localhost.yml",
@@ -1193,18 +1193,17 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn t_load_from_path_into_db() -> Result<(), failure::Error> {
-        let mut one_dir = Directory {
-            remote_dir: "fixtures/adir".to_string(),
-            ..Directory::default()
-        };
-        let pool = tutil::create_sqlite_mem_pool();
-        create_sqlite_database(pool.clone())?;
-        load_remote_item_to_sqlite(&one_dir, pool, true)?;
-
-        Ok(())
-    }
+    // #[test]
+    // fn t_load_from_path_into_db() -> Result<(), failure::Error> {
+    //     let mut one_dir = Directory {
+    //         remote_dir: "fixtures/adir".to_string(),
+    //         ..Directory::default()
+    //     };
+    //     let pool = tutil::create_sqlite_mem_pool();
+    //     create_sqlite_database(pool.clone())?;
+    //     load_remote_item_to_sqlite(&one_dir, pool, true)?;
+    //     Ok(())
+    // }
 
     #[test]
     fn t_from_path() -> Result<(), failure::Error> {

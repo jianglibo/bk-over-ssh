@@ -18,7 +18,7 @@ mod ioutil;
 mod log_util;
 mod mail;
 mod rustsync;
-mod sqlite_db;
+mod db_accesses;
 
 #[macro_use]
 extern crate rusqlite;
@@ -44,11 +44,11 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 use std::{fs, io, io::BufRead, io::Write};
+use db_accesses::{DbAccess, SqliteDbAccess};
 
 use actions::SyncDirReport;
 use data_shape::{AppConf, Server, ServerYml, CONF_FILE_NAME};
 use r2d2_sqlite::SqliteConnectionManager;
-use sqlite_db::db::create_sqlite_database;
 
 fn parse_server_yml<'a>(sub_sub_matches: &'a clap::ArgMatches<'a>) -> &'a str {
     sub_sub_matches.value_of("server-yml").unwrap()
@@ -97,13 +97,14 @@ fn demonstrate_pbr() -> Result<(), failure::Error> {
     Ok(())
 }
 
-fn process_app_config<M>(
+fn process_app_config<M, D>(
     conf: Option<&str>,
     console_log: bool,
     re_try: bool,
-) -> Result<AppConf<M>, failure::Error>
+) -> Result<AppConf<M, D>, failure::Error>
 where
     M: r2d2::ManageConnection,
+    D: DbAccess<M>,
 {
     let message_pb = ProgressBar::new_spinner();
     message_pb.enable_steady_tick(200);
@@ -169,16 +170,17 @@ fn delay_exec(delay: &str) {
     thread::sleep(Duration::from_secs(delay));
 }
 
-fn sync_dirs<'a, M>(
-    app_conf: &AppConf<M>,
+fn sync_dirs<'a, M, D>(
+    app_conf: &AppConf<M, D>,
     sub_matches: &'a clap::ArgMatches<'a>,
     console_log: bool,
-    pool: Option<r2d2::Pool<M>>,
+    db_access: Option<D>,
 ) -> Result<(), failure::Error>
 where
     M: r2d2::ManageConnection,
+    D: DbAccess<M>,
 {
-    let mut servers: Vec<Server<M>> = Vec::new();
+    let mut servers: Vec<Server<M, D>> = Vec::new();
     let skip_sha1 = sub_matches.is_present("skip-sha1");
     let no_pb = sub_matches.is_present("no-pb");
     let buf_len = sub_matches.value_of("buf-len").and_then(|v| {
@@ -200,14 +202,14 @@ where
             parse_server_yml(sub_matches),
             buf_len,
             mb_op.as_ref().map(Arc::clone),
-            pool,
+            db_access,
         )?;
         servers.push(server);
     } else {
         servers.append(&mut app_conf.load_all_server_yml(
             buf_len,
             mb_op.as_ref().map(Arc::clone),
-            pool,
+            db_access,
         ));
     }
 
@@ -258,24 +260,19 @@ fn main() -> Result<(), failure::Error> {
 
     let conf = m.value_of("conf");
 
-    let app_conf = process_app_config::<SqliteConnectionManager>(conf, console_log, false)?;
+    let app_conf = process_app_config::<SqliteConnectionManager, SqliteDbAccess>(conf, console_log, false)?;
+
 
     if let ("create-db", Some(sub_matches)) = m.subcommand() {
         let db_type = sub_matches.value_of("db-type").unwrap_or("sqlite");
         if "sqlite" == db_type {
-            let pool = app_conf.create_sqlite_pool();
-            create_sqlite_database(pool.clone())?;
+            app_conf.get_db_access().create_database()?;
         } else {
             println!("unsupported database: {}", db_type);
         }
         return Ok(());
     }
 
-    let pool_op = if let Some(_use_db) = m.value_of("use-db") {
-        Some(app_conf.create_sqlite_pool())
-    } else {
-        None
-    };
 
     let lock_file = !m.is_present("no-lock-file");
 
@@ -296,15 +293,16 @@ fn main() -> Result<(), failure::Error> {
     Ok(())
 }
 
-fn main_entry<'a, M>(
+fn main_entry<'a, M, D>(
     app1: App,
-    app_conf: &AppConf<M>,
+    app_conf: &AppConf<M, D>,
     m: &'a clap::ArgMatches<'a>,
     console_log: bool,
-    pool_op: Option<r2d2::Pool<M>>,
+    db_access: Option<D>,
 ) -> Result<(), failure::Error>
 where
     M: r2d2::ManageConnection,
+    D: DbAccess<M>,
 {
     if let ("sync-dirs", Some(sub_matches)) = m.subcommand() {
         if let Some(pool) = pool_op {
@@ -316,15 +314,16 @@ where
     main_entry_1(app1, app_conf, m, console_log, pool_op.clone())
 }
 
-fn main_entry_1<'a, M>(
+fn main_entry_1<'a, M, D>(
     mut app1: App,
-    app_conf: &AppConf<M>,
+    app_conf: &AppConf<M, D>,
     m: &'a clap::ArgMatches<'a>,
     console_log: bool,
-    pool_op: Option<r2d2::Pool<M>>,
+    db_access: Option<D>,
 ) -> Result<(), failure::Error>
 where
     M: r2d2::ManageConnection,
+    D: DbAccess<M>,
 {
     match m.subcommand() {
         ("pbr", Some(_sub_matches)) => {

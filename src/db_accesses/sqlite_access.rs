@@ -6,68 +6,42 @@ use r2d2;
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::params;
 use std::path::{Path, PathBuf};
+use super::{DbAccess, RemoteFileItemInDb};
 
 pub type SqlitePool = r2d2::Pool<SqliteConnectionManager>;
 
-pub fn create_sqlite_pool(db_file: impl AsRef<Path>) -> SqlitePool {
-    let db_file = db_file.as_ref();
+#[derive(Clone)]
+pub struct SqliteDbAccess {
+    pool: SqlitePool,
+}
+
+impl SqliteDbAccess {
+    pub fn new(db_file: impl AsRef<Path>) -> Self {
+            let db_file = db_file.as_ref();
     let manager = SqliteConnectionManager::file(db_file)
         .with_init(|c| c.execute_batch("PRAGMA foreign_keys=1;"));
-    r2d2::Pool::new(manager).unwrap()
-}
-
-#[derive(Debug, Default)]
-pub struct RemoteFileItemInDb {
-    id: i64,
-    path: String,
-    sha1: Option<String>,
-    len: i64,
-    modified: Option<DateTime<Utc>>,
-    created: Option<DateTime<Utc>>,
-    dir_id: i64,
-}
-
-impl RemoteFileItemInDb {
-    pub fn from_path(
-        base_path: impl AsRef<Path>,
-        path: PathBuf,
-        skip_sha1: bool,
-        dir_id: i64,
-    ) -> Option<Self> {
-        let metadata_r = path.metadata();
-        match metadata_r {
-            Ok(metadata) => {
-                let sha1 = if !skip_sha1 {
-                    hash_file_sha1(&path)
-                } else {
-                    Option::<String>::None
-                };
-                let relative_o = path.strip_prefix(&base_path).ok().and_then(|p| p.to_str());
-                if let Some(relative) = relative_o {
-                    return Some(Self {
-                        id: 0,
-                        path: relative.to_string(),
-                        sha1,
-                        len: metadata.len() as i64,
-                        modified: metadata.modified().ok().map(Into::into),
-                        created: metadata.created().ok().map(Into::into),
-                        dir_id,
-                    });
-                } else {
-                    error!("RemoteFileItem path name to_str() failed. {:?}", path);
-                }
-                // }
-            }
-            Err(err) => {
-                error!("RemoteFileItem from_path failed: {:?}, {:?}", path, err);
-            }
+    let pool = r2d2::Pool::new(manager).unwrap();
+        Self {
+            pool,
         }
-        None
+    }
+    pub fn new_mem() -> Self {
+    let manager = SqliteConnectionManager::memory()
+        .with_init(|c| c.execute_batch("PRAGMA foreign_keys=1;"));
+    let pool = r2d2::Pool::new(manager).unwrap();
+        Self {
+            pool,
+        }
+    }
+
+    pub fn get_pool(&self) -> &SqlitePool {
+        &self.pool
     }
 }
 
-pub fn insert_directory<M>(pool: r2d2::Pool<M>, path: impl AsRef<str>) -> Result<i64, failure::Error> where M: r2d2::ManageConnection, {
-    let conn = pool.get().unwrap();
+impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
+    fn insert_directory(&self, path: impl AsRef<str>) -> Result<i64, failure::Error> {
+    let conn = self.pool.get().unwrap();
     let count = conn.execute(
         "INSERT INTO directory (path) VALUES (?1)",
         params![path.as_ref()],
@@ -76,10 +50,10 @@ pub fn insert_directory<M>(pool: r2d2::Pool<M>, path: impl AsRef<str>) -> Result
         bail!("insert directory failed, execute return not eq to 1.");
     }
     Ok(conn.last_insert_rowid())
-}
+    }
 
-pub fn insert_remote_file_item<M>(pool: r2d2::Pool<M>, rfi: RemoteFileItemInDb) where M: r2d2::ManageConnection,{
-    let conn = pool.get().unwrap();
+    fn insert_remote_file_item(&self, rfi: RemoteFileItemInDb) {
+    let conn = self.pool.get().unwrap();
     match conn.execute(
             "INSERT INTO directory (path, sha1, len, time_modified, time_created, dir_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![rfi.path, rfi.sha1, rfi.len, rfi.modified, rfi.created, rfi.dir_id],
@@ -93,8 +67,8 @@ pub fn insert_remote_file_item<M>(pool: r2d2::Pool<M>, rfi: RemoteFileItemInDb) 
         }
 }
 
-pub fn create_sqlite_database(pool: SqlitePool) -> Result<(), failure::Error> {
-    let conn = pool.get().unwrap();
+    fn create_database(&self) -> Result<(), failure::Error> {
+    let conn = self.pool.get().unwrap();
     conn.execute_batch(
         "BEGIN;
             CREATE TABLE directory (
@@ -116,6 +90,10 @@ pub fn create_sqlite_database(pool: SqlitePool) -> Result<(), failure::Error> {
     )?;
     Ok(())
 }
+
+}
+
+
 
 #[cfg(test)]
 mod tests {
@@ -142,9 +120,9 @@ mod tests {
 
     #[test]
     fn t_create_database() -> Result<(), failure::Error> {
-        let pool = tutil::create_sqlite_mem_pool();
-        create_sqlite_database(pool.clone())?;
-
+        let db_access = SqliteDbAccess::new_mem();
+        db_access.create_database()?;
+        let pool = db_access.get_pool();
         let insert_result = pool.get().unwrap().execute(
             "INSERT INTO remote_file_item (path, time_created, dir_id)
                   VALUES (?1, ?2, ?3)",
@@ -168,7 +146,8 @@ mod tests {
 
     #[test]
     fn t_create_database_1() -> Result<(), failure::Error> {
-        let pool = tutil::create_sqlite_mem_pool();
+        let db_access = SqliteDbAccess::new_mem();
+        let pool = db_access.get_pool();
 
         println!("auto_commit: {}", pool.get().unwrap().is_autocommit());
 

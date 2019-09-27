@@ -1,13 +1,12 @@
 use crate::data_shape::{FileItem, FileItemProcessResult, Server, SyncType};
 use crate::rustsync::{DeltaFileReader, DeltaReader, Signature};
+use crate::db_accesses::{DbAccess};
 use indicatif::HumanBytes;
 use indicatif::ProgressBar;
 use log::*;
 use r2d2;
-use r2d2_sqlite::SqliteConnectionManager;
 use sha1::{Digest, Sha1};
 use ssh2;
-use std::convert::TryInto;
 use std::ffi::OsStr;
 use std::io::prelude::Write;
 use std::path::Path;
@@ -266,14 +265,15 @@ pub fn copy_a_file_item_sftp<'a, F: FnMut(u64) -> ()>(
     }
 }
 
-pub fn copy_a_file_item_rsync<'a, M>(
-    server: &Server<M>,
+pub fn copy_a_file_item_rsync<'a, M, D>(
+    server: &Server<M, D>,
     sftp: &ssh2::Sftp,
     local_file_path: String,
     file_item: &FileItem<'a>,
 ) -> Result<FileItemProcessResult, failure::Error>
 where
     M: r2d2::ManageConnection,
+    D: DbAccess<M>,
 {
     let remote_path = file_item.get_remote_path();
     trace!("start signature_a_file {}", &local_file_path);
@@ -342,8 +342,8 @@ fn update_local_file_from_restored(local_file_path: impl AsRef<str>) -> Result<(
     Ok(())
 }
 
-pub fn copy_a_file_item<'a, M>(
-    server: &Server<M>,
+pub fn copy_a_file_item<'a, M, D>(
+    server: &Server<M, D>,
     sftp: &ssh2::Sftp,
     file_item: FileItem<'a>,
     buf: &mut [u8],
@@ -351,6 +351,7 @@ pub fn copy_a_file_item<'a, M>(
 ) -> FileItemProcessResult
 where
     M: r2d2::ManageConnection,
+    D: DbAccess<M>,
 {
     let mut received = 0_u64;
     let item_len = file_item.get_remote_item().get_len();
@@ -414,6 +415,8 @@ mod tests {
     use crate::log_util;
     use std::panic;
     use std::{fs, io};
+    use crate::db_accesses::{SqliteDbAccess};
+    use r2d2_sqlite::SqliteConnectionManager;
 
     fn log() {
         log_util::setup_logger_detail(
@@ -425,8 +428,8 @@ mod tests {
         .expect("init log should success.");
     }
 
-    fn load_server_yml() -> Server<SqliteConnectionManager> {
-        Server::<SqliteConnectionManager>::load_from_yml(
+    fn load_server_yml() -> Server<SqliteConnectionManager, SqliteDbAccess> {
+        Server::<SqliteConnectionManager, SqliteDbAccess>::load_from_yml(
             "data/servers",
             "data",
             "localhost.yml",
@@ -437,8 +440,8 @@ mod tests {
         .unwrap()
     }
 
-    fn copy_a_file<'a, M>(
-        server: &mut Server<M>,
+    fn copy_a_file<'a, M, D>(
+        server: &mut Server<M, D>,
         local_base_dir: &'a Path,
         remote_base_dir: &'a str,
         remote_relative_path: &'a str,
@@ -447,6 +450,7 @@ mod tests {
     ) -> Result<FileItemProcessResult, failure::Error>
     where
         M: r2d2::ManageConnection,
+        D: DbAccess<M>,
     {
         let ri = RemoteFileItem::new(remote_relative_path, remote_file_len);
         let fi = FileItem::new(local_base_dir, remote_base_dir, ri, sync_type);

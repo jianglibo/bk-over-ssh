@@ -1,21 +1,13 @@
-use crate::sqlite_db::db::SqlitePool;
-use r2d2;
-use r2d2_sqlite::SqliteConnectionManager;
 use rand::Rng;
 use std::path::{Path, PathBuf};
 use std::{fs, io, io::BufRead, io::BufWriter, io::Seek, io::Write};
 use tempfile::TempDir;
+use crate::db_accesses::{SqliteDbAccess};
 
 #[allow(dead_code)]
 pub fn get_a_cursor_writer() -> io::Cursor<Vec<u8>> {
     let v = Vec::<u8>::new();
     io::Cursor::new(v)
-}
-
-pub fn create_sqlite_mem_pool() -> SqlitePool {
-    let manager =
-        SqliteConnectionManager::memory().with_init(|c| c.execute_batch("PRAGMA foreign_keys=1;"));
-    r2d2::Pool::new(manager).unwrap()
 }
 
 #[allow(dead_code)]

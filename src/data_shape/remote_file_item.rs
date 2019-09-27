@@ -1,8 +1,6 @@
 use super::server::Directory;
 use crate::actions::hash_file_sha1;
-use crate::sqlite_db::db::{
-    insert_directory, insert_remote_file_item, RemoteFileItemInDb, SqlitePool,
-};
+use crate::db_accesses::{RemoteFileItemInDb, DbAccess};
 use log::*;
 use serde::{Deserialize, Serialize};
 use std::io;
@@ -10,6 +8,7 @@ use std::iter::Iterator;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use walkdir::WalkDir;
+use r2d2;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct RemoteFileItem {
@@ -90,14 +89,15 @@ impl RemoteFileItem {
     }
 }
 
-pub fn load_remote_item_to_sqlite<M>(
+pub fn load_remote_item_to_sqlite<M, D>(
     directory: &Directory,
-    pool: r2d2::Pool<M>,
+    db_access: D,
     skip_sha1: bool,
 ) -> Result<(), failure::Error> where
-    M: r2d2::ManageConnection, {
+    M: r2d2::ManageConnection, 
+    D: DbAccess<M>, {
     if let Some(base_path) = directory.get_remote_canonicalized_dir_str() {
-        let dir_id = insert_directory(pool.clone(), base_path.as_str())?;
+        let dir_id = db_access.insert_directory(base_path.as_str())?;
         WalkDir::new(&base_path)
             .follow_links(false)
             .into_iter()
@@ -107,7 +107,7 @@ pub fn load_remote_item_to_sqlite<M>(
             .filter_map(|d| directory.match_path(d))
             .filter_map(|d| RemoteFileItemInDb::from_path(&base_path, d, skip_sha1, dir_id))
             .for_each(|rfi| {
-                insert_remote_file_item(pool.clone(), rfi);
+                db_access.insert_remote_file_item(rfi);
             });
     }
     Ok(())

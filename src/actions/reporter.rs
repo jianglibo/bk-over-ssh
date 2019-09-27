@@ -4,6 +4,7 @@ use r2d2;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use std::{fs, io::Write};
+use crate::db_accesses::{DbAccess};
 // fn ser_instant<S>(inst: &Instant, serer: S) -> Result<S::Ok, S::Error> where S: Serializer {
 //     let s = format!("{}", date.format(FORMAT));
 //     serializer.serialize_str(&s)
@@ -52,9 +53,10 @@ impl SyncDirReport {
     }
 }
 
-pub fn write_dir_sync_result<M>(server: &Server<M>, result: &SyncDirReport)
+pub fn write_dir_sync_result<M, D>(server: &Server<M, D>, result: &SyncDirReport)
 where
     M: r2d2::ManageConnection,
+    D: DbAccess<M>,
 {
     let rp = &server.get_dir_sync_report_file();
     match fs::OpenOptions::new()

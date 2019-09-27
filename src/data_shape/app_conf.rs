@@ -1,14 +1,13 @@
 use crate::data_shape::Server;
 use crate::ioutil::SharedMpb;
-use crate::sqlite_db::db::{create_sqlite_pool, SqlitePool};
+use crate::db_accesses::{DbAccess};
 use log::{trace, warn};
-use r2d2_sqlite::SqliteConnectionManager;
 use serde::{Deserialize, Serialize};
 use std::env;
-use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::{fs, io::Read, io::Write};
+use std::marker::PhantomData;
 
 pub const CONF_FILE_NAME: &str = "bk_over_ssh.yml";
 
@@ -67,26 +66,32 @@ fn guesss_data_dir(data_dir: impl AsRef<str>) -> Result<PathBuf, failure::Error>
     }
 }
 
-pub struct AppConf<M>
+pub struct AppConf<M, D>
 where
     M: r2d2::ManageConnection,
+    D: DbAccess<M>,
 {
     inner: AppConfYml,
     pub config_file_path: PathBuf,
     pub data_dir_full_path: PathBuf,
     pub log_full_path: PathBuf,
     pub servers_dir: PathBuf,
-    mc_type: PhantomData<M>,
+    pub db_access: Option<D>,
+    _m: PhantomData<M>,
 }
 
-impl<M> AppConf<M>
+impl<M, D> AppConf<M, D>
 where
     M: r2d2::ManageConnection,
+    D: DbAccess<M>,
 {
     pub fn get_inner(&self) -> &AppConfYml {
         &self.inner
     }
-    fn read_app_conf(file: impl AsRef<Path>) -> Result<Option<AppConf<M>>, failure::Error> {
+    pub fn get_db_access(&self) -> Option<&D> {
+        self.db_access.as_ref()
+    }
+    fn read_app_conf(file: impl AsRef<Path>) -> Result<Option<AppConf<M, D>>, failure::Error> {
         if !file.as_ref().exists() {
             return Ok(None);
         }
@@ -128,7 +133,8 @@ where
                             data_dir_full_path,
                             log_full_path,
                             servers_dir,
-                            mc_type: PhantomData,
+                            db_access: None,
+                            _m: PhantomData,
                         };
                         Ok(Some(app_conf))
                     }
@@ -157,7 +163,7 @@ where
     /// If no conf file provided, first look at the same directory as execuable, then current working directory.
     pub fn guess_conf_file(
         app_conf_file: Option<&str>,
-    ) -> Result<Option<AppConf<M>>, failure::Error> {
+    ) -> Result<Option<AppConf<M, D>>, failure::Error> {
         if let Some(af) = app_conf_file {
             return AppConf::read_app_conf(af);
         } else {
@@ -181,17 +187,6 @@ where
         bail!("read app_conf failed.")
     }
 
-    // pub fn get_data_dir(&self) -> &Path {
-    //     self.data_dir_full_path
-    //         .as_ref()
-    //         .map(|pb| pb.as_path())
-    //         .expect("data_dir_full_path should always available.")
-    // }
-
-    // fn get_working_lock_file(&self) -> PathBuf {
-    //     self.data_dir_full_path.as_path().join("working.lock")
-    // }
-
     pub fn lock_working_file(&self) -> Result<(), failure::Error> {
         let lof = self.data_dir_full_path.as_path().join("working.lock");
         if lof.exists() {
@@ -210,49 +205,9 @@ where
         }
     }
 
-    pub fn create_sqlite_pool(&self) -> SqlitePool {
-        let db_file = self.data_dir_full_path.as_path().join("db.db");
-        create_sqlite_pool(db_file)
-    }
-
-    // pub fn validate_conf(&mut self) -> Result<(), failure::Error> {
-    //     // if self.data_dir.trim().is_empty() {
-    //     //     self.data_dir = "data".to_string();
-    //     // } else {
-    //     //     self.data_dir = self.data_dir.trim().to_string();
-    //     // }
-
-    //     // let mut path_buf = Path::new(&self.data_dir).to_path_buf();
-    //     // if !&path_buf.is_absolute() {
-    //     //     path_buf = env::current_exe()?
-    //     //         .parent()
-    //     //         .expect("current_exe parent should exists.")
-    //     //         .join(path_buf);
-    //     // }
-    //     // if !&path_buf.exists() {
-    //     //     if let Err(err) = fs::create_dir_all(&path_buf) {
-    //     //         bail!("create data_dir {:?}, failed: {:?}", &path_buf, err);
-    //     //     }
-    //     // }
-    //     // match path_buf.canonicalize() {
-    //     //     Ok(ab) => self.data_dir_full_path.replace(ab),
-    //     //     Err(err) => bail!("path_buf {:?} canonicalize failed: {:?}", &path_buf, err),
-    //     // };
-
-    //     // self.log_full_path
-    //     //     .replace(Path::new(&self.get_log_file()).to_path_buf());
-
-    //     let servers_dir = self.get_servers_dir();
-    //     if !servers_dir.exists() {
-    //         if let Err(err) = fs::create_dir_all(&servers_dir) {
-    //             bail!("create servers_dir {:?}, failed: {:?}", &servers_dir, err);
-    //         }
-    //     }
-    //     Ok(())
-    // }
-
-    // pub fn get_servers_dir(&self) -> PathBuf {
-    //     self.get_data_dir().join("servers")
+    // pub fn create_sqlite_pool(&self) {
+    //     let db_file = self.data_dir_full_path.as_path().join("db.db");
+    //     create_sqlite_pool(db_file)
     // }
 
     pub fn load_server_yml(
@@ -260,14 +215,14 @@ where
         yml_file_name: impl AsRef<str>,
         buf_len: Option<usize>,
         multi_bar: Option<SharedMpb>,
-        pool: Option<r2d2::Pool<M>>,
-    ) -> Result<Server<M>, failure::Error> {
-        let server = Server::<M>::load_from_yml_with_app_config(
+        db_access: Option<D>,
+    ) -> Result<Server<M, D>, failure::Error> {
+        let server = Server::<M, D>::load_from_yml_with_app_config(
             &self,
             yml_file_name.as_ref(),
             buf_len,
             multi_bar,
-            pool,
+            db_access,
         )?;
         println!(
             "load server yml from: {}",
@@ -283,8 +238,8 @@ where
         &self,
         buf_len: Option<usize>,
         multi_bar: Option<SharedMpb>,
-        pool: Option<r2d2::Pool<M>>,
-    ) -> Vec<Server<M>> {
+        db_access: Option<D>,
+    ) -> Vec<Server<M, D>> {
         if let Ok(rd) = self.servers_dir.read_dir() {
             rd.filter_map(|ery| match ery {
                 Err(err) => {
@@ -305,7 +260,7 @@ where
                     astr,
                     buf_len,
                     multi_bar.as_ref().map(Arc::clone),
-                    pool.as_ref().cloned(),
+                    db_access.clone(),
                 )
             })
             .filter_map(|rr| match rr {
