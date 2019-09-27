@@ -424,6 +424,7 @@ mod tests {
             "output.log",
             vec!["actions::copy_file"],
             Some(vec!["ssh2"]),
+            ""
         )
         .expect("init log should success.");
     }

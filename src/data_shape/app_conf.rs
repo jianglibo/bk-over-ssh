@@ -85,6 +85,10 @@ where
     M: r2d2::ManageConnection,
     D: DbAccess<M>,
 {
+    pub fn set_db_access(&mut self, db_access: D) {
+        self.db_access.replace(db_access);
+    }
+
     pub fn get_inner(&self) -> &AppConfYml {
         &self.inner
     }
@@ -215,14 +219,12 @@ where
         yml_file_name: impl AsRef<str>,
         buf_len: Option<usize>,
         multi_bar: Option<SharedMpb>,
-        db_access: Option<D>,
     ) -> Result<Server<M, D>, failure::Error> {
         let server = Server::<M, D>::load_from_yml_with_app_config(
             &self,
             yml_file_name.as_ref(),
             buf_len,
             multi_bar,
-            db_access,
         )?;
         println!(
             "load server yml from: {}",
@@ -238,7 +240,6 @@ where
         &self,
         buf_len: Option<usize>,
         multi_bar: Option<SharedMpb>,
-        db_access: Option<D>,
     ) -> Vec<Server<M, D>> {
         if let Ok(rd) = self.servers_dir.read_dir() {
             rd.filter_map(|ery| match ery {
@@ -260,7 +261,6 @@ where
                     astr,
                     buf_len,
                     multi_bar.as_ref().map(Arc::clone),
-                    db_access.clone(),
                 )
             })
             .filter_map(|rr| match rr {

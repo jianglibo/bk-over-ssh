@@ -11,6 +11,7 @@ file_list_file: /home/jianglibo/file_list_file.txt
 rsync_valve: 419430400
 buf_len: 8192
 rsync_window: 2048
+use_db: true
 directories:
   - remote_dir: /home/jianglibo/ws/ssh-client-demo/fixtures/adir
     local_dir: ~

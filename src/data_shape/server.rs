@@ -3,9 +3,9 @@ use crate::data_shape::{
     load_remote_item, load_remote_item_to_sqlite, rolling_files, string_path, AppConf, FileItem,
     FileItemProcessResult, FileItemProcessResultStats, RemoteFileItem, SyncType,
 };
+use crate::db_accesses::DbAccess;
 use crate::ioutil::SharedMpb;
 use crate::rustsync::{DeltaFileReader, DeltaReader, Signature};
-use crate::db_accesses::{DbAccess};
 use bzip2::write::BzEncoder;
 use bzip2::Compression;
 use glob::Pattern;
@@ -15,11 +15,11 @@ use r2d2;
 use serde::{Deserialize, Serialize};
 use ssh2;
 use std::io::prelude::{BufRead, Read};
+use std::marker::PhantomData;
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 use std::{fs, io, io::Seek};
-use std::marker::PhantomData;
 use tar::Builder;
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -191,6 +191,7 @@ pub struct ServerYml {
     pub compress_archive: Option<CompressionImpl>,
     pub buf_len: usize,
     pub rsync_window: usize,
+    pub use_db: bool,
     #[serde(skip)]
     pub yml_location: Option<PathBuf>,
 }
@@ -339,16 +340,14 @@ where
         name: impl AsRef<str>,
         buf_len: Option<usize>,
         multi_bar: Option<SharedMpb>,
-        db_access: Option<D>,
-    ) -> Result<Server<M, D>, failure::Error>
-    {
+    ) -> Result<Server<M, D>, failure::Error> {
         Server::<M, D>::load_from_yml(
             app_conf.servers_dir.as_path(),
             app_conf.data_dir_full_path.as_path(),
             name,
             buf_len,
             multi_bar,
-            db_access,
+            app_conf.get_db_access().cloned(),
         )
     }
 
@@ -359,8 +358,7 @@ where
         buf_len: Option<usize>,
         multi_bar: Option<SharedMpb>,
         db_access: Option<D>,
-    ) -> Result<Server<M, D>, failure::Error>
-    {
+    ) -> Result<Server<M, D>, failure::Error> {
         let name = name.as_ref();
         trace!("got server yml name: {:?}", name);
         let mut server_yml_path = Path::new(name).to_path_buf();
@@ -383,7 +381,7 @@ where
         let mut f = fs::OpenOptions::new().read(true).open(&server_yml_path)?;
         let mut buf = String::new();
         f.read_to_string(&mut buf)?;
-        let mut server_yml: ServerYml = serde_yaml::from_str(&buf)?;
+        let server_yml: ServerYml = serde_yaml::from_str(&buf)?;
 
         let data_dir = data_dir.as_ref();
         let maybe_local_server_base_dir = data_dir.join(&server_yml.host);
@@ -629,13 +627,10 @@ where
     }
 
     pub fn connect(&mut self) -> Result<(), failure::Error> {
-        // if let Some(pb) = self.pb.as_ref() {
-        //     pb.set_message(format!("connecting to {}", self.host).as_str());
-        // }
         if !self.is_connected() {
             let (tcp, sess) = self.create_ssh_session()?;
-            if tcp.is_some() {
-                self._tcp_stream.replace(tcp.unwrap());
+            if let Some(tcp) = tcp {
+                self._tcp_stream.replace(tcp);
             }
             self.session.replace(sess);
         }
@@ -686,8 +681,28 @@ where
         Ok(working_file)
     }
 
+    pub fn create_remote_db(&self, db_type: impl AsRef<str>) -> Result<(), failure::Error> {
+        let mut channel: ssh2::Channel = self.create_channel()?;
+        let db_type = db_type.as_ref();
+        let cmd = format!(
+            "{} create-db --db-type {}",
+            self.server_yml.remote_exec,
+            db_type,
+        );
+        info!("invoking remote command: {:?}", cmd);
+        channel.exec(cmd.as_str())?;
+        let mut contents = String::new();
+        if let Err(err) = channel.read_to_string(&mut contents) {
+            bail!("is remote exec executable? {:?}", err);
+        }
+        trace!("create_remote_db output: {:?}", contents);
+        contents.clear();
+        channel.stderr().read_to_string(&mut contents)?;
+        trace!("create_remote_db stderr: {:?}", contents);
+        Ok(())
+    }
+
     pub fn list_remote_file_exec(&mut self, skip_sha1: bool) -> Result<PathBuf, failure::Error> {
-        self.connect()?;
         let mut channel: ssh2::Channel = self.create_channel()?;
         let cmd = format!(
             "{} list-local-files {}{}",
@@ -928,9 +943,13 @@ where
         out: &mut O,
         skip_sha1: bool,
     ) -> Result<(), failure::Error> {
-        if let Some(db_access) = self.db_access.as_ref().cloned() {
+        if self.db_access.is_some() && self.server_yml.use_db {
             for one_dir in self.server_yml.directories.iter() {
-            load_remote_item_to_sqlite(one_dir, db_access.clone(), skip_sha1)?;
+                load_remote_item_to_sqlite(
+                    one_dir,
+                    self.db_access.as_ref().cloned().unwrap(),
+                    skip_sha1,
+                )?;
             }
         } else {
             for one_dir in self.server_yml.directories.iter() {
@@ -1012,17 +1031,16 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db_accesses::SqliteDbAccess;
     use crate::develope::tutil;
     use crate::log_util;
     use bzip2::write::{BzDecoder, BzEncoder};
     use bzip2::Compression;
     use indicatif::MultiProgress;
+    use r2d2_sqlite::SqliteConnectionManager;
     use std::sync::Arc;
     use std::thread;
     use std::time::Duration;
-    use crate::db_accesses::{SqliteDbAccess};
-    use r2d2_sqlite::SqliteConnectionManager;
-    
 
     fn log() {
         log_util::setup_logger_detail(
@@ -1030,6 +1048,7 @@ mod tests {
             "output.log",
             vec!["data_shape::server"],
             Some(vec!["ssh2"]),
+            "",
         )
         .expect("init log should success.");
     }

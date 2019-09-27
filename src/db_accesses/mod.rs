@@ -60,9 +60,10 @@ impl RemoteFileItemInDb {
     }
 }
 
-pub trait DbAccess<M>: Clone where M: r2d2::ManageConnection, {
+pub trait DbAccess<M>: Send + Sync + Clone where M: r2d2::ManageConnection, {
     fn insert_directory(&self, path: impl AsRef<str>) -> Result<i64, failure::Error>;
     fn insert_remote_file_item(&self, rfi: RemoteFileItemInDb);
     fn create_database(&self) -> Result<(), failure::Error>;
+    fn find_directory(&self, path: impl AsRef<str>) -> Result<i64, failure::Error>;
 }
 

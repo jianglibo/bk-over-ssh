@@ -1,3 +1,4 @@
+use super::{DbAccess, RemoteFileItemInDb};
 use crate::actions::hash_file_sha1;
 use chrono::{DateTime, Utc};
 use failure;
@@ -6,7 +7,6 @@ use r2d2;
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::params;
 use std::path::{Path, PathBuf};
-use super::{DbAccess, RemoteFileItemInDb};
 
 pub type SqlitePool = r2d2::Pool<SqliteConnectionManager>;
 
@@ -17,21 +17,17 @@ pub struct SqliteDbAccess {
 
 impl SqliteDbAccess {
     pub fn new(db_file: impl AsRef<Path>) -> Self {
-            let db_file = db_file.as_ref();
-    let manager = SqliteConnectionManager::file(db_file)
-        .with_init(|c| c.execute_batch("PRAGMA foreign_keys=1;"));
-    let pool = r2d2::Pool::new(manager).unwrap();
-        Self {
-            pool,
-        }
+        let db_file = db_file.as_ref();
+        let manager = SqliteConnectionManager::file(db_file)
+            .with_init(|c| c.execute_batch("PRAGMA foreign_keys=1;"));
+        let pool = r2d2::Pool::new(manager).unwrap();
+        Self { pool }
     }
     pub fn new_mem() -> Self {
-    let manager = SqliteConnectionManager::memory()
-        .with_init(|c| c.execute_batch("PRAGMA foreign_keys=1;"));
-    let pool = r2d2::Pool::new(manager).unwrap();
-        Self {
-            pool,
-        }
+        let manager = SqliteConnectionManager::memory()
+            .with_init(|c| c.execute_batch("PRAGMA foreign_keys=1;"));
+        let pool = r2d2::Pool::new(manager).unwrap();
+        Self { pool }
     }
 
     pub fn get_pool(&self) -> &SqlitePool {
@@ -41,21 +37,36 @@ impl SqliteDbAccess {
 
 impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
     fn insert_directory(&self, path: impl AsRef<str>) -> Result<i64, failure::Error> {
-    let conn = self.pool.get().unwrap();
-    let count = conn.execute(
-        "INSERT INTO directory (path) VALUES (?1)",
-        params![path.as_ref()],
-    )?;
-    if count != 1 {
-        bail!("insert directory failed, execute return not eq to 1.");
+        let conn = self.pool.get().unwrap();
+        let path = path.as_ref();
+        if let Err(err) = conn.execute(
+            "INSERT INTO directory (path) VALUES (?1)",
+            params![path],
+        ) {
+            if let rusqlite::Error::SqliteFailure(_, Some(desc)) = &err {
+                if desc.contains("UNIQUE constraint failed") {
+                    warn!("{}", err);
+                    return self.find_directory(path);
+                } else {
+                    bail!("{}", err);
+                }
+            } else {
+                bail!("{}", err);
+            }
+        }
+        Ok(conn.last_insert_rowid())
     }
-    Ok(conn.last_insert_rowid())
+
+    fn find_directory(&self, path: impl AsRef<str>) -> Result<i64, failure::Error> {
+        let conn = self.pool.get().unwrap();
+        let mut stmt = conn.prepare("SELECT id FROM directory where path = ?1")?;
+        Ok(stmt.query_row(params![path.as_ref()], |row| row.get(0))?)
     }
 
     fn insert_remote_file_item(&self, rfi: RemoteFileItemInDb) {
-    let conn = self.pool.get().unwrap();
-    match conn.execute(
-            "INSERT INTO directory (path, sha1, len, time_modified, time_created, dir_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        let conn = self.pool.get().unwrap();
+        match conn.execute(
+            "INSERT INTO remote_file_item (path, sha1, len, time_modified, time_created, dir_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![rfi.path, rfi.sha1, rfi.len, rfi.modified, rfi.created, rfi.dir_id],
         ) {
             Ok(count) => {
@@ -65,12 +76,12 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
             },
             Err(e) => error!("insert remote file failed: {:?}, {:?}", rfi, e)
         }
-}
+    }
 
     fn create_database(&self) -> Result<(), failure::Error> {
-    let conn = self.pool.get().unwrap();
-    conn.execute_batch(
-        "BEGIN;
+        let conn = self.pool.get().unwrap();
+        conn.execute_batch(
+            "BEGIN;
             CREATE TABLE directory (
                 id  INTEGER PRIMARY KEY,
                 path TEXT NOT NULL UNIQUE
@@ -87,21 +98,18 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
                    );
              CREATE UNIQUE INDEX dir_path ON remote_file_item (path, dir_id);
                 COMMIT;",
-    )?;
-    Ok(())
+        )?;
+        Ok(())
+    }
 }
-
-}
-
-
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::develope::tutil;
-    use std::str::FromStr;
-    use rusqlite::{NO_PARAMS};
     use chrono::{DateTime, SecondsFormat, Utc};
+    use rusqlite::NO_PARAMS;
+    use std::str::FromStr;
 
     pub fn create_sqlite_database_1(pool: &SqlitePool) -> Result<usize, failure::Error> {
         let r = pool.get().unwrap().execute(

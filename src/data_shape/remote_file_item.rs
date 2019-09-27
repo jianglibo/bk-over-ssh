@@ -158,6 +158,7 @@ mod tests {
             "output.log",
             vec!["data_shape::remote_file_item"],
             Some(vec!["ssh2"]),
+            ""
         )?;
         let item = RemoteFileItem {
             path: "b b\\b b.txt".to_string(),

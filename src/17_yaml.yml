@@ -34,6 +34,14 @@ args:
         help: enable console log output.
         long: console-log
         required: false
+    - v:
+        help: verbose level debug.
+        long: v
+        required: false
+    - vv:
+        help: verbose level trace.
+        long: vv
+        required: false
     - delay:
         help: delay seconds before execute command. for test purpose.
         long: delay
@@ -43,11 +51,10 @@ args:
         help: don't write a lock file so multiple running instance is allowed, may cause errors.
         long: no-lock-file
         required: false
-    - use-db:
-        help: use database to store inermediate values.
-        long: use-db
-        possible_values: [ sqlite, none ]
-        takes_value: true
+    - no-use-db:
+        help: don't open db connection at startup.
+        long: no-use-db
+        required: false
 
     # - flag:
     #     help: demo flag argument
@@ -114,9 +121,21 @@ subcommands:
         about: create database.
         args:
             - db-type:
-                help: create database.
+                help: what kind of database to create.
                 long: db-type
                 possible_values: [ sqlite ]
+                takes_value: true
+    - create-remote-db:
+        about: create remote database.
+        args:
+            - db-type:
+                help: what kind of database to create.
+                long: db-type
+                possible_values: [ sqlite ]
+                takes_value: true
+            - server-yml:
+                long: server-yml
+                required: true
                 takes_value: true
     - pbr:
         about: demonstrate bpr usage.

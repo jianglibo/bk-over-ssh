@@ -368,6 +368,7 @@ mod tests {
             "output.log",
             vec!["data_shape::rolling_files"],
             Some(vec!["ssh2"]),
+            "",
         )
         .unwrap();
     }
