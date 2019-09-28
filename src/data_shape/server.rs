@@ -686,8 +686,7 @@ where
         let db_type = db_type.as_ref();
         let cmd = format!(
             "{} create-db --db-type {}",
-            self.server_yml.remote_exec,
-            db_type,
+            self.server_yml.remote_exec, db_type,
         );
         info!("invoking remote command: {:?}", cmd);
         channel.exec(cmd.as_str())?;
@@ -702,12 +701,16 @@ where
         Ok(())
     }
 
-    pub fn list_remote_file_exec(&mut self, skip_sha1: bool, no_db: bool) -> Result<PathBuf, failure::Error> {
+    pub fn list_remote_file_exec(
+        &mut self,
+        skip_sha1: bool,
+        no_db: bool,
+    ) -> Result<PathBuf, failure::Error> {
         let mut channel: ssh2::Channel = self.create_channel()?;
         let cmd = format!(
             "{} {} list-local-files {}{}",
             self.server_yml.remote_exec,
-            if no_db {" --no-db"} else {""},
+            if no_db { " --no-db" } else { "" },
             self.server_yml.remote_server_yml,
             if skip_sha1 { " --skip-sha1" } else { "" }
         );
@@ -839,7 +842,8 @@ where
                                     pb_item.set_message(local_item.get_remote_item().get_path());
                                 }
                                 let mut skiped = false;
-                                let r = if local_item.had_changed() {
+                                // if use_db all received item are changed.
+                                let r = if self.server_yml.use_db || local_item.had_changed() {
                                     trace!("file had changed. start copy_a_file_item.");
                                     copy_a_file_item(
                                         &self,
@@ -946,11 +950,29 @@ where
     ) -> Result<(), failure::Error> {
         if self.db_access.is_some() && self.server_yml.use_db {
             for one_dir in self.server_yml.directories.iter() {
-                load_remote_item_to_sqlite(
-                    one_dir,
-                    self.db_access.as_ref().unwrap(),
-                    skip_sha1,
-                )?;
+                load_remote_item_to_sqlite(one_dir, self.db_access.as_ref().unwrap(), skip_sha1)?;
+
+                self.db_access
+                    .as_ref()
+                    .unwrap()
+                    .iterate_files_by_directory(|fidb_or_path| match fidb_or_path {
+                        (Some(fidb), None) => {
+                            if fidb.changed {
+                                match serde_json::to_string(&RemoteFileItem::from(fidb)) {
+                                    Ok(line) => {
+                                        writeln!(out, "{}", line).ok();
+                                    }
+                                    Err(err) => error!("serialize item line failed: {:?}", err),
+                                }
+                            }
+                        }
+                        (None, Some(path)) => {
+                            if let Err(err) = writeln!(out, "{}", path) {
+                                error!("write path failed: {:?}", err);
+                            }
+                        }
+                        _ => {}
+                    })?;
             }
         } else {
             for one_dir in self.server_yml.directories.iter() {

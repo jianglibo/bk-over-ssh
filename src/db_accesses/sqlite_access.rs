@@ -3,8 +3,8 @@ use failure;
 use log::*;
 use r2d2;
 use r2d2_sqlite::SqliteConnectionManager;
-use rusqlite::{params, NO_PARAMS};
-use std::path::{Path};
+use rusqlite::{params, Row, NO_PARAMS};
+use std::path::Path;
 
 pub type SqlitePool = r2d2::Pool<SqliteConnectionManager>;
 
@@ -36,6 +36,19 @@ impl SqliteDbAccess {
     pub fn get_pool(&self) -> &SqlitePool {
         &self.0
     }
+}
+
+fn map_to_file_item(row: &Row) -> Result<RemoteFileItemInDb, rusqlite::Error> {
+    Ok(RemoteFileItemInDb {
+        id: row.get(0)?,
+        path: row.get(1)?,
+        sha1: row.get(2)?,
+        len: row.get(3)?,
+        modified: row.get(4)?,
+        created: row.get(5)?,
+        dir_id: row.get(6)?,
+        changed: row.get(7)?,
+    })
 }
 
 impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
@@ -77,18 +90,7 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
                 ":dir_id": dir_id,
                 ":path": path,
             },
-            |row| {
-                Ok(RemoteFileItemInDb {
-                    id: row.get(0)?,
-                    path: path.to_owned(),
-                    sha1: row.get(2)?,
-                    len: row.get(3)?,
-                    modified: row.get(4)?,
-                    created: row.get(5)?,
-                    dir_id,
-                    changed: row.get(7)?,
-                })
-            },
+            map_to_file_item
         ){
             Ok(r) => r,
             Err(e) => {
@@ -114,6 +116,35 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
         let conn = self.0.get().unwrap();
         // let mut stmt = conn.prepare("SELECT id, path, sha1, len, time_modified, time_created, dir_id FROM directory where dir_id = :dir_id and path = :path")?;
         (0, 0)
+    }
+
+    fn iterate_files_by_directory<F>(&self, mut processor: F) -> Result<(), failure::Error>
+    where
+        F: FnMut((Option<RemoteFileItemInDb>, Option<String>)) -> (),
+    {
+        let conn = self.get_pool().get().unwrap();
+        let mut stmt = conn.prepare("SELECT id, path FROM directory")?;
+        let dirs = stmt.query_map(NO_PARAMS, |row| Ok((row.get(0)?, row.get(1)?)))?;
+
+        for dir in dirs {
+            let dir = dir?;
+            let dir_id: i64 = dir.0;
+            let path = dir.1;
+            processor((None, Some(path)));
+            let mut stmt = conn.prepare("SELECT id, path, sha1, len, time_modified, time_created, dir_id, changed FROM remote_file_item where dir_id = :dir_id")?;
+            let files = stmt.query_map_named(
+                named_params! {
+                    ":dir_id": dir_id
+                },
+                map_to_file_item,
+            )?;
+
+            files
+                .filter_map(|fi| fi.ok())
+                .for_each(|fi| processor((Some(fi), None)));
+        }
+
+        Ok(())
     }
 
     fn count_directory(&self) -> Result<u64, failure::Error> {
@@ -208,12 +239,10 @@ mod tests {
     use super::*;
     use crate::data_shape::{load_remote_item_to_sqlite, Directory};
     use crate::develope::tutil;
+    use crate::log_util;
     use std::fs;
     use std::io::{Read, Write};
-    use crate::log_util;
 
-
-    
     fn log() {
         log_util::setup_logger_detail(
             true,

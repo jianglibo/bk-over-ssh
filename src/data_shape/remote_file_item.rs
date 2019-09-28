@@ -1,14 +1,14 @@
 use super::server::Directory;
 use crate::actions::hash_file_sha1;
-use crate::db_accesses::{RemoteFileItemInDb, DbAccess};
+use crate::db_accesses::{DbAccess, RemoteFileItemInDb};
 use log::*;
+use r2d2;
 use serde::{Deserialize, Serialize};
 use std::io;
 use std::iter::Iterator;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use walkdir::WalkDir;
-use r2d2;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct RemoteFileItem {
@@ -60,6 +60,18 @@ impl RemoteFileItem {
     }
 }
 
+impl std::convert::From<RemoteFileItemInDb> for RemoteFileItem {
+    fn from(rfidb: RemoteFileItemInDb) -> Self {
+        RemoteFileItem {
+            path: rfidb.path,
+            sha1: rfidb.sha1,
+            len: rfidb.len as u64,
+            modified: rfidb.modified.map(|dt| dt.timestamp() as u64),
+            created: rfidb.created.map(|dt| dt.timestamp() as u64),
+        }
+    }
+}
+
 impl RemoteFileItem {
     #[allow(dead_code)]
     pub fn new(relative_path: &str, len: u64) -> Self {
@@ -93,9 +105,11 @@ pub fn load_remote_item_to_sqlite<M, D>(
     directory: &Directory,
     db_access: &D,
     skip_sha1: bool,
-) -> Result<(), failure::Error> where
-    M: r2d2::ManageConnection, 
-    D: DbAccess<M>, {
+) -> Result<(), failure::Error>
+where
+    M: r2d2::ManageConnection,
+    D: DbAccess<M>,
+{
     if let Some(base_path) = directory.get_remote_canonicalized_dir_str() {
         let dir_id = db_access.insert_directory(base_path.as_str())?;
         WalkDir::new(&base_path)
@@ -158,7 +172,7 @@ mod tests {
             "output.log",
             vec!["data_shape::remote_file_item"],
             Some(vec!["ssh2"]),
-            ""
+            "",
         )?;
         let item = RemoteFileItem {
             path: "b b\\b b.txt".to_string(),

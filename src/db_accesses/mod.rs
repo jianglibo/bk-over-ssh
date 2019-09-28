@@ -1,12 +1,13 @@
 // placeholders
-pub mod sqlite_access;
 mod scheduler_util;
+pub mod sqlite_access;
 
+use crate::actions::hash_file_sha1;
+use crate::data_shape::RemoteFileItem;
+use chrono::{DateTime, Utc};
+use log::*;
 use r2d2;
 use std::path::{Path, PathBuf};
-use chrono::{DateTime, Utc};
-use crate::actions::hash_file_sha1;
-use log::*;
 
 pub use sqlite_access::SqliteDbAccess;
 
@@ -61,14 +62,25 @@ impl RemoteFileItemInDb {
     }
 }
 
-pub trait DbAccess<M>: Send + Sync + Clone where M: r2d2::ManageConnection, {
+pub trait DbAccess<M>: Send + Sync + Clone
+where
+    M: r2d2::ManageConnection,
+{
     fn insert_directory(&self, path: impl AsRef<str>) -> Result<i64, failure::Error>;
     fn insert_or_update_remote_file_item(&self, rfi: RemoteFileItemInDb);
-    fn find_remote_file_item(&self, dir_id: i64, path: impl AsRef<str>) -> Result<RemoteFileItemInDb, failure::Error>;
+    fn find_remote_file_item(
+        &self,
+        dir_id: i64,
+        path: impl AsRef<str>,
+    ) -> Result<RemoteFileItemInDb, failure::Error>;
     fn create_database(&self) -> Result<(), failure::Error>;
     fn find_directory(&self, path: impl AsRef<str>) -> Result<i64, failure::Error>;
     fn count_directory(&self) -> Result<u64, failure::Error>;
     fn count_remote_file_item(&self, changed: Option<bool>) -> Result<u64, failure::Error>;
-    fn iterate_all_file_items<P>(&self, processor: P) -> (usize, usize) where P: Fn(RemoteFileItemInDb) -> ();
+    fn iterate_all_file_items<P>(&self, processor: P) -> (usize, usize)
+    where
+        P: Fn(RemoteFileItemInDb) -> ();
+    fn iterate_files_by_directory<F>(&self, processor: F) -> Result<(), failure::Error>
+    where
+        F: FnMut((Option<RemoteFileItemInDb>, Option<String>)) -> ();
 }
-
