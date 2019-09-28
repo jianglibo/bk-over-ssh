@@ -46,7 +46,7 @@ cron = "0.6.0"
 r2d2 = "0.8.5"
 r2d2_sqlite = "0.12.0"
 lazy_static = "1.4.0"
-
+ctrlc = { version = "3", features = ["termination"] }
 
 time = "0.1"
 # https://docs.rs/crate/rustsync/0.2.3

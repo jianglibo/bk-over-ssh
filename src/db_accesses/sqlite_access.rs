@@ -176,21 +176,40 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
         let conn = self.0.get().unwrap();
         if let Ok(rfi_db) = self.find_remote_file_item(rfi.dir_id, rfi.path.as_str()) {
             if rfi_db.len != rfi.len || rfi_db.sha1 != rfi.sha1 || rfi_db.modified != rfi.modified {
-                if let Err(err) = conn.execute_named(
-                    "UPDATE remote_file_item SET len = :len, sha1 = :sha1, time_modified = :modified, changed = :changed where id = :id",
-                    named_params! {
+                let sql_mark_changed = "UPDATE remote_file_item SET len = :len, sha1 = :sha1, time_modified = :modified, changed = :changed where id = :id";
+                if let Ok(mut stmt) = conn.prepare(sql_mark_changed) {
+                    if let Err(err) = stmt.execute_named(named_params! {
                         ":len": rfi.len,
                         ":sha1": rfi.sha1,
                         ":modified": rfi.modified,
                         ":id": rfi_db.id,
                         ":changed": true,
-                    },
-                ) {
-                    error!("update remote file item failed: {:?}", err);
+                    }) {
+                        error!("update remote file item failed: {:?}", err);
+                    } else {
+                        trace!("update changed item successfully.");
+                    }
                 } else {
-                    trace!("changed item.");
+                    error!("prepare find stmt failed: {:?}", sql_mark_changed);
                 }
             } else {
+                // make changed unchanged.
+                if rfi_db.changed {
+                    let sql_unmark_changed =
+                        "UPDATE remote_file_item SET changed = :changed where id = :id";
+                    if let Ok(mut stmt) = conn.prepare(sql_unmark_changed) {
+                        if let Err(err) = stmt.execute_named(named_params! {
+                            ":id": rfi_db.id,
+                            ":changed": false,
+                        }) {
+                            error!("update remote file item failed: {:?}", err);
+                        } else {
+                            trace!("update changed item successfully.");
+                        }
+                    } else {
+                        error!("prepare find stmt failed: {:?}", sql_unmark_changed);
+                    }
+                }
                 trace!("unchanged file item.");
             }
         } else {

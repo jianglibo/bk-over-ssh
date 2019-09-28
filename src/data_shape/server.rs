@@ -373,8 +373,7 @@ where
             }
             if !server_yml_path.exists() {
                 bail!(
-                    "server yml file does't exist and had created one for you: {:?}",
-                    server_yml_path
+                    "server yml file does't exist: {:?}", server_yml_path
                 );
             }
         }

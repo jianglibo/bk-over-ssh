@@ -191,14 +191,15 @@ where
         bail!("read app_conf failed.")
     }
 
-    pub fn lock_working_file(&self) -> Result<(), failure::Error> {
+    pub fn lock_working_file(&self) -> Result<PathBuf, failure::Error> {
         let lof = self.data_dir_full_path.as_path().join("working.lock");
+        let lof1 = lof.clone();
         if lof.exists() {
             bail!("create lock file failed: {:?}, if you can sure app isn't running, you can delete it manually.", lof);
         } else {
             fs::OpenOptions::new().write(true).create(true).open(lof)?;
         }
-        Ok(())
+        Ok(lof1)
     }
     pub fn unlock_working_file(&self) {
         let lof = self.data_dir_full_path.as_path().join("working.lock");
