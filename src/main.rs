@@ -318,7 +318,8 @@ fn main() -> Result<(), failure::Error> {
         delay_exec(delay);
     }
     if let Err(err) = main_entry(app1, &app_conf, &m, console_log) {
-        error!("main return error: {:?}", err);
+        error!("{:?}", err);
+        eprintln!("{:?}", err);
     }
     if lock_file {
         app_conf.unlock_working_file();
@@ -531,17 +532,17 @@ where
                 buf_len,
                 None,
             )?;
-            println!(
+            eprintln!(
                 "found server configuration yml at: {:?}",
                 server.yml_location.as_ref().unwrap()
             );
-            println!(
+            eprintln!(
                 "server content: {}",
                 serde_yaml::to_string(&server.server_yml)?
             );
             server.connect()?;
             if let Err(err) = server.stats_remote_exec() {
-                println!(
+                eprintln!(
                     "CAN'T FIND SERVER SIDE EXEC. {:?}\n{:?}",
                     server.server_yml.remote_exec, err
                 );
@@ -551,7 +552,7 @@ where
                     Ok(content) => {
                         let ss: ServerYml = serde_yaml::from_str(content.as_str())?;
                         if !server.dir_equals(&ss.directories) {
-                            println!(
+                            eprintln!(
                                 "SERVER DIRS DIDN'T EQUAL TO.\nlocal: {:?} vs remote: {:?}",
                                 server.server_yml.directories, ss.directories
                             );
@@ -635,7 +636,7 @@ where
                         error!("rsync signature failed: {:?}", err);
                     }
                 }
-                println!("time costs: {:?}", start.elapsed().as_secs());
+                eprintln!("time costs: {:?}", start.elapsed().as_secs());
             }
 
             (_, _) => {

@@ -14,7 +14,7 @@ where
     T: IntoIterator<Item = I>,
 {
     if let Err(err) = setup_logger_detail(true, "output.log", verbose_modules, Some(other_modules), "") {
-        println!("{:?}", err);
+        eprintln!("{:?}", err);
     }
 }
 
@@ -25,7 +25,7 @@ where
     T: IntoIterator<Item = I>,
 {
     if let Err(err) = setup_logger_detail(true, "output.log", verbose_modules, None, "") {
-        println!("{:?}", err);
+        eprintln!("{:?}", err);
     }    
 }
 
@@ -94,7 +94,7 @@ where
     // let path = Path::new(log_file_name);
     if log_file_name.exists() && log_file_name.is_file() {
         if let Err(err) = fs::remove_file(log_file_name) {
-            println!("remove old log file failed: {:?}, {:?}", log_file_name, err);
+            eprintln!("remove old log file failed: {:?}, {:?}", log_file_name, err);
         }
     }
 

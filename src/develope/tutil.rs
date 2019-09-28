@@ -19,7 +19,7 @@ pub fn count_cursor_lines(cursor: &mut io::Cursor<Vec<u8>>) -> usize {
 pub fn print_cursor_lines(cursor: &mut io::Cursor<Vec<u8>>) {
     cursor.seek(io::SeekFrom::Start(0)).unwrap();
     io::BufReader::new(cursor).lines().for_each(|line| {
-        println!("{}", line.unwrap());
+        eprintln!("{}", line.unwrap());
     });
 }
 

@@ -261,6 +261,7 @@ mod tests {
     use crate::log_util;
     use std::fs;
     use std::io::{Read, Write};
+    use std::sync::{Arc, Mutex};
 
     fn log() {
         log_util::setup_logger_detail(
@@ -318,5 +319,35 @@ mod tests {
         assert_eq!(db_access.count_remote_file_item(Some(false))?, 2);
 
         Ok(())
+    }
+
+    #[test]
+    fn t_scan_chunk() {
+        let holder: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(vec![]));
+
+        let holder1 = holder.clone();
+        let holder2 = holder.clone();
+
+        let mut aa: Vec<Vec<u8>> = (0..10_u8).peekable().scan(0_u8, move |st, i|{
+            holder1.lock().unwrap().push(i);
+            *st += 1;
+            if *st == 3 {
+                *st = 0;
+                Some(1)
+            } else {
+                Some(0)
+            }
+        }).filter_map(move |v|if v == 0 {
+            None
+        } else {
+            Some(holder2.lock().unwrap().drain(..).collect())
+        }).collect();
+
+        if holder.lock().unwrap().len() > 0 {
+            aa.push(holder.lock().unwrap().drain(..).collect());
+        }
+
+        assert_eq!(aa.len(), 4);
+        assert_eq!(aa.get(3).unwrap().len(), 1);
     }
 }

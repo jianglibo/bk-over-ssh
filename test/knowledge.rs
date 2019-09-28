@@ -98,9 +98,9 @@ use r2d2_sqlite::SqliteConnectionManager;
 
         for identity in agent.identities() {
             let identity = identity.unwrap(); // assume no I/O errors
-            println!("{}", identity.comment());
+            eprintln!("{}", identity.comment());
             let pubkey = identity.blob();
-            println!("{:?}", pubkey);
+            eprintln!("{:?}", pubkey);
         }
     }
 
@@ -117,7 +117,7 @@ use r2d2_sqlite::SqliteConnectionManager;
         let test_dir = tutil::create_a_dir_and_a_file_with_len("xx.bin", 1024)?;
         let file = test_dir.tmp_file_str()?;
         let (mut remote_file, stat) = sess.scp_recv(Path::new(&file)).unwrap();
-        println!("remote file size: {}", stat.size());
+        eprintln!("remote file size: {}", stat.size());
         let mut contents = Vec::new();
         remote_file.read_to_end(&mut contents).unwrap();
         assert_eq!(stat.size(), 1024);
@@ -191,7 +191,7 @@ use r2d2_sqlite::SqliteConnectionManager;
                 d.strip_prefix(&base_path).ok().map(|d| d.to_path_buf())
                 // .map(|dd| dd.to_str().map(|s| s.to_string()))
             })
-            .for_each(|d| println!("{:?}", d.to_str()));
+            .for_each(|d| eprintln!("{:?}", d.to_str()));
         // assert_eq!(WalkDir::new("f:/").into_iter().filter_map(|e| e.ok()).count(), 33);
     }
 
@@ -200,13 +200,13 @@ use r2d2_sqlite::SqliteConnectionManager;
         let p = Path::new("./fixtures/a/b b/")
             .canonicalize()
             .expect("success");
-        println!("{:?}", p);
+        eprintln!("{:?}", p);
 
         let rp = Path::new("fixtures").canonicalize().expect("success");
 
         let pp = p.strip_prefix(rp).expect("success");
 
-        println!("{:?}", pp.as_os_str());
+        eprintln!("{:?}", pp.as_os_str());
     }
 
     #[test]
@@ -225,7 +225,7 @@ use r2d2_sqlite::SqliteConnectionManager;
         match mut_value {
             ref mut r => {
                 *r += 1;
-                println!("{}", r);
+                eprintln!("{}", r);
             }
         }
         let x = Some("foo".to_string());
@@ -276,9 +276,9 @@ use r2d2_sqlite::SqliteConnectionManager;
         let result = mailer.send(email.into());
 
         if result.is_ok() {
-            println!("Email sent");
+            eprintln!("Email sent");
         } else {
-            println!("Could not send email: {:?}", result);
+            eprintln!("Could not send email: {:?}", result);
         }
 
         assert!(result.is_ok());
@@ -336,7 +336,7 @@ mod tests1 {
         })?;
 
         for person in person_iter {
-            println!("Found person {:?}", person.unwrap());
+            eprintln!("Found person {:?}", person.unwrap());
         }
         Ok(())
     }

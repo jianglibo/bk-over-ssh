@@ -326,9 +326,9 @@ mod tests {
                 for i in 0..10 {
                     let a = &restored[i * WINDOW..(i + 1) * WINDOW];
                     let b = &modified.as_bytes()[i * WINDOW..(i + 1) * WINDOW];
-                    println!("{:?}\n{:?}\n", a, b);
+                    eprintln!("{:?}\n{:?}\n", a, b);
                     if a != b {
-                        println!(">>>>>>>>");
+                        eprintln!(">>>>>>>>");
                     }
                 }
                 panic!("different");

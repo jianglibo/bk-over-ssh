@@ -756,7 +756,7 @@ where
     /// Preparing file list includes invoking remote command to collect file list and downloading to local.
     pub fn prepare_file_list(&self, skip_sha1: bool) -> Result<(), failure::Error> {
         if self.get_working_file_list_file().exists() {
-            println!(
+            eprintln!(
                 "uncompleted list file exists: {:?} continue processing",
                 self.get_working_file_list_file()
             );

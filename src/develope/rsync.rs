@@ -176,7 +176,7 @@ fn create_patch_file_whole(
 
     whole::patch(&mut old_file, &mut delta_file, &mut restored_file)?;
 
-    println!(
+    eprintln!(
         "computed_new: {:?}",
         Path::new(&restored_name).metadata()?.len()
     );
@@ -205,7 +205,7 @@ fn create_patch_file(
 
     io::copy(&mut patch, &mut restored_file)?;
 
-    println!(
+    eprintln!(
         "computed_new: {:?}",
         Path::new(&restored_name).metadata()?.len()
     );
@@ -259,7 +259,7 @@ mod tests {
         &old_name,
         delta_name,
     )?;
-    println!("costs seconds: {:?}", start.elapsed().as_secs());
+    eprintln!("costs seconds: {:?}", start.elapsed().as_secs());
     Ok(())
 }
 
@@ -276,7 +276,7 @@ fn rsynclib_whole() -> Result<(), failure::Error> {
         &old_name,
         delta_name,
     )?;
-    println!("costs seconds: {:?}", start.elapsed().as_secs());
+    eprintln!("costs seconds: {:?}", start.elapsed().as_secs());
     Ok(())
 }
 

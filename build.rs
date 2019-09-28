@@ -15,7 +15,7 @@ fn main() {
     vcpkg::find_package("sqlite3").unwrap();
 // output goes target/debug/build/<pkg>/output
                 for (key, value) in env::vars_os() {
-                println!("{:?}: {:?}", key, value);
+                eprintln!("{:?}: {:?}", key, value);
             }
 
 }

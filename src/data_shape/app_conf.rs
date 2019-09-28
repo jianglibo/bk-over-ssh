@@ -227,7 +227,7 @@ where
             buf_len,
             multi_bar,
         )?;
-        println!(
+        eprintln!(
             "load server yml from: {}",
             server
                 .yml_location
@@ -309,7 +309,7 @@ servers_dir: abc"##;
         // assert_eq!(app_conf.get_servers_dir(), Path::new("abc"));
 
         let ymld = serde_yaml::to_string(&app_conf)?;
-        println!("{}", ymld);
+        eprintln!("{}", ymld);
 
         assert_eq!(yml, ymld);
         Ok(())
