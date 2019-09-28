@@ -51,9 +51,9 @@ args:
         help: don't write a lock file so multiple running instance is allowed, may cause errors.
         long: no-lock-file
         required: false
-    - no-use-db:
-        help: don't open db connection at startup.
-        long: no-use-db
+    - no-db:
+        help: don't use db.
+        long: no-db
         required: false
 
     # - flag:

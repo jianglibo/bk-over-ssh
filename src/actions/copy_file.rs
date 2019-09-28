@@ -479,7 +479,7 @@ mod tests {
         let mut server = load_server_yml();
         server.connect()?;
         server.server_yml.rsync_valve = 4;
-        let test_dir1 = tutil::create_a_dir_and_a_filename("xx.txt")?;
+        let test_dir1 = tutil::create_a_dir_and_a_file_with_content("xx.txt", "")?;
         let local_file_name = test_dir1.tmp_dir.path().join("yy.txt");
         let test_dir2 = tutil::create_a_dir_and_a_file_with_content("yy.txt", "hello")?;
         let remote_file_name = test_dir2.tmp_file_name_only()?;

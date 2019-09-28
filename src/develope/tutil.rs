@@ -158,12 +158,6 @@ impl std::default::Default for TestDir {
     }
 }
 
-#[allow(dead_code)]
-pub fn create_a_dir_and_a_filename(file_name: impl AsRef<str>) -> Result<TestDir, failure::Error> {
-    let td = TestDir::new();
-    td.make_a_file_with_content(file_name, "")?;
-    Ok(td)
-}
 
 #[allow(dead_code)]
 pub fn create_a_dir_and_a_file_with_content(

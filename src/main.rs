@@ -250,8 +250,8 @@ fn main() -> Result<(), failure::Error> {
     // we always open db connection unless no-db parameter provided.
     let mut app_conf =
         process_app_config::<SqliteConnectionManager, SqliteDbAccess>(conf, false)?;
-    let no_use_db = m.is_present("no-use-db");
-    if !no_use_db {
+    let no_db = m.is_present("no-db");
+    if !no_db {
         let sqlite_db_access = SqliteDbAccess::new(app_conf.data_dir_full_path.join("db.db"));
         app_conf.set_db_access(sqlite_db_access);
     }
@@ -350,6 +350,7 @@ where
     M: r2d2::ManageConnection,
     D: DbAccess<M>,
 {
+    let no_db = m.is_present("no-db");
     match m.subcommand() {
         ("pbr", Some(_sub_matches)) => {
             demonstrate_pbr()?;
@@ -455,7 +456,7 @@ where
             let start = Instant::now();
             let mut server = app_conf.load_server_yml(sub_matches.value_of("server-yml").unwrap(), None, None)?;
             server.connect()?;
-            server.list_remote_file_exec(skip_sha1)?;
+            server.list_remote_file_exec(skip_sha1, no_db)?;
 
             if let Some(out) = sub_matches.value_of("out") {
                 let mut out = fs::OpenOptions::new()
@@ -478,7 +479,10 @@ where
         }
         ("list-local-files", Some(sub_matches)) => {
             let skip_sha1 = sub_matches.is_present("skip-sha1");
-            let server = &app_conf.load_server_yml(sub_matches.value_of("server-yml").unwrap(), None, None)?;
+            let mut server = app_conf.load_server_yml(sub_matches.value_of("server-yml").unwrap(), None, None)?;
+            if no_db {
+                server.server_yml.use_db = false;
+            }
             if let Some(out) = sub_matches.value_of("out") {
                 let mut out = fs::OpenOptions::new()
                     .create(true)

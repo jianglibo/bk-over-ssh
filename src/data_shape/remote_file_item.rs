@@ -91,7 +91,7 @@ impl RemoteFileItem {
 
 pub fn load_remote_item_to_sqlite<M, D>(
     directory: &Directory,
-    db_access: D,
+    db_access: &D,
     skip_sha1: bool,
 ) -> Result<(), failure::Error> where
     M: r2d2::ManageConnection, 
@@ -107,7 +107,7 @@ pub fn load_remote_item_to_sqlite<M, D>(
             .filter_map(|d| directory.match_path(d))
             .filter_map(|d| RemoteFileItemInDb::from_path(&base_path, d, skip_sha1, dir_id))
             .for_each(|rfi| {
-                db_access.insert_remote_file_item(rfi);
+                db_access.insert_or_update_remote_file_item(rfi);
             });
     }
     Ok(())

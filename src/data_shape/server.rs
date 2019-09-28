@@ -702,11 +702,12 @@ where
         Ok(())
     }
 
-    pub fn list_remote_file_exec(&mut self, skip_sha1: bool) -> Result<PathBuf, failure::Error> {
+    pub fn list_remote_file_exec(&mut self, skip_sha1: bool, no_db: bool) -> Result<PathBuf, failure::Error> {
         let mut channel: ssh2::Channel = self.create_channel()?;
         let cmd = format!(
-            "{} list-local-files {}{}",
+            "{} {} list-local-files {}{}",
             self.server_yml.remote_exec,
+            if no_db {" --no-db"} else {""},
             self.server_yml.remote_server_yml,
             if skip_sha1 { " --skip-sha1" } else { "" }
         );
@@ -947,7 +948,7 @@ where
             for one_dir in self.server_yml.directories.iter() {
                 load_remote_item_to_sqlite(
                     one_dir,
-                    self.db_access.as_ref().cloned().unwrap(),
+                    self.db_access.as_ref().unwrap(),
                     skip_sha1,
                 )?;
             }

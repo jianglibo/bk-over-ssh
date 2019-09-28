@@ -19,6 +19,7 @@ pub struct RemoteFileItemInDb {
     pub modified: Option<DateTime<Utc>>,
     pub created: Option<DateTime<Utc>>,
     pub dir_id: i64,
+    pub changed: bool,
 }
 
 impl RemoteFileItemInDb {
@@ -46,14 +47,14 @@ impl RemoteFileItemInDb {
                         modified: metadata.modified().ok().map(Into::into),
                         created: metadata.created().ok().map(Into::into),
                         dir_id,
+                        changed: false,
                     });
                 } else {
                     error!("RemoteFileItem path name to_str() failed. {:?}", path);
                 }
-                // }
             }
             Err(err) => {
-                error!("RemoteFileItem from_path failed: {:?}, {:?}", path, err);
+                error!("RemoteFileItem metadata failed: {:?}, {:?}", path, err);
             }
         }
         None
@@ -62,8 +63,12 @@ impl RemoteFileItemInDb {
 
 pub trait DbAccess<M>: Send + Sync + Clone where M: r2d2::ManageConnection, {
     fn insert_directory(&self, path: impl AsRef<str>) -> Result<i64, failure::Error>;
-    fn insert_remote_file_item(&self, rfi: RemoteFileItemInDb);
+    fn insert_or_update_remote_file_item(&self, rfi: RemoteFileItemInDb);
+    fn find_remote_file_item(&self, dir_id: i64, path: impl AsRef<str>) -> Result<RemoteFileItemInDb, failure::Error>;
     fn create_database(&self) -> Result<(), failure::Error>;
     fn find_directory(&self, path: impl AsRef<str>) -> Result<i64, failure::Error>;
+    fn count_directory(&self) -> Result<u64, failure::Error>;
+    fn count_remote_file_item(&self, changed: Option<bool>) -> Result<u64, failure::Error>;
+    fn iterate_all_file_items<P>(&self, processor: P) -> (usize, usize) where P: Fn(RemoteFileItemInDb) -> ();
 }
 
