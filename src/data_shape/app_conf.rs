@@ -23,6 +23,13 @@ impl LogConf {
     }
 }
 
+#[derive(Deserialize, Serialize, Debug)]
+#[serde(rename_all(deserialize = "snake_case"))]
+pub enum AppRole {
+    Controller,
+    Leaf,
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 pub struct MailConf {
     pub from: String,
@@ -37,6 +44,7 @@ pub struct AppConfYml {
     data_dir: String,
     log_conf: LogConf,
     pub mail_conf: MailConf,
+    role: AppRole,
 }
 
 fn guesss_data_dir(data_dir: impl AsRef<str>) -> Result<PathBuf, failure::Error> {

@@ -31,3 +31,6 @@ prune_strategy:
   daily: 3
   hourly: 1
   minutely: 1
+schedules:
+  - name: "sync-dir"
+    cron: "0 30 9,12,15 1,15 May-Aug Mon,Wed,Fri 2018/2"

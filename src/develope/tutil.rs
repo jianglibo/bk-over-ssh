@@ -1,8 +1,8 @@
+use crate::db_accesses::{DbAccess, SqliteDbAccess};
 use rand::Rng;
 use std::path::{Path, PathBuf};
 use std::{fs, io, io::BufRead, io::BufWriter, io::Seek, io::Write};
 use tempfile::TempDir;
-use crate::db_accesses::{SqliteDbAccess};
 
 #[allow(dead_code)]
 pub fn get_a_cursor_writer() -> io::Cursor<Vec<u8>> {
@@ -14,6 +14,13 @@ pub fn get_a_cursor_writer() -> io::Cursor<Vec<u8>> {
 pub fn count_cursor_lines(cursor: &mut io::Cursor<Vec<u8>>) -> usize {
     cursor.seek(io::SeekFrom::Start(0)).unwrap();
     io::BufReader::new(cursor).lines().count()
+}
+
+pub fn create_a_sqlite_file_db(db_dir: &TestDir) -> Result<SqliteDbAccess, failure::Error> {
+    let db_file = db_dir.tmp_dir_path().join("db.db");
+    let db_access = SqliteDbAccess::new(db_file);
+    db_access.create_database()?;
+    Ok(db_access)
 }
 
 pub fn print_cursor_lines(cursor: &mut io::Cursor<Vec<u8>>) {
@@ -157,7 +164,6 @@ impl std::default::Default for TestDir {
         Self::new()
     }
 }
-
 
 #[allow(dead_code)]
 pub fn create_a_dir_and_a_file_with_content(

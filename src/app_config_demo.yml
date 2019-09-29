@@ -1,3 +1,4 @@
+role: controller
 data_dir: data
 log_conf:
   log_file: output.log

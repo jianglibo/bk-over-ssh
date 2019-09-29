@@ -3,7 +3,6 @@ mod scheduler_util;
 pub mod sqlite_access;
 
 use crate::actions::hash_file_sha1;
-use crate::data_shape::RemoteFileItem;
 use chrono::{DateTime, Utc};
 use log::*;
 use r2d2;
@@ -67,7 +66,9 @@ where
     M: r2d2::ManageConnection,
 {
     fn insert_directory(&self, path: impl AsRef<str>) -> Result<i64, failure::Error>;
+    fn insert_or_update_remote_file_items(&self, rfis: Vec<RemoteFileItemInDb>);
     fn insert_or_update_remote_file_item(&self, rfi: RemoteFileItemInDb);
+    fn one_file_item(&self) -> Result<RemoteFileItemInDb, failure::Error>;
     fn find_remote_file_item(
         &self,
         dir_id: i64,
@@ -83,4 +84,7 @@ where
     fn iterate_files_by_directory<F>(&self, processor: F) -> Result<(), failure::Error>
     where
         F: FnMut((Option<RemoteFileItemInDb>, Option<String>)) -> ();
+    
+    fn find_next_execute(&self, server_yml_path: impl AsRef<str>, task_name: impl AsRef<str>) -> Option<bool>;
+    fn insert_next_execute(&self, server_yml_path: impl AsRef<str>, task_name: impl AsRef<str>, time_execution: DateTime<Utc>);
 }

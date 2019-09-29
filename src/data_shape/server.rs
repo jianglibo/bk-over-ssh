@@ -5,7 +5,6 @@ use crate::data_shape::{
 };
 use crate::db_accesses::DbAccess;
 use crate::ioutil::SharedMpb;
-use crate::rustsync::{DeltaFileReader, DeltaReader, Signature};
 use bzip2::write::BzEncoder;
 use bzip2::Compression;
 use glob::Pattern;
@@ -46,6 +45,12 @@ pub struct Directory {
     pub includes_patterns: Option<Vec<Pattern>>,
     #[serde(skip)]
     pub excludes_patterns: Option<Vec<Pattern>>,
+}
+
+#[derive(Deserialize, Serialize, Debug)]
+pub struct ScheduleItem {
+    pub name: String,
+    pub cron: String,
 }
 
 impl Directory {
@@ -192,6 +197,7 @@ pub struct ServerYml {
     pub buf_len: usize,
     pub rsync_window: usize,
     pub use_db: bool,
+    pub schedules: Vec<ScheduleItem>,
     #[serde(skip)]
     pub yml_location: Option<PathBuf>,
 }
