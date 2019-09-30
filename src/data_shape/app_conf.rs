@@ -74,6 +74,7 @@ fn guesss_data_dir(data_dir: impl AsRef<str>) -> Result<PathBuf, failure::Error>
     }
 }
 
+#[derive(Debug, Serialize)]
 pub struct AppConf<M, D>
 where
     M: r2d2::ManageConnection,
@@ -84,8 +85,12 @@ where
     pub data_dir_full_path: PathBuf,
     pub log_full_path: PathBuf,
     pub servers_dir: PathBuf,
+    #[serde(skip)]
     pub db_access: Option<D>,
+    #[serde(skip)]
     _m: PhantomData<M>,
+    #[serde(skip)]
+    lock_file: Option<fs::File>,
 }
 
 impl<M, D> AppConf<M, D>
@@ -147,6 +152,7 @@ where
                             servers_dir,
                             db_access: None,
                             _m: PhantomData,
+                            lock_file: None,
                         };
                         Ok(Some(app_conf))
                     }
@@ -199,29 +205,17 @@ where
         bail!("read app_conf failed.")
     }
 
-    pub fn lock_working_file(&self) -> Result<PathBuf, failure::Error> {
-        let lof = self.data_dir_full_path.as_path().join("working.lock");
-        let lof1 = lof.clone();
-        if lof.exists() {
-            bail!("create lock file failed: {:?}, if you can sure app isn't running, you can delete it manually.", lof);
-        } else {
-            fs::OpenOptions::new().write(true).create(true).open(lof)?;
-        }
-        Ok(lof1)
-    }
-    pub fn unlock_working_file(&self) {
+    pub fn lock_working_file(&mut self) -> Result<(), failure::Error> {
         let lof = self.data_dir_full_path.as_path().join("working.lock");
         if lof.exists() {
-            if let Err(err) = fs::remove_file(lof.as_path()) {
-                warn!("remove lock file failed: {:?}, {:?}", lof, err);
+            if fs::remove_file(lof.as_path()).is_err() {
+                eprintln!("create lock file failed: {:?}, if you can sure app isn't running, you can delete it manually.", lof);
             }
+        } else {
+            self.lock_file.replace(fs::OpenOptions::new().write(true).create(true).open(lof)?);
         }
+        Ok(())
     }
-
-    // pub fn create_sqlite_pool(&self) {
-    //     let db_file = self.data_dir_full_path.as_path().join("db.db");
-    //     create_sqlite_pool(db_file)
-    // }
 
     pub fn load_server_yml(
         &self,

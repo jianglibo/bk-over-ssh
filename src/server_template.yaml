@@ -33,4 +33,5 @@ prune_strategy:
   minutely: 1
 schedules:
   - name: "sync-dir"
+    # at 0 seconds, 30 minutes, 9,12,15 hours, may to august, monday, Wednesday, Friday, 2018 start every 2 years.
     cron: "0 30 9,12,15 1,15 May-Aug Mon,Wed,Fri 2018/2"

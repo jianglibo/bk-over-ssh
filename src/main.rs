@@ -297,21 +297,21 @@ fn main() -> Result<(), failure::Error> {
         return Ok(());
     }
 
-    let lock_file = !m.is_present("no-lock-file");
+    // let lock_file = !m.is_present("no-lock-file");
 
-    if lock_file {
+    // if lock_file {
         let lof = app_conf.lock_working_file()?;
-        ctrlc::set_handler(move || {
-            if lof.exists() {
-                println!("Ctrl-C catched, deleting lock_file: {:?}", lof);
-                if let Err(err) = fs::remove_file(lof.as_path()) {
-                    warn!("remove lock file failed: {:?}, {:?}", lof, err);
-                }
-                std::process::exit(0);
-            }
-        })
-        .expect("Error setting Ctrl-C handler");
-    }
+        // ctrlc::set_handler(move || {
+        //     if lof.exists() {
+        //         println!("Ctrl-C catched, deleting lock_file: {:?}", lof);
+        //         if let Err(err) = fs::remove_file(lof.as_path()) {
+        //             warn!("remove lock file failed: {:?}, {:?}", lof, err);
+        //         }
+        //         std::process::exit(0);
+        //     }
+        // })
+        // .expect("Error setting Ctrl-C handler");
+    // }
 
     let delay = m.value_of("delay");
     if let Some(delay) = delay {
@@ -321,9 +321,9 @@ fn main() -> Result<(), failure::Error> {
         error!("{:?}", err);
         eprintln!("{:?}", err);
     }
-    if lock_file {
-        app_conf.unlock_working_file();
-    }
+    // if lock_file {
+    //     app_conf.unlock_working_file();
+    // }
     Ok(())
 }
 
@@ -656,7 +656,7 @@ where
             println!(
                 "The configuration file is located at: {:?}, content:\n{}",
                 app_conf.config_file_path,
-                serde_yaml::to_string(&app_conf.get_inner())?
+                serde_yaml::to_string(&app_conf)?
             );
         }
         (_, _) => unimplemented!(), // for brevity

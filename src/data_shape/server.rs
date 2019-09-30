@@ -3,7 +3,7 @@ use crate::data_shape::{
     load_remote_item, load_remote_item_to_sqlite, rolling_files, string_path, AppConf, FileItem,
     FileItemProcessResult, FileItemProcessResultStats, RemoteFileItem, SyncType,
 };
-use crate::db_accesses::DbAccess;
+use crate::db_accesses::{DbAccess, scheduler_util};
 use crate::ioutil::SharedMpb;
 use bzip2::write::BzEncoder;
 use bzip2::Compression;
@@ -669,9 +669,10 @@ where
         trace!("list-local-files output: {:?}", contents);
         contents.clear();
         channel.stderr().read_to_string(&mut contents)?;
+
         trace!("list-local-files stderr: {:?}", contents);
         if !contents.is_empty() {
-            bail!("list-local-files return error: {:?}", contents);
+            eprintln!("server side message: {:?}", contents);
         }
         let sftp = self.session.as_ref().unwrap().sftp()?;
         let mut f = sftp.open(Path::new(&self.server_yml.file_list_file))?;
@@ -940,6 +941,15 @@ where
     }
 
     pub fn sync_dirs(&mut self, skip_sha1: bool) -> Result<SyncDirReport, failure::Error> {
+        let b = if let Some(si) = self.server_yml.schedules.iter().find(|it|it.name == "sync-dir") {
+            scheduler_util::need_execute(self.db_access.as_ref(), self.yml_location.as_ref().unwrap().to_str().unwrap(), &si.name, &si.cron)
+        } else {
+            true
+        };
+
+        if !b {
+            bail!("cron time did't meet yet.");
+        }
         let start = Instant::now();
         self.connect()?;
         let rs = self.start_sync_working_file_list(skip_sha1)?;

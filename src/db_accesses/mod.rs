@@ -1,5 +1,5 @@
 // placeholders
-mod scheduler_util;
+pub mod scheduler_util;
 pub mod sqlite_access;
 
 use crate::actions::hash_file_sha1;
@@ -85,6 +85,9 @@ where
     where
         F: FnMut((Option<RemoteFileItemInDb>, Option<String>)) -> ();
     
-    fn find_next_execute(&self, server_yml_path: impl AsRef<str>, task_name: impl AsRef<str>) -> Option<bool>;
+    fn find_next_execute(&self, server_yml_path: impl AsRef<str>, task_name: impl AsRef<str>) -> Option<(i64, DateTime<Utc>, bool)>;
     fn insert_next_execute(&self, server_yml_path: impl AsRef<str>, task_name: impl AsRef<str>, time_execution: DateTime<Utc>);
+    fn update_next_execute_done(&self, id: i64) -> Result<(), failure::Error>;
+    fn delete_next_execute(&self, id: i64) -> Result<(), failure::Error>;
+    fn count_next_execute(&self) -> Result<u64, failure::Error>;
 }

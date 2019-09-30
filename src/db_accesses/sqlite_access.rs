@@ -325,33 +325,57 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
         }
     }
 
+    fn update_next_execute_done(&self, id: i64) -> Result<(), failure::Error> {
+        let conn = self.get_pool().get().unwrap();
+        let mut stmt = conn.prepare("UPDATE schedule_done set done = :done WHERE id = :id")?;
+        stmt.execute_named(named_params!{
+            ":done": true,
+            ":id": id,
+        })?;
+
+        Ok(())
+    }
+
     fn find_next_execute(
         &self,
         server_yml_path: impl AsRef<str>,
         task_name: impl AsRef<str>,
-    ) -> Option<bool> {
+    ) -> Option<(i64, DateTime<Utc>, bool)> {
         let conn = self.get_pool().get().unwrap();
-        let r = match conn.prepare("SELECT id, done FROM schedule_done WHERE server_yml_path = :server_yml_path AND task_name = :task_name") {
+        let r = match conn.prepare("SELECT id, time_execution, done FROM schedule_done
+                                         WHERE server_yml_path = :server_yml_path AND task_name = :task_name
+                                         ORDER BY time_execution DESC
+                                         LIMIT 1") {
             Ok(mut stmt) => {
-                let qr = stmt.query_row_named(named_params!{
+                stmt.query_map_named(named_params!{
                     ":server_yml_path": server_yml_path.as_ref(),
                     ":task_name": task_name.as_ref(),
-                }, |row| Ok(row.get(1).expect("archive row of 'done' failed.")));
-                match  qr {
-                    Ok(b) => Some(b),
-                    Err(rusqlite::Error::QueryReturnedNoRows) => None,
-                    Err(err) => {
-                        error!("query find_next_execute stmt failed: {:?}", err);
-                        Some(false) // default no execution.
-                    }
-                }
+                }, |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                ).expect("query schedule_done should success.").next().map(|it|it.expect("schedule_done item should success."))
             }
             Err(err) => {
                 error!("prepare find_next_execute stmt failed: {:?}", err);
-                    Some(false) // default no execution.
+                    None
                 }
         };
         r
+    }
+
+    fn count_next_execute(&self) -> Result<u64, failure::Error> {
+        let conn = self.get_pool().get().unwrap();
+        let mut stmt = conn.prepare("SELECT count(id) FROM schedule_done;")?;
+        let i: i64 = stmt.query_row(NO_PARAMS, |row| row.get(0))?;
+        Ok(i as u64)
+
+    }
+
+    fn delete_next_execute(&self, id: i64) -> Result<(), failure::Error> {
+        let conn = self.get_pool().get().unwrap();
+        let mut stmt = conn.prepare("DELETE FROM schedule_done WHERE id = :id")?;
+        stmt.execute_named(named_params!{
+            ":id": id,
+        })?;
+        Ok(())
     }
 
     fn insert_next_execute(
