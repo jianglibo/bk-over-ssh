@@ -12,6 +12,7 @@ rsync_valve: 419430400
 buf_len: 8192
 rsync_window: 2048
 use_db: true
+skip_sha1: true
 directories:
   - remote_dir: /home/jianglibo/ws/ssh-client-demo/fixtures/adir
     local_dir: ~

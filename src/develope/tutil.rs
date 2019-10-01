@@ -1,8 +1,29 @@
+use crate::data_shape::{demo_app_conf, AppConf, Server, load_server_from_yml};
 use crate::db_accesses::{DbAccess, SqliteDbAccess};
+use r2d2_sqlite::SqliteConnectionManager;
 use rand::Rng;
 use std::path::{Path, PathBuf};
 use std::{fs, io, io::BufRead, io::BufWriter, io::Seek, io::Write};
 use tempfile::TempDir;
+
+#[allow(dead_code)]
+pub fn load_demo_app_conf_sqlite() -> AppConf<SqliteConnectionManager, SqliteDbAccess> {
+    demo_app_conf::<SqliteConnectionManager, SqliteDbAccess>()
+}
+
+#[allow(dead_code)]
+pub fn load_demo_server_sqlite(
+    app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
+) -> Server<SqliteConnectionManager, SqliteDbAccess> {
+    eprintln!("load_demo_server_sqlite");
+    load_server_from_yml(
+        app_conf,
+        "localhost.yml",
+        None,
+        None,
+    )
+    .unwrap()
+}
 
 #[allow(dead_code)]
 pub fn get_a_cursor_writer() -> io::Cursor<Vec<u8>> {
@@ -16,13 +37,14 @@ pub fn count_cursor_lines(cursor: &mut io::Cursor<Vec<u8>>) -> usize {
     io::BufReader::new(cursor).lines().count()
 }
 
+#[allow(dead_code)]
 pub fn create_a_sqlite_file_db(db_dir: &TestDir) -> Result<SqliteDbAccess, failure::Error> {
     let db_file = db_dir.tmp_dir_path().join("db.db");
     let db_access = SqliteDbAccess::new(db_file);
     db_access.create_database()?;
     Ok(db_access)
 }
-
+#[allow(dead_code)]
 pub fn print_cursor_lines(cursor: &mut io::Cursor<Vec<u8>>) {
     cursor.seek(io::SeekFrom::Start(0)).unwrap();
     io::BufReader::new(cursor).lines().for_each(|line| {
@@ -87,15 +109,17 @@ impl TestDir {
         Ok(self.tmp_file()?.metadata().unwrap().len())
     }
 
+    #[allow(dead_code)]
     pub fn get_file_path(&self, file_name: impl AsRef<str>) -> PathBuf {
         self.tmp_dir_path().join(file_name.as_ref())
     }
 
+    #[allow(dead_code)]
     pub fn assert_file_exists(&self, file_name: impl AsRef<str>) {
         let f = self.tmp_dir_path().join(file_name.as_ref());
         assert!(f.exists() && f.is_file());
     }
-
+    #[allow(dead_code)]
     pub fn open_a_file_for_read(
         &self,
         file_name: impl AsRef<str>,
@@ -103,7 +127,7 @@ impl TestDir {
         let f = self.tmp_dir_path().join(file_name.as_ref());
         Ok(fs::OpenOptions::new().read(true).open(f)?)
     }
-
+    #[allow(dead_code)]
     pub fn open_an_empty_file_for_write(
         &self,
         file_name: impl AsRef<str>,

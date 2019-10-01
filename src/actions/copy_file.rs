@@ -1,4 +1,4 @@
-use crate::data_shape::{FileItem, FileItemProcessResult, Server, SyncType, AppConf};
+use crate::data_shape::{FileItem, FileItemProcessResult, Server, SyncType};
 use crate::rustsync::{DeltaFileReader, DeltaReader, Signature};
 use crate::db_accesses::{DbAccess};
 use indicatif::HumanBytes;
@@ -415,8 +415,6 @@ mod tests {
     use crate::log_util;
     use std::panic;
     use std::{fs, io};
-    use crate::db_accesses::{SqliteDbAccess};
-    use r2d2_sqlite::SqliteConnectionManager;
 
     fn log() {
         log_util::setup_logger_detail(
@@ -429,18 +427,18 @@ mod tests {
         .expect("init log should success.");
     }
 
-    fn load_server_yml(app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>) -> Server<SqliteConnectionManager, SqliteDbAccess> {
-        Server::<SqliteConnectionManager, SqliteDbAccess>::load_from_yml(
-            app_conf,
-            // "data/servers",
-            // "data",
-            "localhost.yml",
-            None,
-            None,
-            // None,
-        )
-        .unwrap()
-    }
+    // fn load_server_yml(app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>) -> Server<SqliteConnectionManager, SqliteDbAccess> {
+    //     Server::<SqliteConnectionManager, SqliteDbAccess>::load_from_yml(
+    //         app_conf,
+    //         // "data/servers",
+    //         // "data",
+    //         "localhost.yml",
+    //         None,
+    //         None,
+    //         // None,
+    //     )
+    //     .unwrap()
+    // }
 
     fn copy_a_file<'a, M, D>(
         server: &mut Server<M, D>,
@@ -458,7 +456,8 @@ mod tests {
         let fi = FileItem::new(local_base_dir, remote_base_dir, ri, sync_type);
         let sftp = server.get_ssh_session().sftp()?;
         let mut buf = vec![0; 8192];
-        let mut another_server = load_server_yml();
+        let app_conf = tutil::load_demo_app_conf_sqlite();
+        let mut another_server = tutil::load_demo_server_sqlite(&app_conf);
         another_server.connect()?;
         let r = copy_a_file_item(&another_server, &sftp, fi, &mut buf, None);
         Ok(r)
@@ -476,8 +475,9 @@ mod tests {
     #[test]
     fn t_copy_a_file() -> Result<(), failure::Error> {
         log();
-
-        let mut server = load_server_yml();
+        let app_conf = tutil::load_demo_app_conf_sqlite();
+        // let mut server = load_server_yml();
+        let mut server = tutil::load_demo_server_sqlite(&app_conf);
         server.connect()?;
         server.server_yml.rsync_valve = 4;
         let test_dir1 = tutil::create_a_dir_and_a_file_with_content("xx.txt", "")?;

@@ -169,7 +169,6 @@ where
     D: DbAccess<M>,
 {
     let mut servers: Vec<Server<M, D>> = Vec::new();
-    let skip_sha1 = sub_matches.is_present("skip-sha1");
     let no_pb = sub_matches.is_present("no-pb");
     let buf_len = sub_matches.value_of("buf-len").and_then(|v| {
         if let Ok(v) = v.parse::<usize>() {
@@ -216,7 +215,7 @@ where
     }
     servers
         .into_par_iter()
-        .for_each(|mut server| match server.sync_dirs(skip_sha1) {
+        .for_each(|mut server| match server.sync_dirs() {
             Ok(result) => {
                 actions::write_dir_sync_result(&server, result.as_ref());
                 if console_log {
@@ -245,6 +244,12 @@ fn main() -> Result<(), failure::Error> {
 
     // we always open db connection unless no-db parameter provided.
     let mut app_conf = process_app_config::<SqliteConnectionManager, SqliteDbAccess>(conf, false)?;
+    if m.is_present("skip-cron") {
+        app_conf.skip_cron();
+    }
+    if m.is_present("enable-sha1") {
+        app_conf.not_skip_sha1();
+    }
     let no_db = m.is_present("no-db");
     if !no_db {
         let sqlite_db_access = SqliteDbAccess::new(app_conf.data_dir_full_path.join("db.db"));
@@ -357,9 +362,6 @@ where
             let to = sub_matches.value_of("to").unwrap();
             send_test_mail(&app_conf.get_mail_conf(), to)?;
         }
-        // ("sync-dirs", Some(sub_matches)) => {
-        //     sync_dirs(&app_conf, sub_matches, console_log, None)?;
-        // }
         ("copy-executable", Some(sub_matches)) => {
             let mut server = app_conf.load_server_yml(
                 sub_matches.value_of("server-yml").unwrap(),
@@ -460,7 +462,6 @@ where
             }
         }
         ("list-remote-files", Some(sub_matches)) => {
-            let skip_sha1 = sub_matches.is_present("skip-sha1");
             let start = Instant::now();
             let mut server = app_conf.load_server_yml(
                 sub_matches.value_of("server-yml").unwrap(),
@@ -468,7 +469,7 @@ where
                 None,
             )?;
             server.connect()?;
-            server.list_remote_file_exec(skip_sha1, no_db)?;
+            server.list_remote_file_exec(no_db)?;
 
             if let Some(out) = sub_matches.value_of("out") {
                 let mut out = fs::OpenOptions::new()
@@ -490,7 +491,6 @@ where
             println!("time costs: {:?}", start.elapsed().as_secs());
         }
         ("list-local-files", Some(sub_matches)) => {
-            let skip_sha1 = sub_matches.is_present("skip-sha1");
             let mut server = app_conf.load_server_yml(
                 sub_matches.value_of("server-yml").unwrap(),
                 None,
@@ -505,9 +505,9 @@ where
                     .truncate(true)
                     .write(true)
                     .open(out)?;
-                server.load_dirs(&mut out, skip_sha1)?;
+                server.load_dirs(&mut out)?;
             } else {
-                server.load_dirs(&mut io::stdout(), skip_sha1)?;
+                server.load_dirs(&mut io::stdout())?;
             }
         }
         ("verify-server-yml", Some(sub_matches)) => {

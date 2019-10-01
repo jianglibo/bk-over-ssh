@@ -77,10 +77,10 @@ impl RemoteFileItemInDb {
         , self.modified.map(|_|"time_modified, ").unwrap_or("")
         , self.created.map(|_|"time_created, ").unwrap_or("")
         , self.path
-        , self.sha1.as_ref().map(|s|format!("'{}', ", s)).unwrap_or("".to_string())
+        , self.sha1.as_ref().map(|s|format!("'{}', ", s)).unwrap_or_else(|| "".to_string())
         , self.len
-        , self.modified.map(|m|format!("'{}', ", m.to_rfc3339_opts(SecondsFormat::Nanos, true))).unwrap_or("".to_string())
-        , self.created.map(|m|format!("'{}', ", m.to_rfc3339_opts(SecondsFormat::Nanos, true))).unwrap_or("".to_string())
+        , self.modified.map(|m|format!("'{}', ", m.to_rfc3339_opts(SecondsFormat::Nanos, true))).unwrap_or_else(|| "".to_string())
+        , self.created.map(|m|format!("'{}', ", m.to_rfc3339_opts(SecondsFormat::Nanos, true))).unwrap_or_else(|| "".to_string())
         , self.dir_id
         , 1
         )
@@ -93,13 +93,13 @@ impl RemoteFileItemInDb {
             self.sha1
                 .as_ref()
                 .map(|s| format!("sha1 = '{}', ", s))
-                .unwrap_or("".to_string()),
+                .unwrap_or_else(|| "".to_string()),
             self.modified
                 .map(|m| format!(
                     "time_modified = '{}', ",
                     m.to_rfc3339_opts(SecondsFormat::Nanos, true)
                 ))
-                .unwrap_or("".to_string()),
+                .unwrap_or_else(|| "".to_string()),
             self.id
         )
     }
@@ -126,7 +126,6 @@ where
     M: r2d2::ManageConnection,
 {
     fn insert_directory(&self, path: impl AsRef<str>) -> Result<i64, failure::Error>;
-    fn insert_or_update_remote_file_items(&self, rfis: Vec<RemoteFileItemInDb>);
     fn insert_or_update_remote_file_item(
         &self,
         rfi: RemoteFileItemInDb,

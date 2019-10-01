@@ -1,17 +1,17 @@
-use crate::data_shape::Server;
+use crate::data_shape::{load_server_from_yml, Server};
+use crate::db_accesses::DbAccess;
 use crate::ioutil::SharedMpb;
-use crate::db_accesses::{DbAccess};
 use log::{trace, warn};
 use serde::{Deserialize, Serialize};
 use std::env;
+use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::{fs, io::Read, io::Write};
-use std::marker::PhantomData;
 
 pub const CONF_FILE_NAME: &str = "bk_over_ssh.yml";
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Default)]
 pub struct LogConf {
     pub log_file: String,
     verbose_modules: Vec<String>,
@@ -30,7 +30,7 @@ pub enum AppRole {
     Leaf,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Default)]
 pub struct MailConf {
     pub from: String,
     pub username: String,
@@ -45,6 +45,17 @@ pub struct AppConfYml {
     log_conf: LogConf,
     pub mail_conf: MailConf,
     role: AppRole,
+}
+
+impl Default for AppConfYml {
+    fn default() -> Self {
+        Self {
+            data_dir: "data".to_string(),
+            role: AppRole::Controller,
+            mail_conf: MailConf::default(),
+            log_conf: LogConf::default(),
+        }
+    }
 }
 
 fn guesss_data_dir(data_dir: impl AsRef<str>) -> Result<PathBuf, failure::Error> {
@@ -91,6 +102,27 @@ where
     _m: PhantomData<M>,
     #[serde(skip)]
     lock_file: Option<fs::File>,
+    skip_cron: bool,
+    skip_sha1: bool,
+}
+
+pub fn demo_app_conf<M, D>() -> AppConf<M, D>
+where
+    M: r2d2::ManageConnection,
+    D: DbAccess<M>,
+{
+    AppConf {
+        inner: AppConfYml::default(),
+        config_file_path: Path::new("abc").to_path_buf(),
+        data_dir_full_path: PathBuf::from("data"),
+        log_full_path: PathBuf::from("data/out.log"),
+        servers_dir: PathBuf::from("data/servers"),
+        _m: PhantomData,
+        db_access: None,
+        lock_file: None,
+        skip_cron: false,
+        skip_sha1: true,
+    }
 }
 
 impl<M, D> AppConf<M, D>
@@ -102,12 +134,30 @@ where
         self.db_access.replace(db_access);
     }
 
+    #[allow(dead_code)]
     pub fn get_inner(&self) -> &AppConfYml {
         &self.inner
     }
     pub fn get_db_access(&self) -> Option<&D> {
         self.db_access.as_ref()
     }
+
+    pub fn skip_cron(&mut self) {
+        self.skip_cron = true;
+    }
+
+    pub fn not_skip_sha1(&mut self) {
+        self.skip_sha1 = false;
+    }
+
+    pub fn is_skip_sha1(&self) -> bool {
+        self.skip_sha1
+    }
+
+    pub fn is_skip_cron(&self) -> bool {
+        self.skip_cron
+    }
+
     fn read_app_conf(file: impl AsRef<Path>) -> Result<Option<AppConf<M, D>>, failure::Error> {
         if !file.as_ref().exists() {
             return Ok(None);
@@ -153,6 +203,8 @@ where
                             db_access: None,
                             _m: PhantomData,
                             lock_file: None,
+                            skip_cron: false,
+                            skip_sha1: true,
                         };
                         Ok(Some(app_conf))
                     }
@@ -212,7 +264,8 @@ where
                 eprintln!("create lock file failed: {:?}, if you can sure app isn't running, you can delete it manually.", lof);
             }
         } else {
-            self.lock_file.replace(fs::OpenOptions::new().write(true).create(true).open(lof)?);
+            self.lock_file
+                .replace(fs::OpenOptions::new().write(true).create(true).open(lof)?);
         }
         Ok(())
     }
@@ -223,12 +276,7 @@ where
         buf_len: Option<usize>,
         multi_bar: Option<SharedMpb>,
     ) -> Result<Server<M, D>, failure::Error> {
-        let server = Server::<M, D>::load_from_yml_with_app_config(
-            &self,
-            yml_file_name.as_ref(),
-            buf_len,
-            multi_bar,
-        )?;
+        let server = load_server_from_yml(&self, yml_file_name.as_ref(), buf_len, multi_bar)?;
         eprintln!(
             "load server yml from: {}",
             server
@@ -259,13 +307,7 @@ where
                 }
                 Ok(astr) => Some(astr),
             })
-            .map(|astr| {
-                self.load_server_yml(
-                    astr,
-                    buf_len,
-                    multi_bar.as_ref().map(Arc::clone),
-                )
-            })
+            .map(|astr| self.load_server_yml(astr, buf_len, multi_bar.as_ref().map(Arc::clone)))
             .filter_map(|rr| match rr {
                 Err(err) => {
                     warn!("load_server_yml failed: {:?}", err);

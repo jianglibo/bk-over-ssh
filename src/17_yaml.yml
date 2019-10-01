@@ -38,6 +38,10 @@ args:
         help: skip cron schedule, execute right now.
         long: skip-cron
         required: false
+    - enable-sha1:
+        help: detect file changing on file's sha1.
+        long: enable-sha1
+        required: false
     - v:
         help: verbose level debug.
         long: v

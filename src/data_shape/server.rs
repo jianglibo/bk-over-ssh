@@ -197,6 +197,7 @@ pub struct ServerYml {
     pub buf_len: usize,
     pub rsync_window: usize,
     pub use_db: bool,
+    pub skip_sha1: bool,
     pub schedules: Vec<ScheduleItem>,
     #[serde(skip)]
     pub yml_location: Option<PathBuf>,
@@ -340,149 +341,6 @@ where
                 err
             );
         }
-    }
-
-    pub fn load_from_yml_with_app_config<'a>(
-        app_conf: &'a AppConf<M, D>,
-        name: impl AsRef<str>,
-        buf_len: Option<usize>,
-        multi_bar: Option<SharedMpb>,
-    ) -> Result<Server<'sv, M, D>, failure::Error> {
-        Server::<'sv, M, D>::load_from_yml(
-            app_conf,
-            // app_conf.servers_dir.as_path(),
-            // app_conf.data_dir_full_path.as_path(),
-            name,
-            buf_len,
-            multi_bar,
-            // app_conf.get_db_access().cloned(),
-        )
-    }
-
-    pub fn load_from_yml<'a>(
-        app_conf: &'a AppConf<M, D>,
-        // servers_dir: impl AsRef<Path>,
-        // data_dir: impl AsRef<Path>,
-        name: impl AsRef<str>,
-        buf_len: Option<usize>,
-        multi_bar: Option<SharedMpb>,
-        // db_access: Option<D>,
-    ) -> Result<Server<'sv, M, D>, failure::Error> {
-        let name = name.as_ref();
-        trace!("got server yml name: {:?}", name);
-        let mut server_yml_path = Path::new(name).to_path_buf();
-        if (server_yml_path.is_absolute() || name.starts_with('/')) && !server_yml_path.exists() {
-            bail!(
-                "server yml file does't exist, please create one: {:?}",
-                server_yml_path
-            );
-        } else {
-            if !name.contains('/') {
-                server_yml_path = app_conf.servers_dir.as_path().join(name);
-            }
-            if !server_yml_path.exists() {
-                bail!("server yml file does't exist: {:?}", server_yml_path);
-            }
-        }
-        let mut f = fs::OpenOptions::new().read(true).open(&server_yml_path)?;
-        let mut buf = String::new();
-        f.read_to_string(&mut buf)?;
-        let server_yml: ServerYml = serde_yaml::from_str(&buf)?;
-
-        let data_dir = app_conf.data_dir_full_path.as_path();
-        let maybe_local_server_base_dir = data_dir.join(&server_yml.host);
-        let report_dir = data_dir.join("report").join(&server_yml.host);
-        let tar_dir = data_dir.join("tar").join(&server_yml.host);
-        let working_dir = data_dir.join("working").join(&server_yml.host);
-
-        if !report_dir.exists() {
-            fs::create_dir_all(&report_dir)?;
-        }
-        if !tar_dir.exists() {
-            fs::create_dir_all(&tar_dir)?;
-        }
-
-        if !working_dir.exists() {
-            fs::create_dir_all(&working_dir)?;
-        }
-
-        let mut server = Server {
-            server_yml,
-            multi_bar,
-            db_access: app_conf.db_access.clone(),
-            pb: None,
-            _tcp_stream: None,
-            report_dir,
-            session: None,
-            tar_dir,
-            working_dir,
-            yml_location: None,
-            app_conf,
-            _m: PhantomData,
-        };
-
-        if let Some(buf_len) = buf_len {
-            server.server_yml.buf_len = buf_len;
-        }
-
-        if let Some(mb) = server.multi_bar.as_ref() {
-            let pb_total = ProgressBar::new(!0);
-            let ps = ProgressStyle::default_spinner(); // {spinner} {msg}
-            pb_total.set_style(ps);
-            let pb_total = mb.add(pb_total);
-
-            let pb_item = ProgressBar::new(!0);
-            let ps = ProgressStyle::default_spinner(); // {spinner} {msg}
-            pb_item.set_style(ps);
-            let pb_item = mb.add(pb_item);
-
-            server.pb = Some((pb_total, pb_item));
-        }
-
-        let ab = server_yml_path.canonicalize()?;
-        server.yml_location.replace(ab);
-
-        server.server_yml.directories.iter_mut().try_for_each(|d| {
-            d.compile_patterns().unwrap();
-            trace!("origin directory: {:?}", d);
-            let ld = d.local_dir.trim();
-            if ld.is_empty() || ld == "~" || ld == "null" {
-                let mut splited = d.remote_dir.trim().rsplitn(3, &['/', '\\'][..]);
-                let mut s = splited.next().expect("remote_dir should has dir name.");
-                if s.is_empty() {
-                    s = splited.next().expect("remote_dir should has dir name.");
-                }
-                d.local_dir = s.to_string();
-                trace!("local_dir is empty. change to {}", s);
-            } else {
-                d.local_dir = ld.to_string();
-            }
-
-            let dpath = Path::new(&d.local_dir);
-            if dpath.is_absolute() {
-                bail!("the local_dir of a server can't be absolute. {:?}", dpath);
-            } else {
-                let ld_path = maybe_local_server_base_dir.join(&d.local_dir);
-                d.local_dir = ld_path
-                    .to_str()
-                    .expect("local_dir to_str should success.")
-                    .to_string();
-                if ld_path.exists() {
-                    fs::create_dir_all(ld_path)?;
-                }
-                Ok(())
-            }
-        })?;
-        trace!(
-            "loaded server: {:?}",
-            server
-                .server_yml
-                .directories
-                .iter()
-                .map(|d| format!("{}, {}", d.local_dir, d.remote_dir))
-                .collect::<Vec<String>>()
-        );
-        Ok(server)
     }
 
     /// get tar_dir , archive_prefix, archive_postfix from server yml configuration file.
@@ -653,14 +511,27 @@ where
             .expect("a channel session."))
     }
 
-    pub fn list_remote_file_sftp(&self, skip_sha1: bool) -> Result<PathBuf, failure::Error> {
+    pub fn is_skip_sha1(&self) -> bool {
+        if !self.app_conf.is_skip_sha1() {
+            // if force not to skip.
+            false
+        } else {
+            self.server_yml.skip_sha1
+        }
+    }
+
+    pub fn list_remote_file_sftp(&self) -> Result<PathBuf, failure::Error> {
         let mut channel: ssh2::Channel = self.create_channel()?;
         let cmd = format!(
-            "{} list-local-files {} --out {}{}",
+            "{} {} list-local-files {} --out {}",
             self.server_yml.remote_exec,
+            if self.is_skip_sha1() {
+                ""
+            } else {
+                "--enable-sha1"
+            },
             self.server_yml.remote_server_yml,
             self.server_yml.file_list_file,
-            if skip_sha1 { " --skip-sha1" } else { "" }
         );
         trace!("invoking remote command: {:?}", cmd);
         channel.exec(cmd.as_str())?;
@@ -709,18 +580,18 @@ where
         Ok(())
     }
 
-    pub fn list_remote_file_exec(
-        &mut self,
-        skip_sha1: bool,
-        no_db: bool,
-    ) -> Result<PathBuf, failure::Error> {
+    pub fn list_remote_file_exec(&mut self, no_db: bool) -> Result<PathBuf, failure::Error> {
         let mut channel: ssh2::Channel = self.create_channel()?;
         let cmd = format!(
-            "{} {} list-local-files {}{}",
+            "{} {} {} list-local-files {}",
             self.server_yml.remote_exec,
+            if self.is_skip_sha1() {
+                ""
+            } else {
+                "--enable-sha1"
+            },
             if no_db { " --no-db" } else { "" },
             self.server_yml.remote_server_yml,
-            if skip_sha1 { " --skip-sha1" } else { "" }
         );
         info!("invoking remote command: {:?}", cmd);
         channel.exec(cmd.as_str())?;
@@ -763,14 +634,14 @@ where
     }
 
     /// Preparing file list includes invoking remote command to collect file list and downloading to local.
-    pub fn prepare_file_list(&self, skip_sha1: bool) -> Result<(), failure::Error> {
+    pub fn prepare_file_list(&self) -> Result<(), failure::Error> {
         if self.get_working_file_list_file().exists() {
             eprintln!(
                 "uncompleted list file exists: {:?} continue processing",
                 self.get_working_file_list_file()
             );
         } else {
-            self.list_remote_file_sftp(skip_sha1)?;
+            self.list_remote_file_sftp()?;
         }
         Ok(())
     }
@@ -781,11 +652,8 @@ where
         Ok(self.count_and_len(&mut wfb))
     }
 
-    fn start_sync_working_file_list(
-        &self,
-        skip_sha1: bool,
-    ) -> Result<FileItemProcessResultStats, failure::Error> {
-        self.prepare_file_list(skip_sha1)?;
+    fn start_sync_working_file_list(&self) -> Result<FileItemProcessResultStats, failure::Error> {
+        self.prepare_file_list()?;
         let working_file = &self.get_working_file_list_file();
         let rb = io::BufReader::new(fs::File::open(working_file)?);
         self.start_sync(rb)
@@ -942,8 +810,8 @@ where
         Ok(result)
     }
 
-    pub fn sync_dirs(&mut self, skip_sha1: bool) -> Result<Option<SyncDirReport>, failure::Error> {
-        let b = if let Some(si) = self
+    pub fn sync_dirs(&mut self) -> Result<Option<SyncDirReport>, failure::Error> {
+        let b = self.app_conf.is_skip_cron() || if let Some(si) = self
             .server_yml
             .schedules
             .iter()
@@ -970,26 +838,25 @@ where
         };
 
         if b {
-
-        let start = Instant::now();
-        self.connect()?;
-        let rs = self.start_sync_working_file_list(skip_sha1)?;
-        self.remove_working_file_list_file();
-        self.pb_finish();
-        Ok(Some(SyncDirReport::new(start.elapsed(), rs)))
+            let start = Instant::now();
+            self.connect()?;
+            let rs = self.start_sync_working_file_list()?;
+            self.remove_working_file_list_file();
+            self.pb_finish();
+            Ok(Some(SyncDirReport::new(start.elapsed(), rs)))
         } else {
             Ok(None)
         }
     }
 
-    pub fn load_dirs<O: io::Write>(
-        &self,
-        out: &mut O,
-        skip_sha1: bool,
-    ) -> Result<(), failure::Error> {
+    pub fn load_dirs<O: io::Write>(&self, out: &mut O) -> Result<(), failure::Error> {
         if self.db_access.is_some() && self.server_yml.use_db {
             for one_dir in self.server_yml.directories.iter() {
-                load_remote_item_to_sqlite(one_dir, self.db_access.as_ref().unwrap(), skip_sha1)?;
+                load_remote_item_to_sqlite(
+                    one_dir,
+                    self.db_access.as_ref().unwrap(),
+                    self.is_skip_sha1(),
+                )?;
 
                 self.db_access
                     .as_ref()
@@ -1015,79 +882,138 @@ where
             }
         } else {
             for one_dir in self.server_yml.directories.iter() {
-                load_remote_item(one_dir, out, skip_sha1)?;
+                load_remote_item(one_dir, out, self.is_skip_sha1())?;
             }
         }
         Ok(())
     }
+}
+pub fn load_server_from_yml<M, D>(
+    app_conf: &AppConf<M, D>,
+    name: impl AsRef<str>,
+    buf_len: Option<usize>,
+    multi_bar: Option<SharedMpb>,
+) -> Result<Server<M, D>, failure::Error>
+where
+    M: r2d2::ManageConnection,
+    D: DbAccess<M>,
+{
+    let name = name.as_ref();
+    trace!("got server yml name: {:?}", name);
+    eprintln!("hhhh");
+    let mut server_yml_path = Path::new(name).to_path_buf();
+    if (server_yml_path.is_absolute() || name.starts_with('/')) && !server_yml_path.exists() {
+        bail!(
+            "server yml file does't exist, please create one: {:?}",
+            server_yml_path
+        );
+    } else {
+        if !name.contains('/') {
+            server_yml_path = app_conf.servers_dir.as_path().join(name);
+        }
+        if !server_yml_path.exists() {
+            bail!("server yml file does't exist: {:?}", server_yml_path);
+        }
+    }
+    let mut f = fs::OpenOptions::new().read(true).open(&server_yml_path)?;
+    let mut buf = String::new();
+    f.read_to_string(&mut buf)?;
+    let server_yml: ServerYml = serde_yaml::from_str(&buf)?;
 
-    //     pub fn copy_a_file_item_rsync<'a>(&self,
-    //     sftp: &ssh2::Sftp,
-    //     local_file_path: String,
-    //     file_item: &FileItem<'a>,
-    // ) -> Result<FileItemProcessResult, failure::Error> {
-    //     let remote_path = file_item.get_remote_path();
-    //     trace!("start signature_a_file {}", &local_file_path);
-    //     let mut sig = Signature::signature_a_file(&local_file_path, Some(self.server_yml.rsync_window), self.pb.is_some())?;
-    //     let remote_sig_file_path = format!("{}.sig", &remote_path);
-    //     let sig_file = sftp.create(Path::new(&remote_sig_file_path))?;
-    //     sig.write_to_stream(sig_file)?;
-    //     let delta_file_name = format!("{}.delta", &remote_path);
-    //     let cmd = format!(
-    //         "{} rsync delta-a-file --new-file {} --sig-file {} --out-file {}",
-    //         self.server_yml.remote_exec, &remote_path, &remote_sig_file_path, &delta_file_name,
-    //     );
-    //     trace!("about to invoke command: {:?}", cmd);
-    //     let mut channel: ssh2::Channel = self.create_channel()?;
-    //     channel.exec(cmd.as_str())?;
-    //     let mut ch_stderr = channel.stderr();
-    //     let mut chout = String::new();
-    //     ch_stderr.read_to_string(&mut chout)?;
-    //     trace!(
-    //         "after invoke delta command, there maybe err in channel: {:?}",
-    //         chout
-    //     );
-    //     channel.read_to_string(&mut chout)?;
-    //     trace!(
-    //         "delta-a-file output: {:?}, delta_file_name: {:?}",
-    //         chout,
-    //         delta_file_name
-    //     );
-    //     if let Ok(file) = sftp.open(Path::new(&delta_file_name)) {
-    //         let mut delta_file = DeltaFileReader::<ssh2::File>::read_delta_stream(file)?;
-    //         let restore_path = fs::OpenOptions::new()
-    //             .create(true)
-    //             .truncate(true)
-    //             .write(true)
-    //             .open(format!("{}.restore", local_file_path))?;
-    //         trace!("restore_path: {:?}", restore_path);
-    //         let old_file = fs::OpenOptions::new().read(true).open(&local_file_path)?;
-    //         delta_file.restore_seekable(restore_path, old_file)?;
-    //         self.update_local_file_from_restored(&local_file_path)?;
-    //         Ok(FileItemProcessResult::Successed(
-    //             0,
-    //             local_file_path,
-    //             SyncType::Rsync,
-    //         ))
-    //     } else {
-    //         bail!("sftp open delta_file: {:?} failed.", delta_file_name);
-    //     }
-    // }
+    let data_dir = app_conf.data_dir_full_path.as_path();
+    let maybe_local_server_base_dir = data_dir.join(&server_yml.host);
+    let report_dir = data_dir.join("report").join(&server_yml.host);
+    let tar_dir = data_dir.join("tar").join(&server_yml.host);
+    let working_dir = data_dir.join("working").join(&server_yml.host);
 
-    // fn update_local_file_from_restored(&self, local_file_path: impl AsRef<str>) -> Result<(), failure::Error> {
-    //     let old_tmp = format!("{}.old.tmp", local_file_path.as_ref());
-    //     let old_tmp_path = Path::new(&old_tmp);
-    //     if old_tmp_path.exists() {
-    //         fs::remove_file(old_tmp_path)?;
-    //     }
-    //     fs::rename(local_file_path.as_ref(), &old_tmp)?;
-    //     let restored = format!("{}.restore", local_file_path.as_ref());
-    //     fs::rename(&restored, local_file_path.as_ref())?;
-    //     if old_tmp_path.exists() {
-    //         fs::remove_file(&old_tmp_path)?;
-    //     }
-    //     Ok(())
-    // }
+    if !report_dir.exists() {
+        fs::create_dir_all(&report_dir)?;
+    }
+    if !tar_dir.exists() {
+        fs::create_dir_all(&tar_dir)?;
+    }
+
+    if !working_dir.exists() {
+        fs::create_dir_all(&working_dir)?;
+    }
+
+    let mut server = Server {
+        server_yml,
+        multi_bar,
+        db_access: app_conf.db_access.clone(),
+        pb: None,
+        _tcp_stream: None,
+        report_dir,
+        session: None,
+        tar_dir,
+        working_dir,
+        yml_location: None,
+        app_conf,
+        _m: PhantomData,
+    };
+
+    if let Some(buf_len) = buf_len {
+        server.server_yml.buf_len = buf_len;
+    }
+
+    if let Some(mb) = server.multi_bar.as_ref() {
+        let pb_total = ProgressBar::new(!0);
+        let ps = ProgressStyle::default_spinner(); // {spinner} {msg}
+        pb_total.set_style(ps);
+        let pb_total = mb.add(pb_total);
+
+        let pb_item = ProgressBar::new(!0);
+        let ps = ProgressStyle::default_spinner(); // {spinner} {msg}
+        pb_item.set_style(ps);
+        let pb_item = mb.add(pb_item);
+
+        server.pb = Some((pb_total, pb_item));
+    }
+
+    let ab = server_yml_path.canonicalize()?;
+    server.yml_location.replace(ab);
+
+    server.server_yml.directories.iter_mut().try_for_each(|d| {
+        d.compile_patterns().unwrap();
+        trace!("origin directory: {:?}", d);
+        let ld = d.local_dir.trim();
+        if ld.is_empty() || ld == "~" || ld == "null" {
+            let mut splited = d.remote_dir.trim().rsplitn(3, &['/', '\\'][..]);
+            let mut s = splited.next().expect("remote_dir should has dir name.");
+            if s.is_empty() {
+                s = splited.next().expect("remote_dir should has dir name.");
+            }
+            d.local_dir = s.to_string();
+            trace!("local_dir is empty. change to {}", s);
+        } else {
+            d.local_dir = ld.to_string();
+        }
+
+        let dpath = Path::new(&d.local_dir);
+        if dpath.is_absolute() {
+            bail!("the local_dir of a server can't be absolute. {:?}", dpath);
+        } else {
+            let ld_path = maybe_local_server_base_dir.join(&d.local_dir);
+            d.local_dir = ld_path
+                .to_str()
+                .expect("local_dir to_str should success.")
+                .to_string();
+            if ld_path.exists() {
+                fs::create_dir_all(ld_path)?;
+            }
+            Ok(())
+        }
+    })?;
+    trace!(
+        "loaded server: {:?}",
+        server
+            .server_yml
+            .directories
+            .iter()
+            .map(|d| format!("{}, {}", d.local_dir, d.remote_dir))
+            .collect::<Vec<String>>()
+    );
+    Ok(server)
 }
 
 #[cfg(test)]
@@ -1115,18 +1041,6 @@ mod tests {
         .expect("init log should success.");
     }
 
-    fn load_server_yml() -> Server<SqliteConnectionManager, SqliteDbAccess> {
-        Server::<SqliteConnectionManager, SqliteDbAccess>::load_from_yml(
-            "data/servers",
-            "data",
-            "localhost.yml",
-            None,
-            None,
-            None,
-        )
-        .unwrap()
-    }
-
     #[test]
     fn t_rsplitn() {
         let s = "a/b/c\\d/c0";
@@ -1144,7 +1058,8 @@ mod tests {
     #[test]
     fn t_load_server() -> Result<(), failure::Error> {
         log();
-        let server = load_server_yml();
+        let app_conf = tutil::load_demo_app_conf_sqlite();
+        let server = tutil::load_demo_server_sqlite(&app_conf);
         assert_eq!(
             server.server_yml.directories[0].excludes,
             vec!["*.log".to_string(), "*.bak".to_string()]
@@ -1155,7 +1070,10 @@ mod tests {
     #[test]
     fn t_connect_server() -> Result<(), failure::Error> {
         log();
-        let mut server = load_server_yml();
+        let app_conf = tutil::load_demo_app_conf_sqlite();
+        // let server = load_server_yml();
+        let mut server = tutil::load_demo_server_sqlite(&app_conf);
+        // let mut server = load_server_yml();
         info!("start connecting...");
         server.connect()?;
         assert!(server.is_connected());
@@ -1165,7 +1083,9 @@ mod tests {
     #[test]
     fn t_sync_dirs() -> Result<(), failure::Error> {
         log();
-        let mut server = load_server_yml();
+        let app_conf = tutil::load_demo_app_conf_sqlite();
+        let mut server = tutil::load_demo_server_sqlite(&app_conf);
+        // let mut server = load_server_yml();
         let mb = Arc::new(MultiProgress::new());
 
         let mb1 = Arc::clone(&mb);
@@ -1179,7 +1099,7 @@ mod tests {
         });
 
         server.multi_bar.replace(mb2);
-        let stats = server.sync_dirs(true)?;
+        let stats = server.sync_dirs()?;
 
         info!("result {:?}", stats);
         t.join().unwrap();
@@ -1273,18 +1193,6 @@ mod tests {
 
         Ok(())
     }
-
-    // #[test]
-    // fn t_load_from_path_into_db() -> Result<(), failure::Error> {
-    //     let mut one_dir = Directory {
-    //         remote_dir: "fixtures/adir".to_string(),
-    //         ..Directory::default()
-    //     };
-    //     let pool = tutil::create_sqlite_mem_pool();
-    //     create_sqlite_database(pool.clone())?;
-    //     load_remote_item_to_sqlite(&one_dir, pool, true)?;
-    //     Ok(())
-    // }
 
     #[test]
     fn t_from_path() -> Result<(), failure::Error> {
