@@ -3,7 +3,7 @@ use crate::data_shape::{
     load_remote_item, load_remote_item_to_sqlite, rolling_files, string_path, AppConf, FileItem,
     FileItemProcessResult, FileItemProcessResultStats, RemoteFileItem, SyncType,
 };
-use crate::db_accesses::{DbAccess, scheduler_util};
+use crate::db_accesses::{scheduler_util, DbAccess};
 use crate::ioutil::SharedMpb;
 use bzip2::write::BzEncoder;
 use bzip2::Compression;
@@ -378,9 +378,7 @@ where
                 server_yml_path = servers_dir.as_ref().join(name);
             }
             if !server_yml_path.exists() {
-                bail!(
-                    "server yml file does't exist: {:?}", server_yml_path
-                );
+                bail!("server yml file does't exist: {:?}", server_yml_path);
             }
         }
         let mut f = fs::OpenOptions::new().read(true).open(&server_yml_path)?;
@@ -940,22 +938,44 @@ where
         Ok(result)
     }
 
-    pub fn sync_dirs(&mut self, skip_sha1: bool) -> Result<SyncDirReport, failure::Error> {
-        let b = if let Some(si) = self.server_yml.schedules.iter().find(|it|it.name == "sync-dir") {
-            scheduler_util::need_execute(self.db_access.as_ref(), self.yml_location.as_ref().unwrap().to_str().unwrap(), &si.name, &si.cron)
+    pub fn sync_dirs(&mut self, skip_sha1: bool) -> Result<Option<SyncDirReport>, failure::Error> {
+        let b = if let Some(si) = self
+            .server_yml
+            .schedules
+            .iter()
+            .find(|it| it.name == "sync-dir")
+        {
+            match scheduler_util::need_execute(
+                self.db_access.as_ref(),
+                self.yml_location.as_ref().unwrap().to_str().unwrap(),
+                &si.name,
+                &si.cron,
+            ) {
+                (true, None) => true,
+                (false, Some(dt)) => {
+                    eprintln!(
+                        "cron time did't meet yet. next execution scheduled at: {:?}",
+                        dt
+                    );
+                    false
+                }
+                (_, _) => false,
+            }
         } else {
             true
         };
 
-        if !b {
-            bail!("cron time did't meet yet.");
-        }
+        if b {
+
         let start = Instant::now();
         self.connect()?;
         let rs = self.start_sync_working_file_list(skip_sha1)?;
         self.remove_working_file_list_file();
         self.pb_finish();
-        Ok(SyncDirReport::new(start.elapsed(), rs))
+        Ok(Some(SyncDirReport::new(start.elapsed(), rs)))
+        } else {
+            Ok(None)
+        }
     }
 
     pub fn load_dirs<O: io::Write>(

@@ -34,13 +34,13 @@ pub fn need_execute<M, D>(
     server_yml_path: impl AsRef<str>,
     task_name: impl AsRef<str>,
     expression: impl AsRef<str>,
-) -> bool
+) -> (bool, Option<DateTime<Utc>>)
 where
     M: r2d2::ManageConnection,
     D: DbAccess<M>,
 {
     if db_access.is_none() {
-        return false;
+        return (true, None);
     }
 
     let db_access = db_access.unwrap();
@@ -60,7 +60,7 @@ where
                 //insert next_execute to db.
                 db_access.insert_next_execute(server_yml_path, task_name, next_execute);
             }
-            false
+            (false, Some(next_execute))
         }
         Some((row_id, next_execute_in_db, false)) => {
             // prevent multiple invoking.
@@ -69,17 +69,17 @@ where
                 db_access
                     .update_next_execute_done(row_id)
                     .expect("update_next_execute_done should success.");
-                true
+                (true, None)
             } else {
                 trace!("time isn't up yet. do nothing.");
-                false
+                (false, Some(next_execute_in_db))
             }
         }
         None => {
             // insert next_execute to db.
             let next_execute = upcomming(expression);
             db_access.insert_next_execute(server_yml_path, task_name, next_execute);
-            false
+            (false, Some(next_execute))
         }
     };
     b
@@ -137,17 +137,17 @@ mod tests {
         );
         eprintln!("expression: {}", expression);
         assert!(
-            !need_execute(Some(&db_access), "a.yml", "d", &expression),
+            !need_execute(Some(&db_access), "a.yml", "d", &expression).0,
             "not happened"
         ); // because time is not up. no need.
         thread::sleep(Duration::from_secs(3));
         assert!(
-            need_execute(Some(&db_access), "a.yml", "d", &expression),
+            need_execute(Some(&db_access), "a.yml", "d", &expression).0,
             "happen"
         ); // time is up, needed.
         assert_eq!(db_access.count_next_execute()?, 1, "done set to true."); // done and deleted.
         assert!(
-            !need_execute(Some(&db_access), "a.yml", "d", &expression),
+            !need_execute(Some(&db_access), "a.yml", "d", &expression).0,
             "happened"
         ); // insert next_execute and delete previous next_execute.
 

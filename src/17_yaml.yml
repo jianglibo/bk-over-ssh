@@ -34,6 +34,10 @@ args:
         help: enable console log output.
         long: console-log
         required: false
+    - skip-cron:
+        help: skip cron schedule, execute right now.
+        long: skip-cron
+        required: false
     - v:
         help: verbose level debug.
         long: v
@@ -46,10 +50,6 @@ args:
         help: delay seconds before execute command. for test purpose.
         long: delay
         takes_value: true
-        required: false
-    - no-lock-file:
-        help: don't write a lock file so multiple running instance is allowed, may cause errors.
-        long: no-lock-file
         required: false
     - no-db:
         help: don't use db.

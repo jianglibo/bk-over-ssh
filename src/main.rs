@@ -11,6 +11,12 @@ extern crate rand;
 // extern crate rustsync;
 extern crate time;
 
+#[macro_use]
+extern crate itertools;
+
+#[macro_use]
+extern crate lazy_static;
+
 mod actions;
 mod data_shape;
 mod db_accesses;
@@ -29,19 +35,12 @@ use crate::rustsync::DeltaWriter;
 use clap::App;
 use clap::ArgMatches;
 use clap::Shell;
+use db_accesses::{DbAccess, SqliteDbAccess};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use log::*;
 use mail::send_test_mail;
 use rayon::prelude::*;
-// use rustyline::completion::{Completer, FilenameCompleter, Pair};
-// use rustyline::config::OutputStreamType;
-// use rustyline::error::ReadlineError;
-// use rustyline::highlight::{Highlighter, MatchingBracketHighlighter};
-// use rustyline::hint::{Hinter, HistoryHinter};
-// use rustyline::{Cmd, CompletionType, Config, Context, EditMode, Editor, Helper, KeyPress};
-use db_accesses::{DbAccess, SqliteDbAccess};
 use std::env;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -50,10 +49,6 @@ use std::{fs, io, io::BufRead, io::Write};
 use actions::SyncDirReport;
 use data_shape::{AppConf, Server, ServerYml, CONF_FILE_NAME};
 use r2d2_sqlite::SqliteConnectionManager;
-
-// fn parse_server_yml<'a>(sub_sub_matches: &'a clap::ArgMatches<'a>) -> &'a str {
-//     sub_sub_matches.value_of("server-yml").unwrap()
-// }
 
 fn demonstrate_pbr() -> Result<(), failure::Error> {
     let multi_bar = Arc::new(MultiProgress::new());
@@ -223,7 +218,7 @@ where
         .into_par_iter()
         .for_each(|mut server| match server.sync_dirs(skip_sha1) {
             Ok(result) => {
-                actions::write_dir_sync_result(&server, &result);
+                actions::write_dir_sync_result(&server, result.as_ref());
                 if console_log {
                     let result_yml = serde_yaml::to_string(&result)
                         .expect("SyncDirReport should deserialize success.");
@@ -297,21 +292,17 @@ fn main() -> Result<(), failure::Error> {
         return Ok(());
     }
 
-    // let lock_file = !m.is_present("no-lock-file");
-
-    // if lock_file {
-        let lof = app_conf.lock_working_file()?;
-        // ctrlc::set_handler(move || {
-        //     if lof.exists() {
-        //         println!("Ctrl-C catched, deleting lock_file: {:?}", lof);
-        //         if let Err(err) = fs::remove_file(lof.as_path()) {
-        //             warn!("remove lock file failed: {:?}, {:?}", lof, err);
-        //         }
-        //         std::process::exit(0);
-        //     }
-        // })
-        // .expect("Error setting Ctrl-C handler");
-    // }
+    app_conf.lock_working_file()?;
+    // ctrlc::set_handler(move || {
+    //     if lof.exists() {
+    //         println!("Ctrl-C catched, deleting lock_file: {:?}", lof);
+    //         if let Err(err) = fs::remove_file(lof.as_path()) {
+    //             warn!("remove lock file failed: {:?}, {:?}", lof, err);
+    //         }
+    //         std::process::exit(0);
+    //     }
+    // })
+    // .expect("Error setting Ctrl-C handler");
 
     let delay = m.value_of("delay");
     if let Some(delay) = delay {

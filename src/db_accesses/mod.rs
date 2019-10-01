@@ -3,10 +3,20 @@ pub mod scheduler_util;
 pub mod sqlite_access;
 
 use crate::actions::hash_file_sha1;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, SecondsFormat, Utc};
 use log::*;
 use r2d2;
 use std::path::{Path, PathBuf};
+
+// lazy_static! {
+//     static ref EMPTY_STRING: String = String::from("");
+// }
+
+pub enum DbAction {
+    Insert,
+    Update,
+    UpdateChangedField,
+}
 
 pub use sqlite_access::SqliteDbAccess;
 
@@ -59,6 +69,56 @@ impl RemoteFileItemInDb {
         }
         None
     }
+
+    pub fn to_insert_sql_string(&self) -> String {
+        // path, sha1, len, time_modified, time_created, dir_id, changed
+        format!("INSERT INTO remote_file_item (path, {}len, {}{}dir_id, changed) VALUES ('{}', {}{}, {}{}{}, {});"
+        , self.sha1.as_ref().map(|_|"sha1, ").unwrap_or("")
+        , self.modified.map(|_|"time_modified, ").unwrap_or("")
+        , self.created.map(|_|"time_created, ").unwrap_or("")
+        , self.path
+        , self.sha1.as_ref().map(|s|format!("'{}', ", s)).unwrap_or("".to_string())
+        , self.len
+        , self.modified.map(|m|format!("'{}', ", m.to_rfc3339_opts(SecondsFormat::Nanos, true))).unwrap_or("".to_string())
+        , self.created.map(|m|format!("'{}', ", m.to_rfc3339_opts(SecondsFormat::Nanos, true))).unwrap_or("".to_string())
+        , self.dir_id
+        , 1
+        )
+    }
+
+    pub fn to_update_sql_string(&self) -> String {
+        format!(
+            "UPDATE remote_file_item SET len = {}, {}{}changed = 1 where id = {}",
+            self.len,
+            self.sha1
+                .as_ref()
+                .map(|s| format!("sha1 = '{}', ", s))
+                .unwrap_or("".to_string()),
+            self.modified
+                .map(|m| format!(
+                    "time_modified = '{}', ",
+                    m.to_rfc3339_opts(SecondsFormat::Nanos, true)
+                ))
+                .unwrap_or("".to_string()),
+            self.id
+        )
+    }
+
+    pub fn to_update_changed_sql_string(&self) -> String {
+        format!(
+            "UPDATE remote_file_item SET changed = {} where id = {}",
+            if self.changed { 1 } else { 0 },
+            self.id
+        )
+    }
+
+    pub fn to_sql_string(&self, da: DbAction) -> String {
+        match da {
+            DbAction::Insert => self.to_insert_sql_string(),
+            DbAction::UpdateChangedField => self.to_update_changed_sql_string(),
+            DbAction::Update => self.to_update_sql_string(),
+        }
+    }
 }
 
 pub trait DbAccess<M>: Send + Sync + Clone
@@ -67,7 +127,11 @@ where
 {
     fn insert_directory(&self, path: impl AsRef<str>) -> Result<i64, failure::Error>;
     fn insert_or_update_remote_file_items(&self, rfis: Vec<RemoteFileItemInDb>);
-    fn insert_or_update_remote_file_item(&self, rfi: RemoteFileItemInDb);
+    fn insert_or_update_remote_file_item(
+        &self,
+        rfi: RemoteFileItemInDb,
+        batch: bool,
+    ) -> Option<(RemoteFileItemInDb, DbAction)>;
     fn one_file_item(&self) -> Result<RemoteFileItemInDb, failure::Error>;
     fn find_remote_file_item(
         &self,
@@ -84,10 +148,21 @@ where
     fn iterate_files_by_directory<F>(&self, processor: F) -> Result<(), failure::Error>
     where
         F: FnMut((Option<RemoteFileItemInDb>, Option<String>)) -> ();
-    
-    fn find_next_execute(&self, server_yml_path: impl AsRef<str>, task_name: impl AsRef<str>) -> Option<(i64, DateTime<Utc>, bool)>;
-    fn insert_next_execute(&self, server_yml_path: impl AsRef<str>, task_name: impl AsRef<str>, time_execution: DateTime<Utc>);
+
+    fn find_next_execute(
+        &self,
+        server_yml_path: impl AsRef<str>,
+        task_name: impl AsRef<str>,
+    ) -> Option<(i64, DateTime<Utc>, bool)>;
+    fn insert_next_execute(
+        &self,
+        server_yml_path: impl AsRef<str>,
+        task_name: impl AsRef<str>,
+        time_execution: DateTime<Utc>,
+    );
     fn update_next_execute_done(&self, id: i64) -> Result<(), failure::Error>;
     fn delete_next_execute(&self, id: i64) -> Result<(), failure::Error>;
     fn count_next_execute(&self) -> Result<u64, failure::Error>;
+
+    fn execute_batch(&self, sit: impl Iterator<Item = String>);
 }

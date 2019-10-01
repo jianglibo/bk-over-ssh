@@ -9,6 +9,7 @@ use std::iter::Iterator;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use walkdir::WalkDir;
+use itertools::Itertools;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct RemoteFileItem {
@@ -120,9 +121,11 @@ where
             .filter_map(|d| d.path().canonicalize().ok())
             .filter_map(|d| directory.match_path(d))
             .filter_map(|d| RemoteFileItemInDb::from_path(&base_path, d, skip_sha1, dir_id))
-            .for_each(|rfi| {
-                db_access.insert_or_update_remote_file_item(rfi);
-            });
+            .filter_map(|rfi|db_access.insert_or_update_remote_file_item(rfi, true))
+            .map(|(rfi, da)| rfi.to_sql_string(da))
+            .chunks(100000)
+            .into_iter()
+            .for_each(|ck| db_access.execute_batch(ck));
     }
     Ok(())
 }

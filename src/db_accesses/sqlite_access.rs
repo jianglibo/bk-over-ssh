@@ -1,4 +1,4 @@
-use super::{DbAccess, RemoteFileItemInDb};
+use super::{DbAccess, DbAction, RemoteFileItemInDb};
 use chrono::{DateTime, Utc};
 use failure;
 use log::*;
@@ -179,103 +179,19 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
         Ok(i as u64)
     }
 
-    fn insert_or_update_remote_file_item(&self, rfi: RemoteFileItemInDb) {
+    fn insert_or_update_remote_file_item(
+        &self,
+        mut rfi: RemoteFileItemInDb,
+        batch: bool,
+    ) -> Option<(RemoteFileItemInDb, DbAction)> {
         let conn = self.0.get().unwrap();
         if let Ok(rfi_db) = self.find_remote_file_item(rfi.dir_id, rfi.path.as_str()) {
             if rfi_db.len != rfi.len || rfi_db.sha1 != rfi.sha1 || rfi_db.modified != rfi.modified {
-                let sql_mark_changed = "UPDATE remote_file_item SET len = :len, sha1 = :sha1, time_modified = :modified, changed = :changed where id = :id";
-                let mut stmt_mark_changed = conn
-                    .prepare(sql_mark_changed)
-                    .expect("prepare sql_mark_changed failed.");
-                if let Err(err) = stmt_mark_changed.execute_named(named_params! {
-                    ":len": rfi.len,
-                    ":sha1": rfi.sha1,
-                    ":modified": rfi.modified,
-                    ":id": rfi_db.id,
-                    ":changed": true,
-                }) {
-                    error!("update remote file item failed: {:?}", err);
-                } else {
-                    trace!("update changed item successfully.");
-                }
-            } else {
-                // make changed unchanged.
-                let sql_unmark_changed =
-                    "UPDATE remote_file_item SET changed = :changed where id = :id";
-                let mut stmt_unmark = conn
-                    .prepare(sql_unmark_changed)
-                    .expect("prepare sql_unmark_changed failed");
-                if rfi_db.changed {
-                    if let Err(err) = stmt_unmark.execute_named(named_params! {
-                        ":id": rfi_db.id,
-                        ":changed": false,
-                    }) {
-                        error!("update remote file item failed: {:?}", err);
-                    } else {
-                        trace!("update changed item successfully.");
-                    }
-                }
-                trace!("unchanged file item.");
-            }
-        } else {
-            let sql_insert = "INSERT INTO remote_file_item (path, sha1, len, time_modified, time_created, dir_id, changed) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)";
-            let mut stmt_insert = conn
-                .prepare(sql_insert)
-                .expect("prepare sql_insert failed.");
-            match stmt_insert.execute(params![
-                rfi.path,
-                rfi.sha1,
-                rfi.len,
-                rfi.modified,
-                rfi.created,
-                rfi.dir_id,
-                rfi.changed
-            ]) {
-                Ok(count) => {
-                    if count != 1 {
-                        error!(
-                            "insert remote file failed, execute return not eq to 1. {:?}",
-                            rfi
-                        );
-                    }
-                }
-                Err(e) => error!("insert remote file failed: {:?}, {:?}", rfi, e),
-            }
-        }
-    }
-
-    fn insert_or_update_remote_file_items(&self, rfis: Vec<RemoteFileItemInDb>) {
-        let conn = self.0.get().unwrap();
-        let sql_mark_changed = "UPDATE remote_file_item SET len = :len, sha1 = :sha1, time_modified = :modified, changed = :changed where id = :id";
-        let mut stmt_mark_changed = match conn.prepare(sql_mark_changed) {
-            Ok(stmt) => stmt,
-            Err(err) => {
-                panic!("prepare update stmt failed: {:?}", err);
-            }
-        };
-
-        let sql_insert = "INSERT INTO remote_file_item (path, sha1, len, time_modified, time_created, dir_id, changed) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)";
-        let mut stmt_insert = match conn.prepare(sql_insert) {
-            Ok(stmt) => stmt,
-            Err(err) => {
-                panic!("prepare insert stmt failed: {:?}", err);
-            }
-        };
-
-        let sql_unmark_changed = "UPDATE remote_file_item SET changed = :changed where id = :id";
-        let mut stmt_unmark = match conn.prepare(sql_unmark_changed) {
-            Ok(stmt) => stmt,
-            Err(err) => {
-                panic!("prepare insert stmt failed: {:?}", err);
-            }
-        };
-
-        for rfi in rfis {
-            if let Ok(rfi_db) = self.find_remote_file_item(rfi.dir_id, rfi.path.as_str()) {
-                if rfi_db.len != rfi.len
-                    || rfi_db.sha1 != rfi.sha1
-                    || rfi_db.modified != rfi.modified
-                {
+                if !batch {
+                    let sql_mark_changed = "UPDATE remote_file_item SET len = :len, sha1 = :sha1, time_modified = :modified, changed = :changed where id = :id";
+                    let mut stmt_mark_changed = conn
+                        .prepare(sql_mark_changed)
+                        .expect("prepare sql_mark_changed failed.");
                     if let Err(err) = stmt_mark_changed.execute_named(named_params! {
                         ":len": rfi.len,
                         ":sha1": rfi.sha1,
@@ -287,9 +203,19 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
                     } else {
                         trace!("update changed item successfully.");
                     }
-                } else {
-                    // make changed unchanged.
-                    if rfi_db.changed {
+                }
+                rfi.id = rfi_db.id;
+                rfi.changed = true;
+                return Some((rfi, DbAction::Update));
+            } else {
+                if rfi_db.changed {
+                    if !batch {
+                        // make changed unchanged.
+                        let sql_unmark_changed =
+                            "UPDATE remote_file_item SET changed = :changed where id = :id";
+                        let mut stmt_unmark = conn
+                            .prepare(sql_unmark_changed)
+                            .expect("prepare sql_unmark_changed failed");
                         if let Err(err) = stmt_unmark.execute_named(named_params! {
                             ":id": rfi_db.id,
                             ":changed": false,
@@ -299,9 +225,17 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
                             trace!("update changed item successfully.");
                         }
                     }
-                    trace!("unchanged file item.");
+                    rfi.id = rfi_db.id;
+                    rfi.changed = false;
+                    return Some((rfi, DbAction::UpdateChangedField));
                 }
-            } else {
+            }
+        } else {
+            if !batch {
+                let sql_insert = "INSERT INTO remote_file_item (path, sha1, len, time_modified, time_created, dir_id, changed) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)";
+                let mut stmt_insert = conn
+                    .prepare(sql_insert)
+                    .expect("prepare sql_insert failed.");
                 match stmt_insert.execute(params![
                     rfi.path,
                     rfi.sha1,
@@ -317,18 +251,26 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
                                 "insert remote file failed, execute return not eq to 1. {:?}",
                                 rfi
                             );
+                        } else {
+                            rfi.id = conn.last_insert_rowid();
+                            return Some((rfi, DbAction::Insert));
                         }
                     }
                     Err(e) => error!("insert remote file failed: {:?}, {:?}", rfi, e),
                 }
+            } else {
+                return Some((rfi, DbAction::Insert));
             }
         }
+        None
     }
+
+    fn insert_or_update_remote_file_items(&self, rfis: Vec<RemoteFileItemInDb>) {}
 
     fn update_next_execute_done(&self, id: i64) -> Result<(), failure::Error> {
         let conn = self.get_pool().get().unwrap();
         let mut stmt = conn.prepare("UPDATE schedule_done set done = :done WHERE id = :id")?;
-        stmt.execute_named(named_params!{
+        stmt.execute_named(named_params! {
             ":done": true,
             ":id": id,
         })?;
@@ -366,13 +308,12 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
         let mut stmt = conn.prepare("SELECT count(id) FROM schedule_done;")?;
         let i: i64 = stmt.query_row(NO_PARAMS, |row| row.get(0))?;
         Ok(i as u64)
-
     }
 
     fn delete_next_execute(&self, id: i64) -> Result<(), failure::Error> {
         let conn = self.get_pool().get().unwrap();
         let mut stmt = conn.prepare("DELETE FROM schedule_done WHERE id = :id")?;
-        stmt.execute_named(named_params!{
+        stmt.execute_named(named_params! {
             ":id": id,
         })?;
         Ok(())
@@ -393,6 +334,18 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
             },
             Err(err) => error!("prepare insert_next_execute stmt failed: {:?}", err)
         };
+    }
+
+    fn execute_batch(&self, sit: impl Iterator<Item = String>) {
+        let conn = self.get_pool().get().unwrap();
+        let mut ss = sit.fold(String::from("BEGIN;"), |mut acc, ref line| {
+            acc.push_str(line);
+            acc
+        });
+        ss.push_str("COMMIT;");
+        if let Err(err) = conn.execute_batch(ss.as_str()) {
+            eprintln!("{:?}", err);
+        }
     }
 
     fn create_database(&self) -> Result<(), failure::Error> {
@@ -435,7 +388,8 @@ mod tests {
     use crate::data_shape::{load_remote_item_to_sqlite, Directory};
     use crate::develope::tutil;
     use crate::log_util;
-    use chrono::{Utc, SecondsFormat, offset::TimeZone};
+    use chrono::{offset::TimeZone, SecondsFormat, Utc};
+    use itertools::Itertools;
     use rand::distributions::Alphanumeric;
     use rand::{self, Rng, RngCore};
     use rusqlite::{params, Row, NO_PARAMS};
@@ -455,22 +409,21 @@ mod tests {
         .expect("init log should success.");
     }
 
-    fn sql_gen(dir_id: i64) -> impl FnMut() -> String {
+    fn rfi_gen(dir_id: i64) -> impl FnMut() -> RemoteFileItemInDb {
         let mut rng = rand::thread_rng();
         let t = Utc.ymd(1970, 1, 1).and_hms(0, 1, 1);
-        move || {
-            format!("INSERT INTO remote_file_item (path, sha1, len, time_modified, time_created, dir_id, changed) VALUES ('{}', {}, {}, {}, {}, {}, {});",
-                std::iter::repeat(())
+        move || RemoteFileItemInDb {
+            id: 0,
+            path: std::iter::repeat(())
                 .map(|()| rng.sample(Alphanumeric))
                 .take(50)
                 .collect::<String>(),
-                "NULL",
-                55,
-                format!("'{}'", t.to_rfc3339_opts(SecondsFormat::Nanos, true)),
-                "NULL",
-                dir_id,
-                1,
-                )
+            sha1: None,
+            len: 55,
+            modified: Some(t),
+            created: None,
+            dir_id,
+            changed: false,
         }
     }
 
@@ -481,113 +434,87 @@ mod tests {
         let dir_id = db_access.insert_directory("abc")?;
 
         let now = Instant::now();
-        std::iter::repeat_with(sql_gen(dir_id))
-            .take(100)
-            .for_each(|line| {
-                if let Err(err) = db_access
-                    .get_pool()
-                    .get()
-                    .unwrap()
-                    .execute(line.as_str(), NO_PARAMS)
-                {
-                    eprintln!("{:?}", err);
-                }
-            });
+        let _c = std::iter::repeat_with(rfi_gen(dir_id))
+            .take(1000)
+            .filter_map(|line| db_access.insert_or_update_remote_file_item(line, false))
+            .count();
         eprintln!("elapsed: {}", now.elapsed().as_secs());
-        println!("{}", sql_gen(dir_id)());
 
-        // db_access.get_pool().get().unwrap().execute(sql().as_str(), NO_PARAMS)?;
-        // let count = 1000;
-        // std::iter::repeat_with(sql).take(count).for_each(|line|ss.push(line));
         let now = Instant::now();
-        let mut ss = String::from("BEGIN;");
-        std::iter::repeat_with(sql_gen(dir_id))
-            .take(10000)
-            .for_each(|line| ss.push_str(line.as_str()));
-        ss.push_str("COMMIT;");
-        db_access
-            .get_pool()
-            .get()
-            .unwrap()
-            .execute_batch(ss.as_str())?;
+        std::iter::repeat_with(rfi_gen(dir_id))
+            .take(100000)
+            .map(|it| it.to_insert_sql_string())
+            .chunks(100000)
+            .into_iter()
+            .for_each(|ck| db_access.execute_batch(ck));
+
         eprintln!("elapsed: {}", now.elapsed().as_secs());
         eprintln!("record: {}", db_access.count_remote_file_item(None)?);
-
+        eprintln!("{:?}", rfi_gen(dir_id)());
         let rfi = db_access.one_file_item()?;
-
         eprintln!("{:?}", rfi);
-
         Ok(())
     }
 
     #[test]
-    fn t_prepare_stmt_vs_execute() -> Result<(), failure::Error> {
+    fn t_to_sql_insert_string() -> Result<(), failure::Error> {
         let db_dir = tutil::TestDir::new();
         let db_access = tutil::create_a_sqlite_file_db(&db_dir)?;
         let dir_id = db_access.insert_directory("abc")?;
+        let conn = db_access.get_pool().get().unwrap();
+        let now = Utc::now();
 
-        let mut rng = rand::thread_rng();
+        let rfi = RemoteFileItemInDb {
+            id: 0,
+            path: "a".to_owned(),
+            sha1: None,
+            len: 55,
+            modified: None,
+            created: None,
+            changed: false,
+            dir_id,
+        };
+        conn.execute(rfi.to_insert_sql_string().as_str(), NO_PARAMS)?;
 
-        let now = Instant::now();
+        let rfi = RemoteFileItemInDb {
+            id: 0,
+            path: "a1".to_owned(),
+            sha1: Some("b".to_string()),
+            len: 55,
+            modified: None,
+            created: None,
+            changed: false,
+            dir_id,
+        };
+        conn.execute(rfi.to_insert_sql_string().as_str(), NO_PARAMS)?;
 
-        let count = 5;
+        let rfi = RemoteFileItemInDb {
+            id: 0,
+            path: "a2".to_owned(),
+            sha1: Some("b".to_string()),
+            len: 55,
+            modified: Some(now),
+            created: None,
+            changed: false,
+            dir_id,
+        };
+        conn.execute(rfi.to_insert_sql_string().as_str(), NO_PARAMS)?;
 
-        std::iter::repeat(()).take(count).for_each(|()| {
-            let path: String = std::iter::repeat(())
-                .map(|()| rng.sample(Alphanumeric))
-                .take(7)
-                .collect();
-
-            let rfi = RemoteFileItemInDb {
-                id: 0,
-                path,
-                sha1: None,
-                len: rng.next_u64() as i64,
-                modified: Some(Utc::now()),
-                created: None,
-                changed: false,
-                dir_id,
-            };
-            db_access.insert_or_update_remote_file_item(rfi);
-        });
-
-        eprintln!("elapsed: {}", now.elapsed().as_secs());
-
-        let db_dir = tutil::TestDir::new();
-        let db_access = tutil::create_a_sqlite_file_db(&db_dir)?;
-        let dir_id = db_access.insert_directory("abc")?;
-
-        let now = Instant::now();
-        let batch: Vec<RemoteFileItemInDb> = std::iter::repeat(())
-            .take(count)
-            .map(|()| {
-                let path: String = std::iter::repeat(())
-                    .map(|()| rng.sample(Alphanumeric))
-                    .take(7)
-                    .collect();
-                RemoteFileItemInDb {
-                    id: 0,
-                    path,
-                    sha1: None,
-                    len: rng.next_u64() as i64,
-                    modified: Some(Utc::now()),
-                    created: None,
-                    changed: false,
-                    dir_id,
-                }
-            })
-            .collect();
-
-        db_access.insert_or_update_remote_file_items(batch);
-        eprintln!("elapsed: {}", now.elapsed().as_secs());
-
-        db_access.iterate_files_by_directory(|par|{
-            if let (Some(rfi), None) = par {
-                eprintln!("{:?}", rfi);
-            }
-        })?;
-
-        eprintln!("{:?}", Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true));
+        let rfi = RemoteFileItemInDb {
+            id: 0,
+            path: "a3".to_owned(),
+            sha1: Some("b".to_string()),
+            len: 55,
+            modified: Some(now),
+            created: None,
+            changed: false,
+            dir_id,
+        };
+        let (mut rfi, _) = db_access
+            .insert_or_update_remote_file_item(rfi, false)
+            .expect("insert should success.");
+        rfi.changed = true;
+        conn.execute(rfi.to_update_changed_sql_string().as_str(), NO_PARAMS)?;
         Ok(())
     }
 
