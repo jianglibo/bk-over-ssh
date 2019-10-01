@@ -202,7 +202,7 @@ pub struct ServerYml {
     pub yml_location: Option<PathBuf>,
 }
 
-pub struct Server<M, D>
+pub struct Server<'sv, M, D>
 where
     M: r2d2::ManageConnection,
     D: DbAccess<M>,
@@ -218,9 +218,10 @@ where
     pub pb: Option<(ProgressBar, ProgressBar)>,
     pub db_access: Option<D>,
     _m: PhantomData<M>,
+    app_conf: &'sv AppConf<M, D>,
 }
 
-impl<M, D> Server<M, D>
+impl<'sv, M, D> Server<'sv, M, D>
 where
     M: r2d2::ManageConnection,
     D: DbAccess<M>,
@@ -341,30 +342,32 @@ where
         }
     }
 
-    pub fn load_from_yml_with_app_config(
-        app_conf: &AppConf<M, D>,
+    pub fn load_from_yml_with_app_config<'a>(
+        app_conf: &'a AppConf<M, D>,
         name: impl AsRef<str>,
         buf_len: Option<usize>,
         multi_bar: Option<SharedMpb>,
-    ) -> Result<Server<M, D>, failure::Error> {
-        Server::<M, D>::load_from_yml(
-            app_conf.servers_dir.as_path(),
-            app_conf.data_dir_full_path.as_path(),
+    ) -> Result<Server<'sv, M, D>, failure::Error> {
+        Server::<'sv, M, D>::load_from_yml(
+            app_conf,
+            // app_conf.servers_dir.as_path(),
+            // app_conf.data_dir_full_path.as_path(),
             name,
             buf_len,
             multi_bar,
-            app_conf.get_db_access().cloned(),
+            // app_conf.get_db_access().cloned(),
         )
     }
 
-    pub fn load_from_yml(
-        servers_dir: impl AsRef<Path>,
-        data_dir: impl AsRef<Path>,
+    pub fn load_from_yml<'a>(
+        app_conf: &'a AppConf<M, D>,
+        // servers_dir: impl AsRef<Path>,
+        // data_dir: impl AsRef<Path>,
         name: impl AsRef<str>,
         buf_len: Option<usize>,
         multi_bar: Option<SharedMpb>,
-        db_access: Option<D>,
-    ) -> Result<Server<M, D>, failure::Error> {
+        // db_access: Option<D>,
+    ) -> Result<Server<'sv, M, D>, failure::Error> {
         let name = name.as_ref();
         trace!("got server yml name: {:?}", name);
         let mut server_yml_path = Path::new(name).to_path_buf();
@@ -375,7 +378,7 @@ where
             );
         } else {
             if !name.contains('/') {
-                server_yml_path = servers_dir.as_ref().join(name);
+                server_yml_path = app_conf.servers_dir.as_path().join(name);
             }
             if !server_yml_path.exists() {
                 bail!("server yml file does't exist: {:?}", server_yml_path);
@@ -386,7 +389,7 @@ where
         f.read_to_string(&mut buf)?;
         let server_yml: ServerYml = serde_yaml::from_str(&buf)?;
 
-        let data_dir = data_dir.as_ref();
+        let data_dir = app_conf.data_dir_full_path.as_path();
         let maybe_local_server_base_dir = data_dir.join(&server_yml.host);
         let report_dir = data_dir.join("report").join(&server_yml.host);
         let tar_dir = data_dir.join("tar").join(&server_yml.host);
@@ -406,7 +409,7 @@ where
         let mut server = Server {
             server_yml,
             multi_bar,
-            db_access,
+            db_access: app_conf.db_access.clone(),
             pb: None,
             _tcp_stream: None,
             report_dir,
@@ -414,6 +417,7 @@ where
             tar_dir,
             working_dir,
             yml_location: None,
+            app_conf,
             _m: PhantomData,
         };
 

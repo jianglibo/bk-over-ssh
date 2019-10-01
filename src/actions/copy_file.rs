@@ -1,4 +1,4 @@
-use crate::data_shape::{FileItem, FileItemProcessResult, Server, SyncType};
+use crate::data_shape::{FileItem, FileItemProcessResult, Server, SyncType, AppConf};
 use crate::rustsync::{DeltaFileReader, DeltaReader, Signature};
 use crate::db_accesses::{DbAccess};
 use indicatif::HumanBytes;
@@ -429,14 +429,15 @@ mod tests {
         .expect("init log should success.");
     }
 
-    fn load_server_yml() -> Server<SqliteConnectionManager, SqliteDbAccess> {
+    fn load_server_yml(app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>) -> Server<SqliteConnectionManager, SqliteDbAccess> {
         Server::<SqliteConnectionManager, SqliteDbAccess>::load_from_yml(
-            "data/servers",
-            "data",
+            app_conf,
+            // "data/servers",
+            // "data",
             "localhost.yml",
             None,
             None,
-            None,
+            // None,
         )
         .unwrap()
     }
