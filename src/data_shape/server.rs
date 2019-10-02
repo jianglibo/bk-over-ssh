@@ -574,10 +574,15 @@ where
         if let Err(err) = channel.read_to_string(&mut contents) {
             bail!("is remote exec executable? {:?}", err);
         }
-        trace!("create_remote_db output: {:?}", contents);
+        if !contents.is_empty() {
+            trace!("create_remote_db output: {:?}", contents);
+        }
         contents.clear();
         channel.stderr().read_to_string(&mut contents)?;
-        trace!("create_remote_db stderr: {:?}", contents);
+        if !contents.is_empty() {
+            trace!("create_remote_db stderr: {:?}", contents);
+            eprintln!("create_remote_db stderr: {:?}", contents);
+        }
         Ok(())
     }
 

@@ -1,6 +1,6 @@
 use crate::data_shape::{FileItem, FileItemProcessResult, Server, SyncType};
+use crate::db_accesses::DbAccess;
 use crate::rustsync::{DeltaFileReader, DeltaReader, Signature};
-use crate::db_accesses::{DbAccess};
 use indicatif::HumanBytes;
 use indicatif::ProgressBar;
 use log::*;
@@ -296,10 +296,12 @@ where
     let mut ch_stderr = channel.stderr();
     let mut chout = String::new();
     ch_stderr.read_to_string(&mut chout)?;
-    trace!(
-        "after invoke delta command, there maybe err in channel: {:?}",
-        chout
-    );
+    if !chout.is_empty() {
+        trace!(
+            "after invoke delta command, there maybe err in channel: {:?}",
+            chout
+        );
+    }
     channel.read_to_string(&mut chout)?;
     trace!(
         "delta-a-file output: {:?}, delta_file_name: {:?}",
@@ -361,13 +363,13 @@ where
             Some(|length| {
                 received += length;
                 if let Some((_pb_total, pb_item)) = pb_op {
-                    let message = format!(
-                        "{}/{} - {}",
-                        HumanBytes(received),
-                        HumanBytes(item_len),
-                        item_path,
-                    );
-                    pb_item.set_message(message.as_str());
+                    // let message = format!(
+                    //     "{}/{} - {}",
+                    //     HumanBytes(received),
+                    //     HumanBytes(item_len),
+                    //     item_path,
+                    // );
+                    // pb_item.set_message(message.as_str());
                     pb_item.inc(length);
                 }
             })
@@ -422,7 +424,7 @@ mod tests {
             "output.log",
             vec!["actions::copy_file"],
             Some(vec!["ssh2"]),
-            ""
+            "",
         )
         .expect("init log should success.");
     }
