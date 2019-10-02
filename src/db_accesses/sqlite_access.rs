@@ -382,11 +382,11 @@ mod tests {
     use crate::data_shape::{load_remote_item_to_sqlite, Directory};
     use crate::develope::tutil;
     use crate::log_util;
-    use chrono::{offset::TimeZone, SecondsFormat, Utc};
+    use chrono::{offset::TimeZone, Utc};
     use itertools::Itertools;
     use rand::distributions::Alphanumeric;
-    use rand::{self, Rng, RngCore};
-    use rusqlite::{params, Row, NO_PARAMS};
+    use rand::{self, Rng};
+    use rusqlite::{NO_PARAMS};
     use std::fs;
     use std::io::{Read, Write};
     use std::sync::{Arc, Mutex};
@@ -526,7 +526,7 @@ mod tests {
         let db_dir = tutil::TestDir::new();
         let db_access = tutil::create_a_sqlite_file_db(&db_dir)?;
 
-        load_remote_item_to_sqlite(&dir, &db_access, false)?;
+        load_remote_item_to_sqlite(&dir, &db_access, false, 50000)?;
 
         assert_eq!(db_access.count_directory()?, 1);
         assert_eq!(db_access.count_remote_file_item(None)?, 3);
@@ -546,7 +546,7 @@ mod tests {
             assert_eq!(buf.as_str(), "abc")
         }
 
-        load_remote_item_to_sqlite(&dir, &db_access, false)?;
+        load_remote_item_to_sqlite(&dir, &db_access, false, 50000)?;
 
         assert_eq!(db_access.count_directory()?, 1);
         assert_eq!(db_access.count_remote_file_item(Some(true))?, 1);

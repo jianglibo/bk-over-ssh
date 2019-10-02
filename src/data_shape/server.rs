@@ -198,6 +198,7 @@ pub struct ServerYml {
     pub rsync_window: usize,
     pub use_db: bool,
     pub skip_sha1: bool,
+    pub sql_batch_size: usize,
     pub schedules: Vec<ScheduleItem>,
     #[serde(skip)]
     pub yml_location: Option<PathBuf>,
@@ -856,8 +857,8 @@ where
                     one_dir,
                     self.db_access.as_ref().unwrap(),
                     self.is_skip_sha1(),
+                    self.server_yml.sql_batch_size,
                 )?;
-
                 self.db_access
                     .as_ref()
                     .unwrap()
@@ -900,7 +901,6 @@ where
 {
     let name = name.as_ref();
     trace!("got server yml name: {:?}", name);
-    eprintln!("hhhh");
     let mut server_yml_path = Path::new(name).to_path_buf();
     if (server_yml_path.is_absolute() || name.starts_with('/')) && !server_yml_path.exists() {
         bail!(
@@ -1019,13 +1019,11 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db_accesses::SqliteDbAccess;
     use crate::develope::tutil;
     use crate::log_util;
     use bzip2::write::{BzDecoder, BzEncoder};
     use bzip2::Compression;
     use indicatif::MultiProgress;
-    use r2d2_sqlite::SqliteConnectionManager;
     use std::sync::Arc;
     use std::thread;
     use std::time::Duration;
@@ -1042,24 +1040,10 @@ mod tests {
     }
 
     #[test]
-    fn t_rsplitn() {
-        let s = "a/b/c\\d/c0";
-        assert_eq!(s.rsplitn(2, &['/', '\\'][..]).next(), Some("c0"));
-        assert_eq!(s.rsplitn(20, &['/', '\\'][..]).next(), Some("c0"));
-
-        let s = "a/b/c\\d\\c0";
-        assert_eq!(s.rsplitn(2, &['/', '\\'][..]).next(), Some("c0"));
-        assert_eq!(s.rsplitn(20, &['/', '\\'][..]).next(), Some("c0"));
-
-        let s = "a/b/c\\d\\c0\\";
-        assert!(s.ends_with(&['/', '\\'][..]));
-    }
-
-    #[test]
     fn t_load_server() -> Result<(), failure::Error> {
         log();
-        let app_conf = tutil::load_demo_app_conf_sqlite();
-        let server = tutil::load_demo_server_sqlite(&app_conf);
+        let app_conf = tutil::load_demo_app_conf_sqlite(None);
+        let server = tutil::load_demo_server_sqlite(&app_conf, None);
         assert_eq!(
             server.server_yml.directories[0].excludes,
             vec!["*.log".to_string(), "*.bak".to_string()]
@@ -1070,10 +1054,8 @@ mod tests {
     #[test]
     fn t_connect_server() -> Result<(), failure::Error> {
         log();
-        let app_conf = tutil::load_demo_app_conf_sqlite();
-        // let server = load_server_yml();
-        let mut server = tutil::load_demo_server_sqlite(&app_conf);
-        // let mut server = load_server_yml();
+        let app_conf = tutil::load_demo_app_conf_sqlite(None);
+        let mut server = tutil::load_demo_server_sqlite(&app_conf, None);
         info!("start connecting...");
         server.connect()?;
         assert!(server.is_connected());
@@ -1083,9 +1065,8 @@ mod tests {
     #[test]
     fn t_sync_dirs() -> Result<(), failure::Error> {
         log();
-        let app_conf = tutil::load_demo_app_conf_sqlite();
-        let mut server = tutil::load_demo_server_sqlite(&app_conf);
-        // let mut server = load_server_yml();
+        let app_conf = tutil::load_demo_app_conf_sqlite(None);
+        let mut server = tutil::load_demo_server_sqlite(&app_conf, None);
         let mb = Arc::new(MultiProgress::new());
 
         let mb1 = Arc::clone(&mb);

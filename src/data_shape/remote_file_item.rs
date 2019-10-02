@@ -1,6 +1,7 @@
 use super::server::Directory;
 use crate::actions::hash_file_sha1;
 use crate::db_accesses::{DbAccess, RemoteFileItemInDb};
+use itertools::Itertools;
 use log::*;
 use r2d2;
 use serde::{Deserialize, Serialize};
@@ -9,7 +10,6 @@ use std::iter::Iterator;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use walkdir::WalkDir;
-use itertools::Itertools;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct RemoteFileItem {
@@ -106,6 +106,7 @@ pub fn load_remote_item_to_sqlite<M, D>(
     directory: &Directory,
     db_access: &D,
     skip_sha1: bool,
+    sql_batch_size: usize,
 ) -> Result<(), failure::Error>
 where
     M: r2d2::ManageConnection,
@@ -113,19 +114,33 @@ where
 {
     if let Some(base_path) = directory.get_remote_canonicalized_dir_str() {
         let dir_id = db_access.insert_directory(base_path.as_str())?;
-        WalkDir::new(&base_path)
-            .follow_links(false)
-            .into_iter()
-            .filter_map(|e| e.ok())
-            .filter(|d| d.file_type().is_file())
-            .filter_map(|d| d.path().canonicalize().ok())
-            .filter_map(|d| directory.match_path(d))
-            .filter_map(|d| RemoteFileItemInDb::from_path(&base_path, d, skip_sha1, dir_id))
-            .filter_map(|rfi|db_access.insert_or_update_remote_file_item(rfi, true))
-            .map(|(rfi, da)| rfi.to_sql_string(da))
-            .chunks(50000)
-            .into_iter()
-            .for_each(|ck| db_access.execute_batch(ck));
+
+        if sql_batch_size > 1 {
+            WalkDir::new(&base_path)
+                .follow_links(false)
+                .into_iter()
+                .filter_map(|e| e.ok())
+                .filter(|d| d.file_type().is_file())
+                .filter_map(|d| d.path().canonicalize().ok())
+                .filter_map(|d| directory.match_path(d))
+                .filter_map(|d| RemoteFileItemInDb::from_path(&base_path, d, skip_sha1, dir_id))
+                .filter_map(|rfi| db_access.insert_or_update_remote_file_item(rfi, true))
+                .map(|(rfi, da)| rfi.to_sql_string(da))
+                .chunks(sql_batch_size)
+                .into_iter()
+                .for_each(|ck| db_access.execute_batch(ck));
+        } else {
+            let _c = WalkDir::new(&base_path)
+                .follow_links(false)
+                .into_iter()
+                .filter_map(|e| e.ok())
+                .filter(|d| d.file_type().is_file())
+                .filter_map(|d| d.path().canonicalize().ok())
+                .filter_map(|d| directory.match_path(d))
+                .filter_map(|d| RemoteFileItemInDb::from_path(&base_path, d, skip_sha1, dir_id))
+                .filter_map(|rfi| db_access.insert_or_update_remote_file_item(rfi, false))
+                .count();
+        }
     }
     Ok(())
 }

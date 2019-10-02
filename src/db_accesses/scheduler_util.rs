@@ -93,7 +93,7 @@ mod tests {
     use chrono::{self, offset::TimeZone, Datelike, Timelike, Utc};
     use std::thread;
     use std::time::Duration;
-    use rusqlite::{params, Row, NO_PARAMS};
+    use rusqlite::{params, NO_PARAMS};
 
     fn log() {
         log_util::setup_logger_detail(

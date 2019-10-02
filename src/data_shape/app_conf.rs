@@ -106,17 +106,17 @@ where
     skip_sha1: bool,
 }
 
-pub fn demo_app_conf<M, D>() -> AppConf<M, D>
+pub fn demo_app_conf<M, D>(data_dir: &str) -> AppConf<M, D>
 where
     M: r2d2::ManageConnection,
     D: DbAccess<M>,
-{
+{   
     AppConf {
         inner: AppConfYml::default(),
         config_file_path: Path::new("abc").to_path_buf(),
-        data_dir_full_path: PathBuf::from("data"),
-        log_full_path: PathBuf::from("data/out.log"),
-        servers_dir: PathBuf::from("data/servers"),
+        data_dir_full_path: PathBuf::from(data_dir),
+        log_full_path: PathBuf::from(data_dir).join("out.log"),
+        servers_dir: PathBuf::from("data").join("servers"),
         _m: PhantomData,
         db_access: None,
         lock_file: None,
@@ -326,6 +326,7 @@ where
         &self.inner.log_conf
     }
 
+    #[allow(dead_code)]
     fn get_log_file(data_dir: &Path, inner: &AppConfYml) -> String {
         let log_file = &inner.log_conf.log_file;
         let path = Path::new(log_file);

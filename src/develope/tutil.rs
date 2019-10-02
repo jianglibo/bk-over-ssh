@@ -7,18 +7,20 @@ use std::{fs, io, io::BufRead, io::BufWriter, io::Seek, io::Write};
 use tempfile::TempDir;
 
 #[allow(dead_code)]
-pub fn load_demo_app_conf_sqlite() -> AppConf<SqliteConnectionManager, SqliteDbAccess> {
-    demo_app_conf::<SqliteConnectionManager, SqliteDbAccess>()
+pub fn load_demo_app_conf_sqlite(data_dir: Option<&str>) -> AppConf<SqliteConnectionManager, SqliteDbAccess> {
+    let data_dir = data_dir.unwrap_or_else(||"data");
+    demo_app_conf::<SqliteConnectionManager, SqliteDbAccess>(data_dir)
 }
 
 #[allow(dead_code)]
-pub fn load_demo_server_sqlite(
-    app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
-) -> Server<SqliteConnectionManager, SqliteDbAccess> {
-    eprintln!("load_demo_server_sqlite");
+pub fn load_demo_server_sqlite<'a> (
+    app_conf: &'a AppConf<SqliteConnectionManager, SqliteDbAccess>,
+    server_yml: Option<&str>,
+) -> Server<'a, SqliteConnectionManager, SqliteDbAccess> {
+    let server_yml = server_yml.unwrap_or_else(||"localhost.yml");
     load_server_from_yml(
         app_conf,
-        "localhost.yml",
+        server_yml,
         None,
         None,
     )

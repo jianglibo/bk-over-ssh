@@ -456,8 +456,8 @@ mod tests {
         let fi = FileItem::new(local_base_dir, remote_base_dir, ri, sync_type);
         let sftp = server.get_ssh_session().sftp()?;
         let mut buf = vec![0; 8192];
-        let app_conf = tutil::load_demo_app_conf_sqlite();
-        let mut another_server = tutil::load_demo_server_sqlite(&app_conf);
+        let app_conf = tutil::load_demo_app_conf_sqlite(None);
+        let mut another_server = tutil::load_demo_server_sqlite(&app_conf, None);
         another_server.connect()?;
         let r = copy_a_file_item(&another_server, &sftp, fi, &mut buf, None);
         Ok(r)
@@ -475,9 +475,9 @@ mod tests {
     #[test]
     fn t_copy_a_file() -> Result<(), failure::Error> {
         log();
-        let app_conf = tutil::load_demo_app_conf_sqlite();
+        let app_conf = tutil::load_demo_app_conf_sqlite(None);
         // let mut server = load_server_yml();
-        let mut server = tutil::load_demo_server_sqlite(&app_conf);
+        let mut server = tutil::load_demo_server_sqlite(&app_conf, None);
         server.connect()?;
         server.server_yml.rsync_valve = 4;
         let test_dir1 = tutil::create_a_dir_and_a_file_with_content("xx.txt", "")?;
