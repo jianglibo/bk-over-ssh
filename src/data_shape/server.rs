@@ -353,16 +353,29 @@ where
         )
     }
 
-    fn get_archive_writer_file(&self) -> Result<impl io::Write, failure::Error> {
-        Ok(fs::File::create(self.next_tar_file())?)
+    /// current tar file will not compress.
+    fn current_tar_file(&self) -> PathBuf {
+        self.tar_dir.join(format!(
+            "{}{}",
+            self.server_yml.archive_prefix,
+            self.server_yml.archive_postfix,
+        ))
     }
 
-    fn get_archive_writer_bzip2(&self) -> Result<impl io::Write, failure::Error> {
-        let nf = self.next_tar_file();
-        trace!("got next file: {:?}", nf);
-        let out = fs::File::create(nf)?;
-        Ok(BzEncoder::new(out, Compression::Best))
-    }
+    // fn get_archive_writer_file(&self) -> Result<impl io::Write, failure::Error> {
+    //     let cur = self.current_tar_file();
+    //     let f = fs::OpenOptions::new().append(true).open(cur)?;
+    //     Ok(f)
+    // }
+
+
+    // fn get_archive_writer_bzip2(&self) -> Result<impl io::Write, failure::Error> {
+    //     let cur = self.current_tar_file();
+    //     trace!("got next file: {:?}", cur);
+    //     let out = fs::OpenOptions::new().append(true).open(cur)?;
+    //     Ok(BzEncoder::new(out, Compression::Best))
+    // }
+
     /// use dyn trait.
     #[allow(dead_code)]
     fn get_archive_writer(
@@ -387,7 +400,10 @@ where
         Ok(file)
     }
 
-    fn do_tar_local(&self, writer: impl io::Write) -> Result<(), failure::Error> {
+    pub fn tar_local(&self) -> Result<(), failure::Error> {
+        let cur = self.current_tar_file();
+        let writer = fs::OpenOptions::new().append(true).open(cur)?;
+
         let mut archive = Builder::new(writer);
 
         for dir in self.server_yml.directories.iter() {
@@ -407,17 +423,17 @@ where
         Ok(())
     }
 
-    /// tar xjf(bzip2) or tar xzf(gzip).
-    pub fn tar_local(&self) -> Result<(), failure::Error> {
-        if let Some(ref zm) = self.server_yml.compress_archive {
-            match zm {
-                CompressionImpl::Bzip2 => self.do_tar_local(self.get_archive_writer_bzip2()?)?,
-            };
-        } else {
-            self.do_tar_local(self.get_archive_writer_file()?)?;
-        }
-        Ok(())
-    }
+    // tar xjf(bzip2) or tar xzf(gzip).
+    // pub fn tar_local(&self) -> Result<(), failure::Error> {
+    //     // if let Some(ref zm) = self.server_yml.compress_archive {
+    //     //     match zm {
+    //     //         CompressionImpl::Bzip2 => self.do_tar_local(self.get_archive_writer_bzip2()?)?,
+    //     //     };
+    //     // } else {
+    //     //     self.do_tar_local(self.get_archive_writer_file()?)?;
+    //     // }
+    //     Ok(())
+    // }
 
     pub fn prune_backups(&self) -> Result<(), failure::Error> {
         rolling_files::do_prune_dir(
@@ -561,12 +577,18 @@ where
         Ok(working_file)
     }
 
-    pub fn create_remote_db(&self, db_type: impl AsRef<str>, force: bool) -> Result<(), failure::Error> {
+    pub fn create_remote_db(
+        &self,
+        db_type: impl AsRef<str>,
+        force: bool,
+    ) -> Result<(), failure::Error> {
         let mut channel: ssh2::Channel = self.create_channel()?;
         let db_type = db_type.as_ref();
         let cmd = format!(
             "{} create-db --db-type {}{}",
-            self.server_yml.remote_exec, db_type, if force {" --force"} else {""},
+            self.server_yml.remote_exec,
+            db_type,
+            if force { " --force" } else { "" },
         );
         info!("invoking remote command: {:?}", cmd);
         channel.exec(cmd.as_str())?;
@@ -818,31 +840,32 @@ where
     }
 
     pub fn sync_dirs(&mut self) -> Result<Option<SyncDirReport>, failure::Error> {
-        let b = self.app_conf.is_skip_cron() || if let Some(si) = self
-            .server_yml
-            .schedules
-            .iter()
-            .find(|it| it.name == "sync-dir")
-        {
-            match scheduler_util::need_execute(
-                self.db_access.as_ref(),
-                self.yml_location.as_ref().unwrap().to_str().unwrap(),
-                &si.name,
-                &si.cron,
-            ) {
-                (true, None) => true,
-                (false, Some(dt)) => {
-                    eprintln!(
-                        "cron time did't meet yet. next execution scheduled at: {:?}",
-                        dt
-                    );
-                    false
+        let b = self.app_conf.is_skip_cron()
+            || if let Some(si) = self
+                .server_yml
+                .schedules
+                .iter()
+                .find(|it| it.name == "sync-dir")
+            {
+                match scheduler_util::need_execute(
+                    self.db_access.as_ref(),
+                    self.yml_location.as_ref().unwrap().to_str().unwrap(),
+                    &si.name,
+                    &si.cron,
+                ) {
+                    (true, None) => true,
+                    (false, Some(dt)) => {
+                        eprintln!(
+                            "cron time did't meet yet. next execution scheduled at: {:?}",
+                            dt
+                        );
+                        false
+                    }
+                    (_, _) => false,
                 }
-                (_, _) => false,
-            }
-        } else {
-            true
-        };
+            } else {
+                true
+            };
 
         if b {
             let start = Instant::now();
@@ -1030,6 +1053,8 @@ mod tests {
     use bzip2::write::{BzDecoder, BzEncoder};
     use bzip2::Compression;
     use indicatif::MultiProgress;
+    use std::fs;
+    use std::io::{self, Read};
     use std::sync::Arc;
     use std::thread;
     use std::time::Duration;
@@ -1139,26 +1164,75 @@ mod tests {
         use tar::{Archive, Builder};
         log();
         let test_dir = tutil::create_a_dir_and_a_file_with_content("a", "cc")?;
+        test_dir.make_a_file_with_content("b", "cc")?;
 
         let tar_dir = tutil::TestDir::new();
         let tar_file_path = tar_dir.tmp_dir_path().join("aa.tar");
-        let tar_file = fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .open(&tar_file_path)?;
+
         {
+            let tar_file = fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&tar_file_path)?;
             let mut a = Builder::new(tar_file);
-            let p = test_dir.tmp_file_str()?;
+            let p = test_dir.get_file_path("a");
+            let p1 = test_dir.get_file_path("b");
             info!("file path: {:?}", p);
             a.append_file("xx.xx", &mut fs::File::open(&p)?)?;
+            a.append_file("yy.yy", &mut fs::File::open(&p1)?)?;
+            a.finish()?;
         }
 
-        let file = fs::File::open(&tar_file_path)?;
-        let mut a = Archive::new(file);
-        let file = a.entries()?.next().expect("tar entry should have one.");
-        let file = file.unwrap();
-        info!("{:?}", file.header());
-        assert_eq!(file.header().path()?, Path::new("xx.xx"));
+        {
+            let tar_file = fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&tar_file_path)?;
+            let mut a = Builder::new(tar_file);
+            let p = test_dir.get_file_path("a");
+            info!("file path: {:?}", p);
+            a.append_file("xx.xx", &mut fs::File::open(&p)?)?;
+            a.finish()?;
+        }
+
+        {
+            let file = fs::File::open(&tar_file_path)?;
+            let mut a = Archive::new(file);
+            let et = a.entries()?.find(|it| {
+                it.as_ref()
+                    .ok()
+                    .and_then(|ite| ite.header().path().ok().map(|co| co.into_owned()))
+                    == Some(PathBuf::from("xx.xx"))
+            });
+            assert!(et.is_some());
+        }
+
+        {
+            let file = fs::File::open(&tar_file_path)?;
+            let mut a = Archive::new(file);
+            assert_eq!(a.entries()?.count(), 2);
+        }
+
+        {
+            let tar_dir = tutil::TestDir::new();
+            let file = fs::File::open(&tar_file_path)?;
+            let mut a = Archive::new(file);
+            for et in a.entries()? {
+                let mut et = et.unwrap();
+                et.unpack_in(tar_dir.tmp_dir_path())?;
+            }
+
+            for p in tar_dir.tmp_dir_path().read_dir()? {
+                let p = p.unwrap();
+                assert!(p.file_name() == "xx.xx" || p.file_name() == "yy.yy");
+
+                let mut f = fs::OpenOptions::new().read(true).open(p.path())?;
+                let mut content = String::new();
+                f.read_to_string(&mut content)?;
+                assert_eq!(content, "cc");
+            }
+        }
+
         Ok(())
     }
 

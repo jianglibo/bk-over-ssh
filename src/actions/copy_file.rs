@@ -356,8 +356,8 @@ where
     D: DbAccess<M>,
 {
     let mut received = 0_u64;
-    let item_len = file_item.get_remote_item().get_len();
-    let item_path = file_item.get_remote_item().get_path();
+    // let item_len = file_item.get_remote_item().get_len();
+    // let item_path = file_item.get_remote_item().get_path();
     if let Some(local_file_path) = file_item.get_local_path_str() {
         let cb = if pb_op.is_some() {
             Some(|length| {
