@@ -680,7 +680,7 @@ where
             pb_total.set_length(count_and_len_op.map(|cl| cl.1).unwrap_or(0u64));
             pb_total.set_style(style);
 
-            let style = ProgressStyle::default_bar().template("{bytes_per_sec:10} {decimal_bytes:8}/{decimal_total_bytes:8} {spinner} {percent}% {eta} {wide_msg}").progress_chars("#-");
+            let style = ProgressStyle::default_bar().template("{bytes_per_sec:10} {decimal_bytes:>8}/{decimal_total_bytes:8} {spinner} {percent:4}% {eta:5} {wide_msg}").progress_chars("#-");
             pb_item.set_style(style);
         }
 
