@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 //     static ref EMPTY_STRING: String = String::from("");
 // }
 
+#[derive(Debug)]
 pub enum DbAction {
     Insert,
     Update,
@@ -33,6 +34,20 @@ pub struct RemoteFileItemInDb {
 }
 
 impl RemoteFileItemInDb {
+    #[allow(dead_code)]
+    pub fn duplicate_self(&self) -> RemoteFileItemInDb {
+        RemoteFileItemInDb {
+            id: self.id,
+            path: self.path.clone(),
+            sha1: self.sha1.clone(),
+            len: self.len,
+            modified: self.modified,
+            created: self.created,
+            dir_id: self.dir_id,
+            changed: self.changed,
+        }
+    }
+
     pub fn from_path(
         base_path: impl AsRef<Path>,
         path: PathBuf,
@@ -88,7 +103,7 @@ impl RemoteFileItemInDb {
 
     pub fn to_update_sql_string(&self) -> String {
         format!(
-            "UPDATE remote_file_item SET len = {}, {}{}changed = 1 where id = {}",
+            "UPDATE remote_file_item SET len = {}, {}{}changed = 1 where id = {};",
             self.len,
             self.sha1
                 .as_ref()
@@ -106,13 +121,13 @@ impl RemoteFileItemInDb {
 
     pub fn to_update_changed_sql_string(&self) -> String {
         format!(
-            "UPDATE remote_file_item SET changed = {} where id = {}",
+            "UPDATE remote_file_item SET changed = {} where id = {};",
             if self.changed { 1 } else { 0 },
             self.id
         )
     }
 
-    pub fn to_sql_string(&self, da: DbAction) -> String {
+    pub fn to_sql_string(&self, da: &DbAction) -> String {
         match da {
             DbAction::Insert => self.to_insert_sql_string(),
             DbAction::UpdateChangedField => self.to_update_changed_sql_string(),
@@ -131,7 +146,7 @@ where
         rfi: RemoteFileItemInDb,
         batch: bool,
     ) -> Option<(RemoteFileItemInDb, DbAction)>;
-    fn one_file_item(&self) -> Result<RemoteFileItemInDb, failure::Error>;
+    fn get_file_item(&self, num: usize) -> Result<Vec<RemoteFileItemInDb>, failure::Error>;
     fn find_remote_file_item(
         &self,
         dir_id: i64,

@@ -77,10 +77,25 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
         Ok(stmt.query_row(params![path.as_ref()], |row| row.get(0))?)
     }
 
-    fn one_file_item(&self) -> Result<RemoteFileItemInDb, failure::Error> {
+    fn get_file_item(&self, num: usize) -> Result<Vec<RemoteFileItemInDb>, failure::Error> {
         let conn = self.0.get().unwrap();
-        let mut stmt = conn.prepare("SELECT id, path, sha1, len, time_modified, time_created, dir_id, changed FROM remote_file_item")?;
-        Ok(stmt.query_row(NO_PARAMS, map_to_file_item)?)
+        let mut stmt = conn.prepare("SELECT id, path, sha1, len, time_modified, time_created, dir_id, changed FROM remote_file_item LIMIT :num")?;
+        let r = stmt
+            .query_map_named(
+                named_params! {
+                    ":num": num as i64,
+                },
+                map_to_file_item,
+            )?
+            .filter_map(|it| match it {
+                Ok(it) => Some(it),
+                Err(err) => {
+                    error!("get_file_item: {:?}", err);
+                    None
+                }
+            })
+            .collect();
+        Ok(r)
     }
 
     fn find_remote_file_item(
@@ -386,7 +401,7 @@ mod tests {
     use itertools::Itertools;
     use rand::distributions::Alphanumeric;
     use rand::{self, Rng};
-    use rusqlite::{NO_PARAMS};
+    use rusqlite::NO_PARAMS;
     use std::fs;
     use std::io::{Read, Write};
     use std::sync::{Arc, Mutex};
@@ -421,32 +436,78 @@ mod tests {
         }
     }
 
+    /// batch insert may partly success. it will stop at the first failure.
+    /// in the batch proccess, later inserting can't see previous inserting. which may cause unique violation.
     #[test]
-    fn t_batch_insert() -> Result<(), failure::Error> {
+    fn t_individual_insert() -> Result<(), failure::Error> {
+        log();
         let db_dir = tutil::TestDir::new();
         let db_access = tutil::create_a_sqlite_file_db(&db_dir)?;
         let dir_id = db_access.insert_directory("abc")?;
 
         let now = Instant::now();
         let _c = std::iter::repeat_with(rfi_gen(dir_id))
-            .take(1000)
+            .take(10)
+            .enumerate()
+            .map(|(idx, mut it)| {
+                if idx == 2 {
+                    let mut it1 = it.duplicate_self();
+                    it1.len = it.len + 1;
+                    vec![it, it1]
+                } else if idx == 4 {
+                    let it1 = it.duplicate_self();
+                    it.changed = true;
+                    vec![it, it1]
+                } else {
+                    vec![it]
+                }
+            })
+            .flat_map(|its| its)
             .filter_map(|line| db_access.insert_or_update_remote_file_item(line, false))
             .count();
         eprintln!("elapsed: {}", now.elapsed().as_secs());
+        Ok(())
+    }
+
+    #[test]
+    fn t_batch_insert() -> Result<(), failure::Error> {
+        log();
+        let db_dir = tutil::TestDir::new();
+        let db_access = tutil::create_a_sqlite_file_db(&db_dir)?;
+        let dir_id = db_access.insert_directory("abc")?;
 
         let now = Instant::now();
         std::iter::repeat_with(rfi_gen(dir_id))
-            .take(100_000)
-            .map(|it| it.to_insert_sql_string())
+            .take(10)
+            .filter_map(|it| db_access.insert_or_update_remote_file_item(it, true))
+            .map(|(it, da)| {
+                let s = it.to_sql_string(&da);
+                eprintln!("{:?}, {}", da, s);
+                s
+            })
             .chunks(100_000)
             .into_iter()
             .for_each(|ck| db_access.execute_batch(ck));
 
+        assert_eq!(db_access.count_remote_file_item(None)?, 10);
+
+        let mut rfis = db_access.get_file_item(2)?;
+        rfis.get_mut(0).unwrap().len = 333;
+
+        assert!(rfis.get(1).unwrap().changed);
+
+        rfis.into_iter()
+            .filter_map(|it| db_access.insert_or_update_remote_file_item(it, true))
+            .map(|(it, da)| {
+                let s = it.to_sql_string(&da);
+                eprintln!("{:?}, {}", da, s);
+                s
+            })
+            .chunks(100_000)
+            .into_iter()
+            .for_each(|ck| db_access.execute_batch(ck));
         eprintln!("elapsed: {}", now.elapsed().as_secs());
-        eprintln!("record: {}", db_access.count_remote_file_item(None)?);
         eprintln!("{:?}", rfi_gen(dir_id)());
-        let rfi = db_access.one_file_item()?;
-        eprintln!("{:?}", rfi);
         Ok(())
     }
 

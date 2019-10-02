@@ -125,7 +125,7 @@ where
                 .filter_map(|d| directory.match_path(d))
                 .filter_map(|d| RemoteFileItemInDb::from_path(&base_path, d, skip_sha1, dir_id))
                 .filter_map(|rfi| db_access.insert_or_update_remote_file_item(rfi, true))
-                .map(|(rfi, da)| rfi.to_sql_string(da))
+                .map(|(rfi, da)| rfi.to_sql_string(&da))
                 .chunks(sql_batch_size)
                 .into_iter()
                 .for_each(|ck| db_access.execute_batch(ck));
