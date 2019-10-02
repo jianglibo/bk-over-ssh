@@ -561,12 +561,12 @@ where
         Ok(working_file)
     }
 
-    pub fn create_remote_db(&self, db_type: impl AsRef<str>) -> Result<(), failure::Error> {
+    pub fn create_remote_db(&self, db_type: impl AsRef<str>, force: bool) -> Result<(), failure::Error> {
         let mut channel: ssh2::Channel = self.create_channel()?;
         let db_type = db_type.as_ref();
         let cmd = format!(
-            "{} create-db --db-type {}",
-            self.server_yml.remote_exec, db_type,
+            "{} create-db --db-type {}{}",
+            self.server_yml.remote_exec, db_type, if force {" --force"} else {""},
         );
         info!("invoking remote command: {:?}", cmd);
         channel.exec(cmd.as_str())?;

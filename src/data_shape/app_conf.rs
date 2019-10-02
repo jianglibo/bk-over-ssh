@@ -134,6 +134,10 @@ where
         self.db_access.replace(db_access);
     }
 
+    pub fn get_sqlite_db_file(&self) -> PathBuf {
+        self.data_dir_full_path.join("db.db")
+    }
+
     #[allow(dead_code)]
     pub fn get_inner(&self) -> &AppConfYml {
         &self.inner

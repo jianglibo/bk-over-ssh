@@ -250,11 +250,6 @@ fn main() -> Result<(), failure::Error> {
     if m.is_present("enable-sha1") {
         app_conf.not_skip_sha1();
     }
-    let no_db = m.is_present("no-db");
-    if !no_db {
-        let sqlite_db_access = SqliteDbAccess::new(app_conf.data_dir_full_path.join("db.db"));
-        app_conf.set_db_access(sqlite_db_access);
-    }
 
     let verbose = if m.is_present("vv") {
         "vv"
@@ -275,20 +270,25 @@ fn main() -> Result<(), failure::Error> {
         let mut server =
             app_conf.load_server_yml(sub_matches.value_of("server-yml").unwrap(), None, None)?;
         let db_type = sub_matches.value_of("db-type").unwrap_or("sqlite");
+        let force = sub_matches.is_present("force");
         server.connect()?;
-        return server.create_remote_db(db_type);
+        return server.create_remote_db(db_type, force);
     }
 
     if let ("create-db", Some(sub_matches)) = m.subcommand() {
         let db_type = sub_matches.value_of("db-type").unwrap_or("sqlite");
+        let force = sub_matches.is_present("force");
         if "sqlite" == db_type {
             let mut app_conf =
                 process_app_config::<SqliteConnectionManager, SqliteDbAccess>(conf, false)?;
-            let sqlite_db_access = SqliteDbAccess::new(app_conf.data_dir_full_path.join("db.db"));
+            if force {
+                fs::remove_file(app_conf.get_sqlite_db_file())?;
+            }
+            let sqlite_db_access = SqliteDbAccess::new(app_conf.get_sqlite_db_file());
             app_conf.set_db_access(sqlite_db_access);
             if let Some(da) = app_conf.get_db_access() {
                 if let Err(err) = da.create_database() {
-                    println!("{}", err.find_root_cause());
+                    eprintln!("{}", err.find_root_cause());
                 }
             }
         } else {
@@ -297,18 +297,14 @@ fn main() -> Result<(), failure::Error> {
         return Ok(());
     }
 
-    app_conf.lock_working_file()?;
-    // ctrlc::set_handler(move || {
-    //     if lof.exists() {
-    //         println!("Ctrl-C catched, deleting lock_file: {:?}", lof);
-    //         if let Err(err) = fs::remove_file(lof.as_path()) {
-    //             warn!("remove lock file failed: {:?}, {:?}", lof, err);
-    //         }
-    //         std::process::exit(0);
-    //     }
-    // })
-    // .expect("Error setting Ctrl-C handler");
+    let no_db = m.is_present("no-db");
+    if !no_db {
+        let sqlite_db_access = SqliteDbAccess::new(app_conf.get_sqlite_db_file());
+        app_conf.set_db_access(sqlite_db_access);
+    }
 
+
+    app_conf.lock_working_file()?;
     let delay = m.value_of("delay");
     if let Some(delay) = delay {
         delay_exec(delay);
@@ -317,9 +313,6 @@ fn main() -> Result<(), failure::Error> {
         error!("{:?}", err);
         eprintln!("{:?}", err);
     }
-    // if lock_file {
-    //     app_conf.unlock_working_file();
-    // }
     Ok(())
 }
 
@@ -334,11 +327,7 @@ where
     D: DbAccess<M>,
 {
     if let ("sync-dirs", Some(sub_matches)) = m.subcommand() {
-        // if let Some(db_access) = db_access {
         return sync_dirs(&app_conf, sub_matches, console_log);
-        // } else {
-        // return sync_dirs(&app_conf, sub_matches, console_log, None);
-        // }
     }
     main_entry_1(app1, app_conf, m, console_log)
 }

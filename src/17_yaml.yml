@@ -129,6 +129,10 @@ subcommands:
                 long: db-type
                 possible_values: [ sqlite ]
                 takes_value: true
+            - force:
+                help: remove and create remote database if exists.
+                long: force
+                required: false
     - create-remote-db:
         about: create remote database.
         args:
@@ -141,6 +145,10 @@ subcommands:
                 long: server-yml
                 required: true
                 takes_value: true
+            - force:
+                help: remove and create remote database if exists.
+                long: force
+                required: false
     - pbr:
         about: demonstrate bpr usage.
     - repl:
