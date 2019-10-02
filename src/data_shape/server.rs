@@ -680,7 +680,7 @@ where
             pb_total.set_length(count_and_len_op.map(|cl| cl.1).unwrap_or(0u64));
             pb_total.set_style(style);
 
-            let style = ProgressStyle::default_bar().template("{bytes_per_sec:10} {decimal_bytes:>8}/{decimal_total_bytes:8} {spinner} {percent:4}% {eta:5} {wide_msg}").progress_chars("#-");
+            let style = ProgressStyle::default_bar().template("{bytes_per_sec:10} {decimal_bytes:>8}/{decimal_total_bytes:8} {spinner} {percent:>4}% {eta:5} {wide_msg}").progress_chars("#-");
             pb_item.set_style(style);
         }
 
@@ -720,7 +720,8 @@ where
                                 }
                                 let mut skiped = false;
                                 // if use_db all received item are changed.
-                                let r = if self.server_yml.use_db || local_item.had_changed() {
+                                // let r = if self.server_yml.use_db || local_item.had_changed() { // even use_db still check change or not.
+                                let r = if local_item.had_changed() {
                                     trace!("file had changed. start copy_a_file_item.");
                                     copy_a_file_item(
                                         &self,

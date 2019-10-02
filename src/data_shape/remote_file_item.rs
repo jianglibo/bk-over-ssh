@@ -112,6 +112,7 @@ where
     M: r2d2::ManageConnection,
     D: DbAccess<M>,
 {
+    trace!("load_remote_item_to_sqlite, skip_sha1: {}, sql_batch_size: {}", skip_sha1, sql_batch_size);
     if let Some(base_path) = directory.get_remote_canonicalized_dir_str() {
         let dir_id = db_access.insert_directory(base_path.as_str())?;
 
@@ -153,6 +154,7 @@ pub fn load_remote_item<O>(
 where
     O: io::Write,
 {
+    trace!("load_remote_item, skip_sha1: {}", skip_sha1);
     if let Some(base_path) = directory.get_remote_canonicalized_dir_str() {
         writeln!(out, "{}", base_path)?;
         WalkDir::new(&base_path)

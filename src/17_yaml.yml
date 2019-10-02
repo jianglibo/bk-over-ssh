@@ -144,7 +144,7 @@ subcommands:
             - server-yml:
                 long: server-yml
                 required: true
-                takes_value: true
+                index: 1
             - force:
                 help: remove and create remote database if exists.
                 long: force
@@ -159,11 +159,11 @@ subcommands:
             - server-yml:
                 long: server-yml
                 required: true
-                takes_value: true
+                index: 1
             - executable:
                 help: the executable file to copy.
                 required: true
-                index: 1
+                takes_value: true
     - copy-server-yml:
         about: copy a server-yml file to server, the directory to put is described in the server yml file.
         args:
