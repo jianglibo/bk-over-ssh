@@ -13,6 +13,7 @@ fn main() {
     });
     // panic!("{}", env_lines);
     vcpkg::find_package("sqlite3").unwrap();
+    vcpkg::find_package("libssh2").unwrap();
 // output goes target/debug/build/<pkg>/output
                 for (key, value) in env::vars_os() {
                 eprintln!("{:?}: {:?}", key, value);

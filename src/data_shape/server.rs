@@ -16,6 +16,7 @@ use ssh2;
 use std::io::prelude::{BufRead, Read};
 use std::marker::PhantomData;
 use std::net::TcpStream;
+use std::ops::Drop;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 use std::{fs, io, io::Seek};
@@ -68,7 +69,6 @@ where
     D: DbAccess<M>,
 {
     pub server_yml: ServerYml,
-    _tcp_stream: Option<TcpStream>,
     session: Option<ssh2::Session>,
     report_dir: PathBuf,
     tar_dir: PathBuf,
@@ -80,6 +80,20 @@ where
     _m: PhantomData<M>,
     app_conf: &'sv AppConf<M, D>,
 }
+
+impl<'sv, M, D> Drop for Server<'sv, M, D>
+where
+    M: r2d2::ManageConnection,
+    D: DbAccess<M>,
+{
+    fn drop(&mut self) {
+        self.pb_finish();
+    }
+}
+
+unsafe impl<'sv, M, D> Sync for Server<'sv, M, D> where
+    M: r2d2::ManageConnection,
+    D: DbAccess<M>, {}
 
 impl<'sv, M, D> Server<'sv, M, D>
 where
@@ -299,7 +313,6 @@ where
     }
 
     pub fn is_connected(&self) -> bool {
-        // self._tcp_stream.is_some() && self.session.is_some()
         self.session.is_some()
     }
     #[allow(dead_code)]
@@ -308,13 +321,13 @@ where
         self.session.as_ref().expect("session should be created.")
     }
 
-    fn create_ssh_session(&self) -> Result<(Option<TcpStream>, ssh2::Session), failure::Error> {
+    fn create_ssh_session(&self) -> Result<ssh2::Session, failure::Error> {
         let url = format!("{}:{}", self.get_host(), self.get_port());
         trace!("connecting to: {}", url);
         let tcp = TcpStream::connect(&url)?;
-        if let Some(mut sess) = ssh2::Session::new() {
-            // sess.set_tcp_stream(tcp);
-            sess.handshake(&tcp)?;
+        if let Ok(mut sess) = ssh2::Session::new() {
+            sess.set_tcp_stream(tcp);
+            sess.handshake()?;
             match self.server_yml.auth_method {
                 AuthMethod::Agent => {
                     let mut agent = sess.agent()?;
@@ -354,8 +367,7 @@ where
                     bail!("password authentication not supported.");
                 }
             }
-            // Ok((None, sess))
-            Ok((Some(tcp), sess))
+            Ok(sess)
         } else {
             bail!("Session::new failed.");
         }
@@ -363,10 +375,7 @@ where
 
     pub fn connect(&mut self) -> Result<(), failure::Error> {
         if !self.is_connected() {
-            let (tcp, sess) = self.create_ssh_session()?;
-            if let Some(tcp) = tcp {
-                self._tcp_stream.replace(tcp);
-            }
+            let sess = self.create_ssh_session()?;
             self.session.replace(sess);
         }
         Ok(())
@@ -700,7 +709,7 @@ where
             .sum()
     }
 
-    pub fn sync_dirs(&mut self) -> Result<Option<SyncDirReport>, failure::Error> {
+    pub fn sync_dirs(&self) -> Result<Option<SyncDirReport>, failure::Error> {
         let b = self.app_conf.is_skip_cron()
             || if let Some(si) = self
                 .server_yml
@@ -730,7 +739,7 @@ where
 
         if b {
             let start = Instant::now();
-            self.connect()?;
+            // self.connect()?;
             let rs = self.start_sync_working_file_list()?;
             self.remove_working_file_list_file();
             Ok(Some(SyncDirReport::new(start.elapsed(), rs)))
@@ -795,7 +804,7 @@ where
             server_yml_path
         );
     } else {
-        if !name.contains('/') {
+        if !name.contains(std::path::MAIN_SEPARATOR) {
             server_yml_path = app_conf.servers_dir.as_path().join(name);
         }
         if !server_yml_path.exists() {
@@ -831,7 +840,6 @@ where
         multi_bar,
         db_access: app_conf.db_access.clone(),
         pb: None,
-        _tcp_stream: None,
         report_dir,
         session: None,
         tar_dir,
@@ -1059,9 +1067,9 @@ mod tests {
             let options = zip::write::FileOptions::default()
                 .compression_method(zip::CompressionMethod::Stored);
             zip.start_file_from_path(test_dir.get_file_path("a").as_path(), options)?;
-            zip.write(b"hello")?;
+            zip.write_all(b"hello")?;
             zip.start_file_from_path(test_dir.get_file_path("b").as_path(), options)?;
-            zip.write(b"world")?;
+            zip.write_all(b"world")?;
             zip.finish()?;
         }
         assert_zip_content(zip_file.as_path(), vec!["hello", "world"])?;
@@ -1074,7 +1082,7 @@ mod tests {
             let options = zip::write::FileOptions::default()
                 .compression_method(zip::CompressionMethod::Stored);
             zip.start_file_from_path(test_dir.get_file_path("a").as_path(), options)?;
-            zip.write(b"hello1")?;
+            zip.write_all(b"hello1")?;
             zip.finish()?;
         }
 

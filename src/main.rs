@@ -205,7 +205,16 @@ where
             servers.len()
         );
     }
-    let servers = servers.into_par_iter().map(|mut server| {
+    servers.iter_mut().filter_map(|s|{
+        if let Err(err) = s.connect() {
+            eprintln!("{:?}", err);
+            None
+        } else {
+            Some(s)
+        }
+        }).count();
+
+        servers.into_par_iter().for_each(|server| {
         match server.sync_dirs() {
             Ok(result) => {
                 actions::write_dir_sync_result(&server, result.as_ref());
@@ -217,10 +226,9 @@ where
             }
             Err(err) => println!("sync-dirs failed: {:?}", err),
         }
-        server
     });
 
-    servers.for_each(|sv| sv.pb_finish());
+    servers.iter().for_each(|sv|sv.pb_finish());
     wait_progresss_bar_finish(t);
     Ok(())
 }
@@ -444,9 +452,10 @@ where
                     servers.len()
                 );
             }
-            let servers = servers.into_par_iter().map(|server| {
-                let prune_op = sub_matches.value_of("prune");
-                let prune_only_op = sub_matches.value_of("prune-only");
+            let prune_op = sub_matches.value_of("prune");
+            let prune_only_op = sub_matches.value_of("prune-only");
+
+            servers.into_par_iter().map(|server| {
                 if prune_op.is_some() {
                     if let Err(err) = server.tar_local() {
                         error!("{:?}", err);
@@ -461,16 +470,13 @@ where
                         error!("{:?}", err);
                         eprintln!("{:?}", err);
                     }
-                } else {
-                    if let Err(err) = server.tar_local() {
-                        error!("{:?}", err);
-                        eprintln!("{:?}", err);
-                    }
+                } else if let Err(err) = server.tar_local() {
+                    error!("{:?}", err);
+                    eprintln!("{:?}", err);
                 }
-                server
-            });
+            }).count();
 
-            servers.for_each(|sv| sv.pb_finish());
+            // servers.for_each(|sv| sv.pb_finish());
             wait_progresss_bar_finish(t);
         }
         ("list-remote-files", Some(sub_matches)) => {
