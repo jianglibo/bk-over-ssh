@@ -21,7 +21,6 @@ pub fn load_demo_server_sqlite<'a> (
     load_server_from_yml(
         app_conf,
         server_yml,
-        None,
     )
     .unwrap()
 }

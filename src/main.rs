@@ -185,20 +185,12 @@ where
     D: DbAccess<M>,
 {
     let mut servers: Vec<Server<M, D>> = Vec::new();
-    let buf_len = sub_matches.value_of("buf-len").and_then(|v| {
-        if let Ok(v) = v.parse::<usize>() {
-            Some(v)
-        } else {
-            None
-        }
-    });
 
     if sub_matches.value_of("server-yml").is_some() {
-        let server =
-            app_conf.load_server_yml(sub_matches.value_of("server-yml").unwrap(), buf_len)?;
+        let server = app_conf.load_server_yml(sub_matches.value_of("server-yml").unwrap())?;
         servers.push(server);
     } else {
-        servers.append(&mut app_conf.load_all_server_yml(buf_len));
+        servers.append(&mut app_conf.load_all_server_yml());
     }
 
     // all progress bars already create from here on.
@@ -241,7 +233,6 @@ fn main() -> Result<(), failure::Error> {
     let console_log = m.is_present("console-log");
 
     let conf = m.value_of("conf");
-    let no_pb = m.is_present("no-pb");
     // we always open db connection unless no-db parameter provided.
     let mut app_conf = process_app_config::<SqliteConnectionManager, SqliteDbAccess>(conf, false)?;
     if m.is_present("skip-cron") {
@@ -250,11 +241,13 @@ fn main() -> Result<(), failure::Error> {
     if m.is_present("enable-sha1") {
         app_conf.not_skip_sha1();
     }
-
-    if !no_pb {
+    if !m.is_present("no-pb") {
         app_conf
             .progress_bar
             .replace(Arc::new(MultiProgress::new()));
+    }
+    if let Some(buf_len) = m.value_of("buf-len") {
+        app_conf.buf_len = Some(buf_len.parse()?);
     }
 
     let verbose = if m.is_present("vv") {
@@ -273,8 +266,7 @@ fn main() -> Result<(), failure::Error> {
     )?;
 
     if let ("create-remote-db", Some(sub_matches)) = m.subcommand() {
-        let mut server =
-            app_conf.load_server_yml(sub_matches.value_of("server-yml").unwrap(), None)?;
+        let mut server = app_conf.load_server_yml(sub_matches.value_of("server-yml").unwrap())?;
         let db_type = sub_matches.value_of("db-type").unwrap_or("sqlite");
         let force = sub_matches.is_present("force");
         server.connect()?;
@@ -359,7 +351,7 @@ where
         }
         ("copy-executable", Some(sub_matches)) => {
             let mut server =
-                app_conf.load_server_yml(sub_matches.value_of("server-yml").unwrap(), None)?;
+                app_conf.load_server_yml(sub_matches.value_of("server-yml").unwrap())?;
             let executable = sub_matches.value_of("executable").unwrap();
             let remote = server.server_yml.remote_exec.clone();
             server.copy_a_file(executable, &remote)?;
@@ -371,8 +363,7 @@ where
             );
         }
         ("print-report", Some(sub_matches)) => {
-            let server =
-                app_conf.load_server_yml(sub_matches.value_of("server-yml").unwrap(), None)?;
+            let server = app_conf.load_server_yml(sub_matches.value_of("server-yml").unwrap())?;
             let fbuf = io::BufReader::new(
                 fs::OpenOptions::new()
                     .read(true)
@@ -389,7 +380,7 @@ where
         }
         ("copy-server-yml", Some(sub_matches)) => {
             let mut server =
-                app_conf.load_server_yml(sub_matches.value_of("server-yml").unwrap(), None)?;
+                app_conf.load_server_yml(sub_matches.value_of("server-yml").unwrap())?;
             let remote = server.server_yml.remote_server_yml.clone();
             let local = server
                 .yml_location
@@ -431,28 +422,61 @@ where
             }
         }
         ("archive-local", Some(sub_matches)) => {
-            let server =
-                app_conf.load_server_yml(sub_matches.value_of("server-yml").unwrap(), None)?;
+            let mut servers: Vec<Server<M, D>> = Vec::new();
+
+            if sub_matches.value_of("server-yml").is_some() {
+                let server =
+                    app_conf.load_server_yml(sub_matches.value_of("server-yml").unwrap())?;
+                servers.push(server);
+            } else {
+                servers.append(&mut app_conf.load_all_server_yml());
+            }
+
+            // all progress bars already create from here on.
 
             let t = join_multi_bars(app_conf.progress_bar.clone());
 
-            let prune_op = sub_matches.value_of("prune");
-            let prune_only_op = sub_matches.value_of("prune-only");
-            if prune_op.is_some() {
-                server.tar_local()?;
-                server.prune_backups()?;
-            } else if prune_only_op.is_some() {
-                server.prune_backups()?;
+            if servers.is_empty() {
+                println!("found no server yml!");
             } else {
-                server.tar_local()?;
+                println!(
+                    "found {} server yml files. start processing...",
+                    servers.len()
+                );
             }
-            server.pb_finish();
+            let servers = servers.into_par_iter().map(|server| {
+                let prune_op = sub_matches.value_of("prune");
+                let prune_only_op = sub_matches.value_of("prune-only");
+                if prune_op.is_some() {
+                    if let Err(err) = server.tar_local() {
+                        error!("{:?}", err);
+                        eprintln!("{:?}", err);
+                    }
+                    if let Err(err) = server.prune_backups() {
+                        error!("{:?}", err);
+                        eprintln!("{:?}", err);
+                    }
+                } else if prune_only_op.is_some() {
+                    if let Err(err) = server.prune_backups() {
+                        error!("{:?}", err);
+                        eprintln!("{:?}", err);
+                    }
+                } else {
+                    if let Err(err) = server.tar_local() {
+                        error!("{:?}", err);
+                        eprintln!("{:?}", err);
+                    }
+                }
+                server
+            });
+
+            servers.for_each(|sv| sv.pb_finish());
             wait_progresss_bar_finish(t);
         }
         ("list-remote-files", Some(sub_matches)) => {
             let start = Instant::now();
             let mut server =
-                app_conf.load_server_yml(sub_matches.value_of("server-yml").unwrap(), None)?;
+                app_conf.load_server_yml(sub_matches.value_of("server-yml").unwrap())?;
             server.connect()?;
             server.list_remote_file_exec(no_db)?;
 
@@ -477,7 +501,7 @@ where
         }
         ("list-local-files", Some(sub_matches)) => {
             let mut server =
-                app_conf.load_server_yml(sub_matches.value_of("server-yml").unwrap(), None)?;
+                app_conf.load_server_yml(sub_matches.value_of("server-yml").unwrap())?;
             if no_db {
                 server.server_yml.use_db = false;
             }
@@ -493,15 +517,8 @@ where
             }
         }
         ("verify-server-yml", Some(sub_matches)) => {
-            let buf_len = sub_matches.value_of("buf-len").and_then(|v| {
-                if let Ok(v) = v.parse::<usize>() {
-                    Some(v)
-                } else {
-                    None
-                }
-            });
             let mut server =
-                app_conf.load_server_yml(sub_matches.value_of("server-yml").unwrap(), buf_len)?;
+                app_conf.load_server_yml(sub_matches.value_of("server-yml").unwrap())?;
             eprintln!(
                 "found server configuration yml at: {:?}",
                 server.yml_location.as_ref().unwrap()

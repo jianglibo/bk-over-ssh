@@ -222,20 +222,27 @@ where
     pub fn tar_local(&self) -> Result<(), failure::Error> {
         let total_size = self.count_local_dirs_size();
         if let Some((pp, _pb)) = self.pb.as_ref() {
-            let style = ProgressStyle::default_bar().template("{spinner} {decimal_bytes}/{decimal_total_bytes}  {percent}% {wide_msg}").progress_chars("#-");
+            let style = ProgressStyle::default_bar()
+                .template("{spinner} {decimal_bytes}/{decimal_total_bytes}  {percent}% {wide_msg}")
+                .progress_chars("#-");
             pp.set_style(style);
+            pp.enable_steady_tick(200);
             pp.set_length(total_size);
         }
         let cur = self.current_tar_file();
         trace!("open file to write archive: {:?}", cur);
 
-        let writer_c = ||fs::OpenOptions::new().create(true).truncate(true).write(true).open(cur.as_path());
+        let writer_c = || {
+            fs::OpenOptions::new()
+                .create(true)
+                .truncate(true)
+                .write(true)
+                .open(cur.as_path())
+        };
 
         let writer: Box<dyn io::Write> = if let Some(ref sm) = self.server_yml.compress_archive {
             match sm {
-                CompressionImpl::Bzip2 => {
-                    Box::new(BzEncoder::new(writer_c()?, Compression::Best))
-                }
+                CompressionImpl::Bzip2 => Box::new(BzEncoder::new(writer_c()?, Compression::Best)),
             }
         } else {
             Box::new(writer_c()?)
@@ -686,7 +693,11 @@ where
     }
 
     pub fn count_local_dirs_size(&self) -> u64 {
-        self.server_yml.directories.iter().map(|d|d.count_total_size()).sum()
+        self.server_yml
+            .directories
+            .iter()
+            .map(|d| d.count_total_size())
+            .sum()
     }
 
     pub fn sync_dirs(&mut self) -> Result<Option<SyncDirReport>, failure::Error> {
@@ -770,7 +781,6 @@ where
 pub fn load_server_from_yml<M, D>(
     app_conf: &AppConf<M, D>,
     name: impl AsRef<str>,
-    buf_len: Option<usize>,
 ) -> Result<Server<M, D>, failure::Error>
 where
     M: r2d2::ManageConnection,
@@ -831,8 +841,8 @@ where
         _m: PhantomData,
     };
 
-    if let Some(buf_len) = buf_len {
-        server.server_yml.buf_len = buf_len;
+    if let Some(bl) = app_conf.buf_len {
+        server.server_yml.buf_len = bl;
     }
 
     if let Some(mb) = server.multi_bar.as_ref() {

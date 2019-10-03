@@ -132,6 +132,7 @@ impl Directory {
             }).sum()
     }
 
+    #[allow(dead_code)]
     pub fn list_files_recursive(
         &self,
     ) -> impl Iterator<Item = (u64, String)> {

@@ -63,6 +63,11 @@ args:
         help: don't display progress bar.
         long: no-pb
         required: false
+    - buf-len:
+        help: the buf-len in case needed.
+        long: buf-len
+        takes_value: true
+        required: false
 
     # - flag:
     #     help: demo flag argument
@@ -186,10 +191,6 @@ subcommands:
             - server-yml:
                 required: true
                 index: 1
-            - buf-len:
-                long: buf-len
-                takes_value: true
-                required: false
     - list-server-yml:
         about: list server yml in the configurated data dir.
     - demo-server-yml:
@@ -203,7 +204,7 @@ subcommands:
         about: archive directories in the configuration file.
         args:
             - server-yml:
-                required: true
+                required: false
                 index: 1
             - prune:
                 help: archive directories and prune backups.
@@ -253,10 +254,6 @@ subcommands:
                 index: 1
             - skip-sha1:
                 long: skip-sha1
-                required: false
-            - buf-len:
-                long: buf-len
-                takes_value: true
                 required: false
             - rsync-window:
                 long: rsync-window
