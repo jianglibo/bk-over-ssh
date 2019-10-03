@@ -1,4 +1,4 @@
-use super::server::Directory;
+use super::Directory;
 use crate::actions::hash_file_sha1;
 use crate::db_accesses::{DbAccess, RemoteFileItemInDb};
 use itertools::Itertools;

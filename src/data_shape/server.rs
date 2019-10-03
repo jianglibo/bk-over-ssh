@@ -1,13 +1,13 @@
-use crate::actions::{copy_a_file_item, SyncDirReport};
-use crate::data_shape::{
-    load_remote_item, load_remote_item_to_sqlite, rolling_files, string_path, AppConf, FileItem,
-    FileItemProcessResult, FileItemProcessResultStats, RemoteFileItem, SyncType,
+use super::{
+    load_remote_item, load_remote_item_to_sqlite, rolling_files, string_path, AppConf, AuthMethod,
+    Directory, FileItem, FileItemProcessResult, FileItemProcessResultStats, PruneStrategy,
+    RemoteFileItem, ScheduleItem, SyncType,
 };
+use crate::actions::{copy_a_file_item, SyncDirReport};
 use crate::db_accesses::{scheduler_util, DbAccess};
 use crate::ioutil::SharedMpb;
 use bzip2::write::BzEncoder;
 use bzip2::Compression;
-use glob::Pattern;
 use indicatif::{ProgressBar, ProgressStyle};
 use log::*;
 use r2d2;
@@ -26,148 +26,6 @@ use tar::Builder;
 pub enum ServerRole {
     PureClient,
     PureServer,
-}
-
-#[derive(Deserialize, Serialize, Debug)]
-pub enum AuthMethod {
-    Password,
-    Agent,
-    IdentityFile,
-}
-
-#[derive(Deserialize, Serialize, Default, Debug)]
-pub struct Directory {
-    pub remote_dir: String,
-    pub local_dir: String,
-    pub includes: Vec<String>,
-    pub excludes: Vec<String>,
-    #[serde(skip)]
-    pub includes_patterns: Option<Vec<Pattern>>,
-    #[serde(skip)]
-    pub excludes_patterns: Option<Vec<Pattern>>,
-}
-
-#[derive(Deserialize, Serialize, Debug)]
-pub struct ScheduleItem {
-    pub name: String,
-    pub cron: String,
-}
-
-impl Directory {
-    pub fn get_remote_dir(&self) -> &str {
-        self.remote_dir.as_str()
-    }
-
-    pub fn get_remote_canonicalized_dir_str(&self) -> Option<String> {
-        let bp = Path::new(self.get_remote_dir()).canonicalize();
-        match bp {
-            Ok(base_path) => {
-                if let Some(path_str) = base_path.to_str() {
-                    return Some(path_str.to_owned());
-                } else {
-                    error!("base_path to_str failed: {:?}", base_path);
-                }
-            }
-            Err(err) => {
-                error!("load_dir resolve path failed: {:?}", err);
-            }
-        }
-        None
-    }
-    /// for test purpose.
-    #[allow(dead_code)]
-    pub fn new(
-        remote_dir: impl AsRef<str>,
-        local_dir: impl AsRef<str>,
-        includes: Vec<impl AsRef<str>>,
-        excludes: Vec<impl AsRef<str>>,
-    ) -> Self {
-        let mut o = Self {
-            remote_dir: remote_dir.as_ref().to_string(),
-            local_dir: local_dir.as_ref().to_string(),
-            includes: includes.iter().map(|s| s.as_ref().to_string()).collect(),
-            excludes: excludes.iter().map(|s| s.as_ref().to_string()).collect(),
-            ..Directory::default()
-        };
-        o.compile_patterns()
-            .expect("directory pattern should compile.");
-        o
-    }
-    /// if has includes get includes first.
-    /// if has excludes exclude files.
-    pub fn match_path(&self, path: PathBuf) -> Option<PathBuf> {
-        let has_includes = self.includes_patterns.is_some();
-        let keep_file = if has_includes {
-            self.includes_patterns
-                .as_ref()
-                .unwrap()
-                .iter()
-                .any(|ptn| ptn.matches_path(&path))
-        } else {
-            true
-        };
-
-        if !keep_file {
-            return None;
-        }
-
-        let has_exlucdes = self.excludes_patterns.is_some();
-
-        let keep_file = if has_exlucdes {
-            !self
-                .excludes_patterns
-                .as_ref()
-                .unwrap()
-                .iter()
-                .any(|p| p.matches_path(&path))
-        } else {
-            true
-        };
-
-        if keep_file {
-            Some(path)
-        } else {
-            None
-        }
-    }
-    /// When includes is empyt, includes_patterns will be None, excludes is the same.
-    pub fn compile_patterns(&mut self) -> Result<(), failure::Error> {
-        if self.includes_patterns.is_none() && !self.includes.is_empty() {
-            self.includes_patterns.replace(
-                self.includes
-                    .iter()
-                    .map(|s| Pattern::new(s).unwrap())
-                    .collect(),
-            );
-        }
-
-        if self.excludes_patterns.is_none() && !self.excludes.is_empty() {
-            self.excludes_patterns.replace(
-                self.excludes
-                    .iter()
-                    .map(|s| Pattern::new(s).unwrap())
-                    .collect(),
-            );
-        }
-        Ok(())
-    }
-}
-
-#[derive(Builder, Deserialize, Serialize, Debug)]
-#[builder(setter(into))]
-pub struct PruneStrategy {
-    #[builder(default = "1")]
-    pub yearly: u8,
-    #[builder(default = "1")]
-    pub monthly: u8,
-    #[builder(default = "0")]
-    pub weekly: u8,
-    #[builder(default = "1")]
-    pub daily: u8,
-    #[builder(default = "1")]
-    pub hourly: u8,
-    #[builder(default = "1")]
-    pub minutely: u8,
 }
 
 #[derive(Deserialize, Debug, Serialize)]
@@ -357,60 +215,46 @@ where
     fn current_tar_file(&self) -> PathBuf {
         self.tar_dir.join(format!(
             "{}{}",
-            self.server_yml.archive_prefix,
-            self.server_yml.archive_postfix,
+            self.server_yml.archive_prefix, self.server_yml.archive_postfix,
         ))
     }
 
-    // fn get_archive_writer_file(&self) -> Result<impl io::Write, failure::Error> {
-    //     let cur = self.current_tar_file();
-    //     let f = fs::OpenOptions::new().append(true).open(cur)?;
-    //     Ok(f)
-    // }
+    pub fn tar_local(&self) -> Result<(), failure::Error> {
+        let total_size = self.count_local_dirs_size();
+        if let Some((pp, _pb)) = self.pb.as_ref() {
+            let style = ProgressStyle::default_bar().template("{spinner} {decimal_bytes}/{decimal_total_bytes}  {percent}% {wide_msg}").progress_chars("#-");
+            pp.set_style(style);
+            pp.set_length(total_size);
+        }
+        let cur = self.current_tar_file();
+        trace!("open file to write archive: {:?}", cur);
 
+        let writer_c = ||fs::OpenOptions::new().create(true).truncate(true).write(true).open(cur.as_path());
 
-    // fn get_archive_writer_bzip2(&self) -> Result<impl io::Write, failure::Error> {
-    //     let cur = self.current_tar_file();
-    //     trace!("got next file: {:?}", cur);
-    //     let out = fs::OpenOptions::new().append(true).open(cur)?;
-    //     Ok(BzEncoder::new(out, Compression::Best))
-    // }
-
-    /// use dyn trait.
-    #[allow(dead_code)]
-    fn get_archive_writer(
-        &self,
-        tar_dir: impl AsRef<Path>,
-    ) -> Result<Box<dyn io::Write>, failure::Error> {
-        let next_fn = rolling_files::get_next_file_name(
-            tar_dir.as_ref(),
-            &self.server_yml.archive_prefix,
-            &self.server_yml.archive_postfix,
-        );
-        let file: Box<dyn io::Write> = if let Some(ref sm) = self.server_yml.compress_archive {
+        let writer: Box<dyn io::Write> = if let Some(ref sm) = self.server_yml.compress_archive {
             match sm {
                 CompressionImpl::Bzip2 => {
-                    let out = fs::File::create(next_fn)?;
-                    Box::new(BzEncoder::new(out, Compression::Best))
+                    Box::new(BzEncoder::new(writer_c()?, Compression::Best))
                 }
             }
         } else {
-            Box::new(fs::File::create(next_fn)?)
+            Box::new(writer_c()?)
         };
-        Ok(file)
-    }
-
-    pub fn tar_local(&self) -> Result<(), failure::Error> {
-        let cur = self.current_tar_file();
-        let writer = fs::OpenOptions::new().append(true).open(cur)?;
 
         let mut archive = Builder::new(writer);
 
         for dir in self.server_yml.directories.iter() {
+            let len = dir.count_total_size();
             let d_path = Path::new(&dir.local_dir);
             if let Some(d_path_name) = d_path.file_name() {
                 if d_path.exists() {
+                    if let Some((pp, _pb)) = self.pb.as_ref() {
+                        pp.set_message(format!("processing directory: {:?}", d_path_name).as_str());
+                    }
                     archive.append_dir_all(d_path_name, d_path)?;
+                    if let Some((pp, _pb)) = self.pb.as_ref() {
+                        pp.inc(len);
+                    }
                 } else {
                     warn!("unexist directory: {:?}", d_path);
                 }
@@ -419,7 +263,9 @@ where
             }
         }
         archive.finish()?;
-
+        let nf = self.next_tar_file();
+        trace!("move fie to {:?}", nf);
+        fs::rename(cur, nf)?;
         Ok(())
     }
 
@@ -839,6 +685,10 @@ where
         Ok(result)
     }
 
+    pub fn count_local_dirs_size(&self) -> u64 {
+        self.server_yml.directories.iter().map(|d|d.count_total_size()).sum()
+    }
+
     pub fn sync_dirs(&mut self) -> Result<Option<SyncDirReport>, failure::Error> {
         let b = self.app_conf.is_skip_cron()
             || if let Some(si) = self
@@ -872,7 +722,6 @@ where
             self.connect()?;
             let rs = self.start_sync_working_file_list()?;
             self.remove_working_file_list_file();
-            self.pb_finish();
             Ok(Some(SyncDirReport::new(start.elapsed(), rs)))
         } else {
             Ok(None)
@@ -922,7 +771,6 @@ pub fn load_server_from_yml<M, D>(
     app_conf: &AppConf<M, D>,
     name: impl AsRef<str>,
     buf_len: Option<usize>,
-    multi_bar: Option<SharedMpb>,
 ) -> Result<Server<M, D>, failure::Error>
 where
     M: r2d2::ManageConnection,
@@ -965,6 +813,8 @@ where
     if !working_dir.exists() {
         fs::create_dir_all(&working_dir)?;
     }
+
+    let multi_bar = app_conf.progress_bar.clone();
 
     let mut server = Server {
         server_yml,
@@ -1052,9 +902,10 @@ mod tests {
     use crate::log_util;
     use bzip2::write::{BzDecoder, BzEncoder};
     use bzip2::Compression;
+    use glob::Pattern;
     use indicatif::MultiProgress;
     use std::fs;
-    use std::io::{self, Read};
+    use std::io::{self, Read, Write};
     use std::sync::Arc;
     use std::thread;
     use std::time::Duration;
@@ -1155,6 +1006,69 @@ mod tests {
             10000,
             "len should equal to file before compress."
         );
+
+        Ok(())
+    }
+
+    fn assert_zip_content(zip_file: impl AsRef<Path>, r: Vec<&str>) -> Result<(), failure::Error> {
+        let zf = fs::OpenOptions::new().read(true).open(zip_file)?;
+        let mut zip = zip::ZipArchive::new(zf)?;
+        assert_eq!(zip.len(), 2);
+        let mut v = Vec::new();
+
+        for i in 0..zip.len() {
+            let mut file = zip.by_index(i).unwrap();
+            eprintln!("{}", file.name());
+            let mut content = String::new();
+            file.read_to_string(&mut content)?;
+            v.push(content);
+        }
+        v.sort();
+        assert_eq!(v, r);
+        Ok(())
+    }
+
+    #[test]
+    fn t_zip() -> Result<(), failure::Error> {
+        log();
+        let test_dir = tutil::create_a_dir_and_a_file_with_content("a", "cc")?;
+        test_dir.make_a_file_with_content("b", "cc1")?;
+
+        let _zip_dir = tutil::TestDir::new();
+        let zip_file = _zip_dir.tmp_dir_path().join("cc.zip");
+        {
+            let zf = fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .open(zip_file.as_path())?;
+            assert!(
+                zip_file.as_path().exists(),
+                "zip file should have been created."
+            );
+            let mut zip = zip::ZipWriter::new(zf);
+            let options = zip::write::FileOptions::default()
+                .compression_method(zip::CompressionMethod::Stored);
+            zip.start_file_from_path(test_dir.get_file_path("a").as_path(), options)?;
+            zip.write(b"hello")?;
+            zip.start_file_from_path(test_dir.get_file_path("b").as_path(), options)?;
+            zip.write(b"world")?;
+            zip.finish()?;
+        }
+        assert_zip_content(zip_file.as_path(), vec!["hello", "world"])?;
+        {
+            let zf = fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .open(zip_file.as_path())?;
+            let mut zip = zip::ZipWriter::new(zf);
+            let options = zip::write::FileOptions::default()
+                .compression_method(zip::CompressionMethod::Stored);
+            zip.start_file_from_path(test_dir.get_file_path("a").as_path(), options)?;
+            zip.write(b"hello1")?;
+            zip.finish()?;
+        }
+
+        assert_zip_content(zip_file.as_path(), vec!["hello1", "world"])?;
 
         Ok(())
     }

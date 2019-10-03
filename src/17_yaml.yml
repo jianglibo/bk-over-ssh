@@ -59,6 +59,10 @@ args:
         help: don't use db.
         long: no-db
         required: false
+    - no-pb:
+        help: don't display progress bar.
+        long: no-pb
+        required: false
 
     # - flag:
     #     help: demo flag argument
@@ -247,9 +251,6 @@ subcommands:
             - server-yml:
                 required: false
                 index: 1
-            - no-pb:
-                long: no-pb
-                required: false
             - skip-sha1:
                 long: skip-sha1
                 required: false

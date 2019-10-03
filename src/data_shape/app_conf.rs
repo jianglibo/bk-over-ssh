@@ -1,12 +1,14 @@
 use crate::data_shape::{load_server_from_yml, Server};
 use crate::db_accesses::DbAccess;
 use crate::ioutil::SharedMpb;
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use log::{trace, warn};
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::thread::{self, JoinHandle};
 use std::{fs, io::Read, io::Write};
 
 pub const CONF_FILE_NAME: &str = "bk_over_ssh.yml";
@@ -104,13 +106,17 @@ where
     lock_file: Option<fs::File>,
     skip_cron: bool,
     skip_sha1: bool,
+    #[serde(skip)]
+    pub progress_bar: Option<Arc<MultiProgress>>,
+    #[serde(skip)]
+    progress_bar_join_thread: Option<JoinHandle<()>>,
 }
 
 pub fn demo_app_conf<M, D>(data_dir: &str) -> AppConf<M, D>
 where
     M: r2d2::ManageConnection,
     D: DbAccess<M>,
-{   
+{
     AppConf {
         inner: AppConfYml::default(),
         config_file_path: Path::new("abc").to_path_buf(),
@@ -122,6 +128,8 @@ where
         lock_file: None,
         skip_cron: false,
         skip_sha1: true,
+        progress_bar: None,
+        progress_bar_join_thread: None,
     }
 }
 
@@ -133,6 +141,10 @@ where
     pub fn set_db_access(&mut self, db_access: D) {
         self.db_access.replace(db_access);
     }
+
+
+
+
 
     pub fn get_sqlite_db_file(&self) -> PathBuf {
         self.data_dir_full_path.join("db.db")
@@ -209,6 +221,8 @@ where
                             lock_file: None,
                             skip_cron: false,
                             skip_sha1: true,
+                            progress_bar: None,
+                            progress_bar_join_thread: None,
                         };
                         Ok(Some(app_conf))
                     }
@@ -278,9 +292,8 @@ where
         &self,
         yml_file_name: impl AsRef<str>,
         buf_len: Option<usize>,
-        multi_bar: Option<SharedMpb>,
     ) -> Result<Server<M, D>, failure::Error> {
-        let server = load_server_from_yml(&self, yml_file_name.as_ref(), buf_len, multi_bar)?;
+        let server = load_server_from_yml(&self, yml_file_name.as_ref(), buf_len)?;
         eprintln!(
             "load server yml from: {}",
             server
@@ -291,11 +304,7 @@ where
         Ok(server)
     }
 
-    pub fn load_all_server_yml(
-        &self,
-        buf_len: Option<usize>,
-        multi_bar: Option<SharedMpb>,
-    ) -> Vec<Server<M, D>> {
+    pub fn load_all_server_yml(&self, buf_len: Option<usize>) -> Vec<Server<M, D>> {
         if let Ok(rd) = self.servers_dir.read_dir() {
             rd.filter_map(|ery| match ery {
                 Err(err) => {
@@ -311,7 +320,7 @@ where
                 }
                 Ok(astr) => Some(astr),
             })
-            .map(|astr| self.load_server_yml(astr, buf_len, multi_bar.as_ref().map(Arc::clone)))
+            .map(|astr| self.load_server_yml(astr, buf_len))
             .filter_map(|rr| match rr {
                 Err(err) => {
                     warn!("load_server_yml failed: {:?}", err);
