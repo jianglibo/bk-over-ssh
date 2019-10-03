@@ -1159,12 +1159,13 @@ mod tests {
         Ok(())
     }
 
+    /// you cannot change a tar file.
     #[test]
     fn t_tar() -> Result<(), failure::Error> {
         use tar::{Archive, Builder};
         log();
         let test_dir = tutil::create_a_dir_and_a_file_with_content("a", "cc")?;
-        test_dir.make_a_file_with_content("b", "cc")?;
+        test_dir.make_a_file_with_content("b", "cc1")?;
 
         let tar_dir = tutil::TestDir::new();
         let tar_file_path = tar_dir.tmp_dir_path().join("aa.tar");
@@ -1189,7 +1190,7 @@ mod tests {
                 .append(true)
                 .open(&tar_file_path)?;
             let mut a = Builder::new(tar_file);
-            let p = test_dir.get_file_path("a");
+            let p = test_dir.get_file_path("b");
             info!("file path: {:?}", p);
             a.append_file("xx.xx", &mut fs::File::open(&p)?)?;
             a.finish()?;
@@ -1219,6 +1220,7 @@ mod tests {
             let mut a = Archive::new(file);
             for et in a.entries()? {
                 let mut et = et.unwrap();
+                eprintln!("all et: {:?}", et.header().path().unwrap());
                 et.unpack_in(tar_dir.tmp_dir_path())?;
             }
 
@@ -1229,7 +1231,7 @@ mod tests {
                 let mut f = fs::OpenOptions::new().read(true).open(p.path())?;
                 let mut content = String::new();
                 f.read_to_string(&mut content)?;
-                assert_eq!(content, "cc");
+                assert_eq!(content, "cc1");
             }
         }
 
