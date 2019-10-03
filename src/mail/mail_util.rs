@@ -1,5 +1,4 @@
 use lettre::smtp::authentication::{Credentials, Mechanism};
-use lettre::smtp::extension::ClientId;
 use lettre::smtp::ConnectionReuseParameters;
 use lettre::{SmtpClient, Transport};
 use lettre_email::{mime::TEXT_PLAIN, Email};

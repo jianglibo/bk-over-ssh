@@ -124,18 +124,17 @@ impl Directory {
             .filter(|d| d.file_type().is_file())
             .filter_map(|d| {
                 let meta = d.metadata();
-                if meta.is_err() {
-                    None
+                if let Ok(meta) = meta {
+                    Some(meta.len())
                 } else {
-                    Some(meta.unwrap().len())
+                    None
                 }
-            }).sum()
+            })
+            .sum()
     }
 
     #[allow(dead_code)]
-    pub fn list_files_recursive(
-        &self,
-    ) -> impl Iterator<Item = (u64, String)> {
+    pub fn list_files_recursive(&self) -> impl Iterator<Item = (u64, String)> {
         WalkDir::new(Path::new(self.local_dir.as_str()))
             .follow_links(false)
             .into_iter()
@@ -144,12 +143,11 @@ impl Directory {
             .filter_map(|d| {
                 let meta = d.metadata();
                 let file_name = d.file_name().to_str().unwrap_or_else(|| "").to_string();
-                if meta.is_err() {
-                    None
+                if let Ok(meta) = meta {
+                    Some((meta.len(), file_name))
                 } else {
-                    Some((meta.unwrap().len(), file_name))
+                    None
                 }
             })
-            .into_iter()
     }
 }

@@ -1,7 +1,7 @@
 use super::{
     load_remote_item, load_remote_item_to_sqlite, rolling_files, string_path, AppConf, AuthMethod,
-    Directory, FileItem, FileItemProcessResult, FileItemProcessResultStats, PruneStrategy,
-    RemoteFileItem, ScheduleItem, SyncType,
+    CountWriter, Directory, FileItem, FileItemProcessResult, FileItemProcessResultStats,
+    PruneStrategy, RemoteFileItem, ScheduleItem, SyncType,
 };
 use crate::actions::{copy_a_file_item, SyncDirReport};
 use crate::db_accesses::{scheduler_util, DbAccess};
@@ -91,9 +91,12 @@ where
     }
 }
 
-unsafe impl<'sv, M, D> Sync for Server<'sv, M, D> where
+unsafe impl<'sv, M, D> Sync for Server<'sv, M, D>
+where
     M: r2d2::ManageConnection,
-    D: DbAccess<M>, {}
+    D: DbAccess<M>,
+{
+}
 
 impl<'sv, M, D> Server<'sv, M, D>
 where
@@ -237,7 +240,9 @@ where
         let total_size = self.count_local_dirs_size();
         if let Some((pp, _pb)) = self.pb.as_ref() {
             let style = ProgressStyle::default_bar()
-                .template("{spinner} {decimal_bytes}/{decimal_total_bytes}  {percent}% {wide_msg}")
+                .template(
+                    "{spinner} {decimal_bytes:>8}/{decimal_total_bytes:8}  {percent:>4}% {wide_msg}",
+                )
                 .progress_chars("#-");
             pp.set_style(style);
             pp.enable_steady_tick(200);
@@ -254,12 +259,23 @@ where
                 .open(cur.as_path())
         };
 
+        let cc = |num| {
+            if let Some((pp, _pb)) = self.pb.as_ref() {
+                pp.inc(num);
+            }
+        };
+
         let writer: Box<dyn io::Write> = if let Some(ref sm) = self.server_yml.compress_archive {
             match sm {
-                CompressionImpl::Bzip2 => Box::new(BzEncoder::new(writer_c()?, Compression::Best)),
+                CompressionImpl::Bzip2 => {
+                    let w = BzEncoder::new(writer_c()?, Compression::Best);
+                    let w = CountWriter::new(w, cc);
+                    Box::new(w)
+                }
             }
         } else {
-            Box::new(writer_c()?)
+            let w = CountWriter::new(writer_c()?, cc);
+            Box::new(w)
         };
 
         let mut archive = Builder::new(writer);
@@ -270,7 +286,7 @@ where
             if let Some(d_path_name) = d_path.file_name() {
                 if d_path.exists() {
                     if let Some((pp, _pb)) = self.pb.as_ref() {
-                        pp.set_message(format!("processing directory: {:?}", d_path_name).as_str());
+                        pp.set_message(format!("[{}] processing directory: {:?}", self.get_host(), d_path_name).as_str());
                     }
                     archive.append_dir_all(d_path_name, d_path)?;
                     if let Some((pp, _pb)) = self.pb.as_ref() {
@@ -617,7 +633,12 @@ where
                                         &sftp,
                                         local_item,
                                         &mut buff,
-                                        self.pb.as_ref(),
+                                        |num| {
+                                            if let Some((_pp, pb_item)) = self.pb.as_ref() {
+                                                pb_item.inc(num);
+                                            }
+                                        }
+                                        
                                     )
                                 } else {
                                     skiped = true;
@@ -804,7 +825,7 @@ where
             server_yml_path
         );
     } else {
-        if !name.contains(std::path::MAIN_SEPARATOR) {
+        if !(name.contains('/') || name.contains('\\')) {
             server_yml_path = app_conf.servers_dir.as_path().join(name);
         }
         if !server_yml_path.exists() {

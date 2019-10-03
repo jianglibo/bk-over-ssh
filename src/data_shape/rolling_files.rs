@@ -43,6 +43,7 @@ impl FileCopies {
     }
 }
 
+#[allow(dead_code)]
 enum GroupPeriod {
     Yearly,
     Monthly,

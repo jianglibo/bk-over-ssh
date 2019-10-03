@@ -287,6 +287,7 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
         Ok(())
     }
 
+    #[allow(clippy::let_and_return)]
     fn find_next_execute(
         &self,
         server_yml_path: impl AsRef<str>,

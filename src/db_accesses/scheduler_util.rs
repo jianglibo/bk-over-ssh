@@ -29,6 +29,7 @@ fn upcomming(expression: impl AsRef<str>) -> DateTime<Utc> {
 /// Command: command to run as cron job.
 
 #[allow(dead_code)]
+#[allow(clippy::let_and_return)]
 pub fn need_execute<M, D>(
     db_access: Option<&D>,
     server_yml_path: impl AsRef<str>,

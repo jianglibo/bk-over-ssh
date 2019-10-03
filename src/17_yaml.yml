@@ -166,6 +166,7 @@ subcommands:
         about: copy a executable file to server, the directory to put is described in the server yml file.
         args:
             - server-yml:
+                help: the configuration file.
                 long: server-yml
                 required: true
                 index: 1

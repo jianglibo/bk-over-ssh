@@ -2,9 +2,11 @@
 extern crate derive_builder;
 #[macro_use] extern crate failure;
 
+#[allow(unused_imports)]
 #[macro_use]
 extern crate clap;
 
+#[allow(unused_imports)]
 #[macro_use]
 extern crate lazy_static;
 #[macro_use] extern crate itertools;

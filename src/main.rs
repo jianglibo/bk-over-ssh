@@ -13,7 +13,7 @@ extern crate time;
 
 #[macro_use]
 extern crate itertools;
-
+#[allow(unused_imports)]
 #[macro_use]
 extern crate lazy_static;
 
@@ -476,7 +476,7 @@ where
                 }
             }).count();
 
-            // servers.for_each(|sv| sv.pb_finish());
+            servers.iter().for_each(|sv| sv.pb_finish());
             wait_progresss_bar_finish(t);
         }
         ("list-remote-files", Some(sub_matches)) => {
