@@ -27,7 +27,6 @@ pub fn copy_stream_to_file_with_cb<T: AsRef<Path>, F: FnMut(u64) -> ()>(
     buf: &mut [u8],
     mut counter: F,
 ) -> Result<u64, failure::Error> {
-    // let u8_buf = &mut vec![0; buf_len];
     let mut length = 0_u64;
     let path = to_file.as_ref();
     trace!("start copy_stream_to_file_with_cb: {:?}", path);
@@ -676,5 +675,13 @@ mod tests {
         });
 
         println!("vec: {:?}", start.elapsed().as_millis())
+    }
+
+    #[test]
+    pub fn t_window_path() {
+        let ps = "D:\\abc";
+        let p = Path::new(ps);
+
+        eprintln!("{:?}", p);
     }
 }

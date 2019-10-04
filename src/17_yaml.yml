@@ -260,6 +260,18 @@ subcommands:
                 long: rsync-window
                 takes_value: true
                 required: false
+    - confirm-remote-sync:
+        about: confirm the last sync-dirs action, execute confirm-local-sync on remote server.
+        args:
+            - server-yml:
+                required: false
+                index: 1
+    - confirm-local-sync:
+        about: confirm the last sync-dirs action.
+        args:
+            - server-yml:
+                required: false
+                index: 1
     - rsync:
         about: sync relative functions.
         subcommands:

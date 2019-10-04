@@ -169,10 +169,46 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
         Ok(())
     }
 
+    fn iterate_files_by_directory_changed_or_unconfirmed<F>(&self, mut processor: F) -> Result<(), failure::Error>
+    where
+        F: FnMut((Option<RemoteFileItemInDb>, Option<String>)) -> () {
+        let conn = self.get_pool().get().unwrap();
+        let mut stmt = conn.prepare("SELECT id, path FROM directory")?;
+        let dirs = stmt.query_map(NO_PARAMS, |row| Ok((row.get(0)?, row.get(1)?)))?;
+
+        for dir in dirs {
+            let dir = dir?;
+            let dir_id: i64 = dir.0;
+            let path = dir.1;
+            processor((None, Some(path)));
+            let mut stmt = conn.prepare("SELECT id, path, sha1, len, time_modified, time_created, dir_id, changed FROM remote_file_item where dir_id = :dir_id and (changed = :changed or confirmed = :confirmed)")?;
+            let files = stmt.query_map_named(
+                named_params! {
+                    ":dir_id": dir_id,
+                    ":changed": true,
+                    ":confirmed": false,
+                },
+                map_to_file_item,
+            )?;
+
+            files
+                .filter_map(|fi| fi.ok())
+                .for_each(|fi| processor((Some(fi), None)));
+        }
+        Ok(())
+        }
+
     fn count_directory(&self) -> Result<u64, failure::Error> {
         let conn = self.0.get().unwrap();
         let mut stmt = conn.prepare("SELECT count(id) FROM directory")?;
         let i: i64 = stmt.query_row(NO_PARAMS, |row| row.get(0))?;
+        Ok(i as u64)
+    }
+
+    fn confirm_all(&self) -> Result<u64, failure::Error> {
+        let conn = self.0.get().unwrap();
+        let mut stmt = conn.prepare("UPDATE remote_file_item SET confirmed = 1")?;
+        let i = stmt.execute(NO_PARAMS)?;
         Ok(i as u64)
     }
 
@@ -203,7 +239,7 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
         if let Ok(rfi_db) = self.find_remote_file_item(rfi.dir_id, rfi.path.as_str()) {
             if rfi_db.len != rfi.len || rfi_db.sha1 != rfi.sha1 || rfi_db.modified != rfi.modified {
                 if !batch {
-                    let sql_mark_changed = "UPDATE remote_file_item SET len = :len, sha1 = :sha1, time_modified = :modified, changed = :changed where id = :id";
+                    let sql_mark_changed = "UPDATE remote_file_item SET len = :len, sha1 = :sha1, time_modified = :modified, changed = :changed, confirmed = :confirmed where id = :id";
                     let mut stmt_mark_changed = conn
                         .prepare(sql_mark_changed)
                         .expect("prepare sql_mark_changed failed.");
@@ -213,6 +249,7 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
                         ":modified": rfi.modified,
                         ":id": rfi_db.id,
                         ":changed": true,
+                        ":confirmed": false,
                     }) {
                         error!("update remote file item failed: {:?}", err);
                     } else {
@@ -222,17 +259,18 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
                 rfi.id = rfi_db.id;
                 rfi.changed = true;
                 return Some((rfi, DbAction::Update));
-            } else if rfi_db.changed {
+            } else if rfi_db.changed { // at the time of invoking, if no property of item was changed, set changed to false.
                 if !batch {
                     // make changed unchanged.
                     let sql_unmark_changed =
-                        "UPDATE remote_file_item SET changed = :changed where id = :id";
+                        "UPDATE remote_file_item SET changed = :changed, confirmed = :confirmed where id = :id";
                     let mut stmt_unmark = conn
                         .prepare(sql_unmark_changed)
                         .expect("prepare sql_unmark_changed failed");
                     if let Err(err) = stmt_unmark.execute_named(named_params! {
                         ":id": rfi_db.id,
                         ":changed": false,
+                        ":confirmed": false,
                     }) {
                         error!("update remote file item failed: {:?}", err);
                     } else {
@@ -242,9 +280,11 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
                 rfi.id = rfi_db.id;
                 rfi.changed = false;
                 return Some((rfi, DbAction::UpdateChangedField));
+            } else {
+                // unchanged items.
             }
         } else if !batch {
-            let sql_insert = "INSERT INTO remote_file_item (path, sha1, len, time_modified, time_created, dir_id, changed) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)";
+            let sql_insert = "INSERT INTO remote_file_item (path, sha1, len, time_modified, time_created, dir_id, changed, confirmed) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)";
             let mut stmt_insert = conn
                 .prepare(sql_insert)
                 .expect("prepare sql_insert failed.");
@@ -255,7 +295,8 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
                 rfi.modified,
                 rfi.created,
                 rfi.dir_id,
-                rfi.changed
+                rfi.changed,
+                false,
             ]) {
                 Ok(count) => {
                     if count != 1 {
@@ -374,6 +415,7 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
                    time_modified   TEXT,
                    time_created    TEXT,
                    changed         BOOLEAN,
+                   confirmed       BOOLEAN,
                    dir_id          INTEGER NOT NULL,
                    FOREIGN KEY(dir_id) REFERENCES directory(id)
                    );

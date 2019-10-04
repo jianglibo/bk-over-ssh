@@ -479,6 +479,19 @@ where
             servers.iter().for_each(|sv| sv.pb_finish());
             wait_progresss_bar_finish(t);
         }
+        ("confirm-remote-sync", Some(sub_matches)) => {
+            let start = Instant::now();
+            let mut server =
+                app_conf.load_server_yml(sub_matches.value_of("server-yml").unwrap())?;
+            server.connect()?;
+            server.confirm_remote_sync()?;
+            eprintln!("time costs: {:?}", start.elapsed().as_secs());
+        }
+        ("confirm-local-sync", Some(sub_matches)) => {
+            let mut server =
+                app_conf.load_server_yml(sub_matches.value_of("server-yml").unwrap())?;
+            server.confirm_local_sync()?;
+        }
         ("list-remote-files", Some(sub_matches)) => {
             let start = Instant::now();
             let mut server =

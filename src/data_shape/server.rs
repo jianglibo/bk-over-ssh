@@ -3,7 +3,7 @@ use super::{
     CountWriter, Directory, FileItem, FileItemProcessResult, FileItemProcessResultStats,
     PruneStrategy, RemoteFileItem, ScheduleItem, SyncType,
 };
-use crate::actions::{copy_a_file_item, SyncDirReport};
+use crate::actions::{copy_a_file_item, SyncDirReport, channel_util};
 use crate::db_accesses::{scheduler_util, DbAccess};
 use crate::ioutil::SharedMpb;
 use bzip2::write::BzEncoder;
@@ -306,19 +306,7 @@ where
         fs::rename(cur, nf)?;
         Ok(())
     }
-
-    // tar xjf(bzip2) or tar xzf(gzip).
-    // pub fn tar_local(&self) -> Result<(), failure::Error> {
-    //     // if let Some(ref zm) = self.server_yml.compress_archive {
-    //     //     match zm {
-    //     //         CompressionImpl::Bzip2 => self.do_tar_local(self.get_archive_writer_bzip2()?)?,
-    //     //     };
-    //     // } else {
-    //     //     self.do_tar_local(self.get_archive_writer_file()?)?;
-    //     // }
-    //     Ok(())
-    // }
-
+    
     pub fn prune_backups(&self) -> Result<(), failure::Error> {
         rolling_files::do_prune_dir(
             &self.server_yml.prune_strategy,
@@ -489,7 +477,30 @@ where
         Ok(())
     }
 
-    pub fn list_remote_file_exec(&mut self, no_db: bool) -> Result<PathBuf, failure::Error> {
+    pub fn confirm_remote_sync(&self) -> Result<(), failure::Error> {
+        let mut channel: ssh2::Channel = self.create_channel()?;
+        let cmd = format!(
+            "{} confirm-local-sync {}",
+            self.server_yml.remote_exec,
+            self.server_yml.remote_server_yml,
+        );
+        info!("invoking remote command: {:?}", cmd);
+        channel.exec(cmd.as_str())?;
+        channel_util::get_stdout_eprintln_stderr(&mut channel, true);
+        Ok(())
+    }
+
+    pub fn confirm_local_sync(&self) -> Result<(), failure::Error> {
+        let confirm_num = if let Some(db_access) = self.db_access.as_ref() {
+            db_access.confirm_all()?
+        } else {
+            0
+        };
+        println!("{}", confirm_num);
+        Ok(())
+    }
+
+    pub fn list_remote_file_exec(&self, no_db: bool) -> Result<PathBuf, failure::Error> {
         let mut channel: ssh2::Channel = self.create_channel()?;
         let cmd = format!(
             "{} {} {} list-local-files {}",
@@ -734,8 +745,8 @@ where
             .sum()
     }
 
-    pub fn sync_dirs(&self) -> Result<Option<SyncDirReport>, failure::Error> {
-        let b = self.app_conf.is_skip_cron()
+    fn check_skip_cron(&self) -> bool {
+        self.app_conf.is_skip_cron()
             || if let Some(si) = self
                 .server_yml
                 .schedules
@@ -760,13 +771,16 @@ where
                 }
             } else {
                 true
-            };
+            }
+        
+    }
 
-        if b {
+    pub fn sync_dirs(&self) -> Result<Option<SyncDirReport>, failure::Error> {
+        if self.check_skip_cron() {
             let start = Instant::now();
-            // self.connect()?;
             let rs = self.start_sync_working_file_list()?;
             self.remove_working_file_list_file();
+            self.confirm_remote_sync()?;
             Ok(Some(SyncDirReport::new(start.elapsed(), rs)))
         } else {
             Ok(None)
@@ -785,7 +799,7 @@ where
                 self.db_access
                     .as_ref()
                     .unwrap()
-                    .iterate_files_by_directory(|fidb_or_path| match fidb_or_path {
+                    .iterate_files_by_directory_changed_or_unconfirmed(|fidb_or_path| match fidb_or_path {
                         (Some(fidb), None) => {
                             if fidb.changed {
                                 match serde_json::to_string(&RemoteFileItem::from(fidb)) {
@@ -920,6 +934,11 @@ where
                 .to_str()
                 .expect("local_dir to_str should success.")
                 .to_string();
+
+            if d.local_dir.starts_with(string_path::VERBATIM_PREFIX) {
+                trace!("local dir start with VERBATIM_PREFIX, stripping it.");
+                d.local_dir = d.local_dir.split_at(4).1.to_string();
+            }
             if ld_path.exists() {
                 fs::create_dir_all(ld_path)?;
             }

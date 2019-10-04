@@ -1,8 +1,8 @@
 use std::fmt;
 
-const VERBATIM_PREFIX: &str = r#"\\?\"#;
+pub const VERBATIM_PREFIX: &str = r#"\\?\"#;
 
-fn is_windows_path_start(s: &str) -> bool {
+pub fn is_windows_path_start(s: &str) -> bool {
     let mut chars = s.chars();
     if let (Some(c0), Some(c1)) = (chars.next(), chars.next()) {
         c0.is_ascii_alphabetic() && c1 == ':'

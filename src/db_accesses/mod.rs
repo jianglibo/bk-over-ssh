@@ -87,7 +87,7 @@ impl RemoteFileItemInDb {
 
     pub fn to_insert_sql_string(&self) -> String {
         // path, sha1, len, time_modified, time_created, dir_id, changed
-        format!("INSERT INTO remote_file_item (path, {}len, {}{}dir_id, changed) VALUES ('{}', {}{}, {}{}{}, {});"
+        format!("INSERT INTO remote_file_item (path, {}len, {}{}dir_id, changed, confirmed) VALUES ('{}', {}{}, {}{}{}, {}, {});"
         , self.sha1.as_ref().map(|_|"sha1, ").unwrap_or("")
         , self.modified.map(|_|"time_modified, ").unwrap_or("")
         , self.created.map(|_|"time_created, ").unwrap_or("")
@@ -98,12 +98,13 @@ impl RemoteFileItemInDb {
         , self.created.map(|m|format!("'{}', ", m.to_rfc3339_opts(SecondsFormat::Nanos, true))).unwrap_or_else(|| "".to_string())
         , self.dir_id
         , 1
+        , 0
         )
     }
 
     pub fn to_update_sql_string(&self) -> String {
         format!(
-            "UPDATE remote_file_item SET len = {}, {}{}changed = 1 where id = {};",
+            "UPDATE remote_file_item SET len = {}, {}{}changed = 1, confirmed = 0 where id = {};",
             self.len,
             self.sha1
                 .as_ref()
@@ -121,7 +122,7 @@ impl RemoteFileItemInDb {
 
     pub fn to_update_changed_sql_string(&self) -> String {
         format!(
-            "UPDATE remote_file_item SET changed = {} where id = {};",
+            "UPDATE remote_file_item SET changed = {}, confirmed = 0 where id = {};",
             if self.changed { 1 } else { 0 },
             self.id
         )
@@ -163,6 +164,10 @@ where
     where
         F: FnMut((Option<RemoteFileItemInDb>, Option<String>)) -> ();
 
+    fn iterate_files_by_directory_changed_or_unconfirmed<F>(&self, processor: F) -> Result<(), failure::Error>
+    where
+        F: FnMut((Option<RemoteFileItemInDb>, Option<String>)) -> ();
+
     fn find_next_execute(
         &self,
         server_yml_path: impl AsRef<str>,
@@ -179,4 +184,6 @@ where
     fn count_next_execute(&self) -> Result<u64, failure::Error>;
 
     fn execute_batch(&self, sit: impl Iterator<Item = String>);
+
+    fn confirm_all(&self) -> Result<u64, failure::Error>;
 }
