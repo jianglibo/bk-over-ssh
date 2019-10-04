@@ -46,6 +46,7 @@ pub struct ServerYml {
     pub file_list_file: String,
     pub remote_server_yml: String,
     pub username: String,
+    pub password: String,
     pub rsync_valve: u64,
     pub directories: Vec<Directory>,
     pub role: ServerRole,
@@ -331,9 +332,8 @@ where
     pub fn is_connected(&self) -> bool {
         self.session.is_some()
     }
-    #[allow(dead_code)]
-    pub fn get_ssh_session(&mut self) -> &ssh2::Session {
-        self.connect().expect("ssh connection should be created.");
+
+    pub fn get_ssh_session(&self) -> &ssh2::Session {
         self.session.as_ref().expect("session should be created.")
     }
 
@@ -380,7 +380,7 @@ where
                     )?;
                 }
                 AuthMethod::Password => {
-                    bail!("password authentication not supported.");
+                    sess.userauth_password(&self.server_yml.username, &self.server_yml.password)?;
                 }
             }
             Ok(sess)
@@ -436,7 +436,10 @@ where
         }
         trace!("list-local-files output: {:?}", contents);
         contents.clear();
-        channel.stderr().read_to_string(&mut contents)?;
+
+        if let Err(err) = channel.stderr().read_to_string(&mut contents) {
+            eprintln!("read stderr failed: {:?}", err);
+        }
 
         trace!("list-local-files stderr: {:?}", contents);
         if !contents.is_empty() {
@@ -716,6 +719,7 @@ where
                     }
                     FileItemProcessResult::GetLocalPathFailed => accu.get_local_path_failed += 1,
                     FileItemProcessResult::SftpOpenFailed => accu.sftp_open_failed += 1,
+                    FileItemProcessResult::ScpOpenFailed => accu.scp_open_failed += 1,
                 };
                 accu
             });
@@ -1001,6 +1005,7 @@ mod tests {
         });
 
         server.multi_bar.replace(mb2);
+        server.connect()?;
         let stats = server.sync_dirs()?;
 
         info!("result {:?}", stats);
@@ -1265,5 +1270,18 @@ mod tests {
         assert_eq!(num, 7, "if exlude logs file there should 7 left.");
 
         Ok(())
+    }
+    
+    #[test]
+    fn t_main_password() {
+        // Connect to the local SSH server
+        let tcp = TcpStream::connect("127.0.0.1:22").unwrap();
+        let mut sess = ssh2::Session::new().unwrap();
+        sess.set_tcp_stream(tcp);
+        sess.handshake().unwrap();
+
+        sess.userauth_password("Administrator", "kass.")
+            .unwrap();
+        assert!(sess.authenticated());
     }
 }

@@ -26,6 +26,7 @@ pub enum FileItemProcessResult {
     Successed(u64, String, SyncType),
     GetLocalPathFailed,
     SftpOpenFailed,
+    ScpOpenFailed,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -41,6 +42,7 @@ pub struct FileItemProcessResultStats {
     pub successed: u64,
     pub get_local_path_failed: u64,
     pub sftp_open_failed: u64,
+    pub scp_open_failed: u64,
     pub read_line_failed: u64,
     pub bytes_transfered: u64,
 }

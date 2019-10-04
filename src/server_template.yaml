@@ -3,6 +3,7 @@ id_rsa_pub: /home/jianglibo/.ssh/id_rsa.pub
 host: 127.0.0.1
 port: 2222
 username: jianglibo
+password: ~
 role: pure_client
 auth_method: IdentityFile # Password, Agent, IdentityFile.
 remote_exec: /home/osboxes/ws/ssh-client-demo/target/debug/bk-over-ssh

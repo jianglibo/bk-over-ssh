@@ -1,8 +1,6 @@
-use crate::data_shape::{FileItem, FileItemProcessResult, Server, SyncType};
+use crate::data_shape::{FileItem, FileItemProcessResult, Server, SyncType, CountWriter};
 use crate::db_accesses::DbAccess;
 use crate::rustsync::{DeltaFileReader, DeltaReader, Signature};
-// use indicatif::HumanBytes;
-// use indicatif::ProgressBar;
 use log::*;
 use r2d2;
 use sha1::{Digest, Sha1};
@@ -197,6 +195,68 @@ pub fn visit_dirs(dir: &Path, cb: &dyn Fn(&fs::DirEntry)) -> io::Result<()> {
     Ok(())
 }
 
+pub fn copy_a_file_item_scp<'a, F: FnMut(u64) -> ()>(
+    session: &mut ssh2::Session,
+    local_file_path: String,
+    file_item: &FileItem<'a>,
+    buf: &mut [u8],
+    counter: F,
+) -> FileItemProcessResult {
+        match session.scp_recv(Path::new(file_item.get_remote_path().as_str())) {
+        Ok((mut file, stat)) => {
+            if let Some(_r_sha1) = file_item.get_remote_item().get_sha1() {
+                match copy_stream_to_file_return_sha1_with_cb(
+                    &mut file,
+                    &local_file_path,
+                    buf,
+                    counter,
+                ) {
+                    Ok((length, sha1)) => {
+                        if length != file_item.get_remote_item().get_len() {
+                            error!("length didn't match: {:?}", file_item);
+                            FileItemProcessResult::LengthNotMatch(local_file_path)
+                        } else if file_item.is_sha1_not_equal(&sha1) {
+                            error!("sha1 didn't match: {:?}, local sha1: {:?}", file_item, sha1);
+                            FileItemProcessResult::Sha1NotMatch(local_file_path)
+                        } else {
+                            FileItemProcessResult::Successed(
+                                length,
+                                local_file_path,
+                                SyncType::Sftp,
+                            )
+                        }
+                    }
+                    Err(err) => {
+                        error!("write_stream_to_file failed: {:?}", err);
+                        FileItemProcessResult::CopyFailed(local_file_path)
+                    }
+                }
+            } else {
+                match copy_stream_to_file_with_cb(&mut file, &local_file_path, buf, counter) {
+                    Ok(length) => {
+                        if length != file_item.get_remote_item().get_len() {
+                            FileItemProcessResult::LengthNotMatch(local_file_path)
+                        } else {
+                            FileItemProcessResult::Successed(
+                                length,
+                                local_file_path,
+                                SyncType::Sftp,
+                            )
+                        }
+                    }
+                    Err(err) => {
+                        error!("write_stream_to_file failed: {:?}", err);
+                        FileItemProcessResult::CopyFailed(local_file_path)
+                    }
+                }
+            }
+        }
+        Err(err) => {
+            error!("scp open failed: {:?}", err);
+            FileItemProcessResult::ScpOpenFailed
+        }
+    }
+}
 // https://stackoverflow.com/questions/32300132/why-cant-i-store-a-value-and-a-reference-to-that-value-in-the-same-struct
 
 pub fn copy_a_file_item_sftp<'a, F: FnMut(u64) -> ()>(
@@ -261,6 +321,72 @@ pub fn copy_a_file_item_sftp<'a, F: FnMut(u64) -> ()>(
         }
     }
 }
+pub fn copy_a_file_item_rsync_scp<'a, M, D>(
+    server: &Server<M, D>,
+    local_file_path: String,
+    file_item: &FileItem<'a>,
+) -> Result<FileItemProcessResult, failure::Error>
+where
+    M: r2d2::ManageConnection,
+    D: DbAccess<M>,
+{
+    let remote_path = file_item.get_remote_path();
+    trace!("start signature_a_file {}", &local_file_path);
+    let mut sig = Signature::signature_a_file(
+        &local_file_path,
+        Some(server.server_yml.rsync_window),
+        server.pb.is_some(),
+    )?;
+    let local_sig_file_path_str = format!("{}.sig", &local_file_path);
+    let local_sig_file_path = Path::new(local_sig_file_path_str.as_str());
+    sig.write_to_file(local_sig_file_path)?;
+    let len = local_sig_file_path.metadata()?.len();
+    let remote_sig_file_path = format!("{}.sig", &remote_path);
+    let sig_file = server.get_ssh_session().scp_send(Path::new(remote_sig_file_path.as_str()), 0o022, len, None)?;
+    let cw = CountWriter::new(sig_file, |_|{});
+    let delta_file_name = format!("{}.delta", &remote_path);
+    let cmd = format!(
+        "{} rsync delta-a-file --new-file {} --sig-file {} --out-file {}",
+        server.server_yml.remote_exec, &remote_path, &remote_sig_file_path, &delta_file_name,
+    );
+    trace!("about to invoke command: {:?}", cmd);
+    let mut channel: ssh2::Channel = server.create_channel()?;
+    channel.exec(cmd.as_str())?;
+    let mut ch_stderr = channel.stderr();
+    let mut chout = String::new();
+    ch_stderr.read_to_string(&mut chout)?;
+    if !chout.is_empty() {
+        trace!(
+            "after invoke delta command, there maybe err in channel: {:?}",
+            chout
+        );
+    }
+    channel.read_to_string(&mut chout)?;
+    trace!(
+        "delta-a-file output: {:?}, delta_file_name: {:?}",
+        chout,
+        delta_file_name
+    );
+    if let Ok((file, stat)) = server.get_ssh_session().scp_recv(Path::new(&delta_file_name)) {
+        let mut delta_file = DeltaFileReader::<ssh2::File>::read_delta_stream(file)?;
+        let restore_path = fs::OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(format!("{}.restore", local_file_path))?;
+        trace!("restore_path: {:?}", restore_path);
+        let old_file = fs::OpenOptions::new().read(true).open(&local_file_path)?;
+        delta_file.restore_seekable(restore_path, old_file)?;
+        update_local_file_from_restored(&local_file_path)?;
+        Ok(FileItemProcessResult::Successed(
+            0,
+            local_file_path,
+            SyncType::Rsync,
+        ))
+    } else {
+        bail!("scp open delta_file: {:?} failed.", delta_file_name);
+    }
+}
 
 pub fn copy_a_file_item_rsync<'a, M, D>(
     server: &Server<M, D>,
@@ -292,14 +418,18 @@ where
     channel.exec(cmd.as_str())?;
     let mut ch_stderr = channel.stderr();
     let mut chout = String::new();
-    ch_stderr.read_to_string(&mut chout)?;
+    if let Err(err) = ch_stderr.read_to_string(&mut chout) {
+        eprintln!("read stdout failed: {:?}", err);
+    }
     if !chout.is_empty() {
         trace!(
             "after invoke delta command, there maybe err in channel: {:?}",
             chout
         );
     }
-    channel.read_to_string(&mut chout)?;
+    if let Err(err) = channel.read_to_string(&mut chout) {
+        eprintln!("read channel failed: {:?}", err);
+    }
     trace!(
         "delta-a-file output: {:?}, delta_file_name: {:?}",
         chout,
@@ -458,7 +588,6 @@ mod tests {
     fn t_copy_a_file() -> Result<(), failure::Error> {
         log();
         let app_conf = tutil::load_demo_app_conf_sqlite(None);
-        // let mut server = load_server_yml();
         let mut server = tutil::load_demo_server_sqlite(&app_conf, None);
         server.connect()?;
         server.server_yml.rsync_valve = 4;
