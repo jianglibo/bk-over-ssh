@@ -21,6 +21,46 @@ pub enum DbAction {
 
 pub use sqlite_access::SqliteDbAccess;
 
+#[derive(Default, Debug, Clone)]
+pub struct CountItemParam {
+    changed: Option<bool>,
+    confirmed: Option<bool>,
+    is_and: u8,
+}
+
+impl CountItemParam {
+    pub fn get_changed(&self) -> Option<bool> {
+        self.changed
+    }
+
+    pub fn get_confirmed(&self) -> Option<bool> {
+        self.confirmed
+    }
+
+    pub fn is_and(&self) -> bool {
+        self.is_and == 1
+    }
+    pub fn changed(&mut self, changed: bool) -> Self {
+        self.changed = Some(changed);
+        self.clone()
+    }
+
+    pub fn confirmed(&mut self, confirmed: bool) -> Self {
+        self.confirmed = Some(confirmed);
+        self.clone()
+    }
+
+    pub fn and(&mut self) -> Self {
+        self.is_and = 1;
+        self.clone()
+    }
+    pub fn or(&mut self) -> Self {
+        self.is_and = 0;
+        self.clone()
+    }
+}
+
+
 #[derive(Debug, Default)]
 pub struct RemoteFileItemInDb {
     pub id: i64,
@@ -137,7 +177,7 @@ impl RemoteFileItemInDb {
     }
 }
 
-pub trait DbAccess<M>: Send + Sync + Clone
+pub trait DbAccess<M>: Clone + 'static
 where
     M: r2d2::ManageConnection,
 {
@@ -156,7 +196,7 @@ where
     fn create_database(&self) -> Result<(), failure::Error>;
     fn find_directory(&self, path: impl AsRef<str>) -> Result<i64, failure::Error>;
     fn count_directory(&self) -> Result<u64, failure::Error>;
-    fn count_remote_file_item(&self, changed: Option<bool>) -> Result<u64, failure::Error>;
+    fn count_remote_file_item(&self, cc: CountItemParam) -> Result<u64, failure::Error>;
     fn iterate_all_file_items<P>(&self, processor: P) -> (usize, usize)
     where
         P: Fn(RemoteFileItemInDb) -> ();
@@ -186,4 +226,18 @@ where
     fn execute_batch(&self, sit: impl Iterator<Item = String>);
 
     fn confirm_all(&self) -> Result<u64, failure::Error>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn t_count_item_param() {
+        let p = CountItemParam::default().changed(true).and().confirmed(false);
+
+        assert_eq!(p.get_changed(), Some(true));
+        assert_eq!(p.get_confirmed(), Some(false));
+    }
+
 }

@@ -102,6 +102,12 @@ impl RemoteFileItem {
     }
 }
 
+/// this function will walk over the directory, for every file checking it's metadata and compare to corepsonding item in the db.
+/// for new and changed items mark changed field to true.
+/// for unchanged items, if the status in db is changed chang to unchanged.
+/// So after invoking this method all changed item will be marked, at the same time, metadata of items were updated too, this means you cannot regenerate the same result if the task is interupted.
+/// To avoid this kind of situation, add a confirm field to the table. when the taks is done, we chang the confirm field to true.
+/// Now we get the previous result by select the unconfirmed items.
 pub fn load_remote_item_to_sqlite<M, D>(
     directory: &Directory,
     db_access: &D,

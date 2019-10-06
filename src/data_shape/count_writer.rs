@@ -1,20 +1,21 @@
 use std::io::{self, Write};
+use crate::data_shape::{Indicator};
 
-pub struct CountWriter<T, F> where T: Write, F: FnMut(u64) -> (), {
+pub struct CountWriter<'a, T> where T: Write {
     w: T,
-    c: F,
+    c: &'a Indicator,
 }
 
-impl<T, F> CountWriter<T, F> where T: Write, F: FnMut(u64) -> (), {
-    pub fn new(w: T, c: F) -> Self {
+impl<'a, T> CountWriter<'a, T> where T: Write {
+    pub fn new(w: T, c: &'a Indicator) -> Self {
         Self { w, c }
     }
 }
 
-impl<T, F> Write for CountWriter<T, F> where T: Write, F: FnMut(u64) -> (), {
+impl<'a, T> Write for CountWriter<'a, T> where T: Write {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let num = self.w.write(buf)?;
-        (self.c)(num as u64);
+        self.c.inc_pb(num as u64);
         Ok(num)
     }
 

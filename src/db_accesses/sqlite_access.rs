@@ -1,4 +1,4 @@
-use super::{DbAccess, DbAction, RemoteFileItemInDb};
+use super::{DbAccess, DbAction, RemoteFileItemInDb, CountItemParam};
 use chrono::{DateTime, Utc};
 use failure;
 use log::*;
@@ -212,20 +212,63 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
         Ok(i as u64)
     }
 
-    fn count_remote_file_item(&self, changed: Option<bool>) -> Result<u64, failure::Error> {
+    fn count_remote_file_item(&self, cc: CountItemParam) -> Result<u64, failure::Error> {
         let conn = self.0.get().unwrap();
-        let i: i64 = if let Some(b) = changed {
-            let mut stmt =
-                conn.prepare("SELECT count(id) FROM remote_file_item WHERE changed = :changed")?;
-            stmt.query_row_named(
-                named_params! {
-                    ":changed": b
+        let i: i64 = match cc {
+                CountItemParam {
+                    changed: None,
+                    confirmed: None,
+                    ..
+                } => {
+                    let mut stmt = conn.prepare("SELECT count(id) FROM remote_file_item")?;
+                    stmt.query_row(NO_PARAMS, |row| row.get(0))?
                 },
-                |row| row.get(0),
-            )?
-        } else {
-            let mut stmt = conn.prepare("SELECT count(id) FROM remote_file_item")?;
-            stmt.query_row(NO_PARAMS, |row| row.get(0))?
+                CountItemParam {
+                    changed: Some(changed),
+                    confirmed: None,
+                    ..
+                } => {
+                    let mut stmt =
+                        conn.prepare("SELECT count(id) FROM remote_file_item WHERE changed = :changed")?;
+                    stmt.query_row_named(
+                        named_params! {
+                            ":changed": changed,
+                        },
+                        |row| row.get(0),
+                    )?
+                },
+                CountItemParam {
+                    changed: Some(changed),
+                    confirmed: Some(confirmed),
+                    is_and,
+                } => {
+                    let mut stmt = if is_and == 1 {
+                        conn.prepare("SELECT count(id) FROM remote_file_item WHERE changed = :changed and confirmed = :confirmed")?
+                    } else {
+                        conn.prepare("SELECT count(id) FROM remote_file_item WHERE changed = :changed or confirmed = :confirmed")?
+                    };
+                    stmt.query_row_named(
+                        named_params! {
+                            ":changed": changed,
+                            ":confirmed": confirmed,
+                        },
+                        |row| row.get(0),
+                    )?                    
+                },
+                CountItemParam {
+                    changed: None,
+                    confirmed: Some(confirmed),
+                    ..
+                } => {
+                    let mut stmt =
+                        conn.prepare("SELECT count(id) FROM remote_file_item WHERE confirmed = :confirmed")?;
+                    stmt.query_row_named(
+                        named_params! {
+                            ":confirmed": confirmed,
+                        },
+                        |row| row.get(0),
+                    )?                    
+                },
         };
         Ok(i as u64)
     }
@@ -532,7 +575,7 @@ mod tests {
             .into_iter()
             .for_each(|ck| db_access.execute_batch(ck));
 
-        assert_eq!(db_access.count_remote_file_item(None)?, 10);
+        assert_eq!(db_access.count_remote_file_item(CountItemParam::default())?, 10);
 
         let mut rfis = db_access.get_file_item(2)?;
         rfis.get_mut(0).unwrap().len = 333;
@@ -619,21 +662,37 @@ mod tests {
     #[test]
     fn t_directory_to_db() -> Result<(), failure::Error> {
         log();
-        let a_file = "abc_20130110120009.tar";
+        // create a directory of 3 files.
+        let a_file = "a_file.tar";
         let t_dir = tutil::create_a_dir_and_a_file_with_content("abc_20130101010155.tar", "abc")?;
         t_dir.make_a_file_with_content(a_file, "abc")?;
-        t_dir.make_a_file_with_content("abc_20130117120009.tar", "abc")?;
+        t_dir.make_a_file_with_content("b.tar", "abc")?;
+
         let dir = Directory {
             remote_dir: t_dir.tmp_dir_str().to_owned(),
             ..Default::default()
         };
+
         let db_dir = tutil::TestDir::new();
         let db_access = tutil::create_a_sqlite_file_db(&db_dir)?;
 
         load_remote_item_to_sqlite(&dir, &db_access, false, 50000)?;
 
         assert_eq!(db_access.count_directory()?, 1);
-        assert_eq!(db_access.count_remote_file_item(None)?, 3);
+        assert_eq!(db_access.count_remote_file_item(CountItemParam::default())?, 3);
+        assert_eq!(db_access.count_remote_file_item(CountItemParam::default().changed(true))?, 3);
+        assert_eq!(db_access.count_remote_file_item(CountItemParam::default().changed(false))?, 0);
+
+        // if invoke successly again. we cannot get the result from changed field alone.
+        load_remote_item_to_sqlite(&dir, &db_access, false, 50000)?;
+
+        assert_eq!(db_access.count_remote_file_item(CountItemParam::default())?, 3);
+        assert_eq!(db_access.count_remote_file_item(CountItemParam::default().changed(true))?, 0);
+        assert_eq!(db_access.count_remote_file_item(CountItemParam::default().changed(false))?, 3);
+
+        
+        let num = db_access.count_remote_file_item(CountItemParam::default().confirmed(false))?;
+        assert_eq!(num, 3);
 
         {
             let mut f = fs::OpenOptions::new()
@@ -653,8 +712,8 @@ mod tests {
         load_remote_item_to_sqlite(&dir, &db_access, false, 50000)?;
 
         assert_eq!(db_access.count_directory()?, 1);
-        assert_eq!(db_access.count_remote_file_item(Some(true))?, 1);
-        assert_eq!(db_access.count_remote_file_item(Some(false))?, 2);
+        assert_eq!(db_access.count_remote_file_item(CountItemParam::default().changed(true))?, 1);
+        assert_eq!(db_access.count_remote_file_item(CountItemParam::default().changed(false))?, 2);
 
         Ok(())
     }

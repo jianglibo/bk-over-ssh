@@ -1,6 +1,6 @@
-use crate::data_shape::{load_server_from_yml, Server};
+use crate::data_shape::{string_path, Indicator, Server, ServerYml};
 use crate::db_accesses::DbAccess;
-use indicatif::{MultiProgress};
+use indicatif::MultiProgress;
 use log::{trace, warn};
 use serde::{Deserialize, Serialize};
 use std::env;
@@ -85,6 +85,13 @@ fn guesss_data_dir(data_dir: impl AsRef<str>) -> Result<PathBuf, failure::Error>
     }
 }
 
+#[derive(Debug, Serialize, Clone)]
+pub struct MiniAppConf {
+    pub buf_len: Option<usize>,
+    pub skip_cron: bool,
+    pub skip_sha1: bool,
+}
+
 #[derive(Debug, Serialize)]
 pub struct AppConf<M, D>
 where
@@ -102,11 +109,9 @@ where
     _m: PhantomData<M>,
     #[serde(skip)]
     lock_file: Option<fs::File>,
-    skip_cron: bool,
-    skip_sha1: bool,
     #[serde(skip)]
     pub progress_bar: Option<Arc<MultiProgress>>,
-    pub buf_len: Option<usize>,
+    pub mini_app_conf: MiniAppConf,
 }
 
 pub fn demo_app_conf<M, D>(data_dir: &str) -> AppConf<M, D>
@@ -123,10 +128,12 @@ where
         _m: PhantomData,
         db_access: None,
         lock_file: None,
-        skip_cron: false,
-        skip_sha1: true,
         progress_bar: None,
-        buf_len: None,
+        mini_app_conf: MiniAppConf {
+            skip_sha1: true,
+            skip_cron: false,
+            buf_len: None,
+        },
     }
 }
 
@@ -152,19 +159,11 @@ where
     }
 
     pub fn skip_cron(&mut self) {
-        self.skip_cron = true;
+        self.mini_app_conf.skip_cron = true;
     }
 
     pub fn not_skip_sha1(&mut self) {
-        self.skip_sha1 = false;
-    }
-
-    pub fn is_skip_sha1(&self) -> bool {
-        self.skip_sha1
-    }
-
-    pub fn is_skip_cron(&self) -> bool {
-        self.skip_cron
+        self.mini_app_conf.skip_sha1 = false;
     }
 
     fn read_app_conf(file: impl AsRef<Path>) -> Result<Option<AppConf<M, D>>, failure::Error> {
@@ -212,10 +211,12 @@ where
                             db_access: None,
                             _m: PhantomData,
                             lock_file: None,
-                            skip_cron: false,
-                            skip_sha1: true,
                             progress_bar: None,
-                            buf_len: None,
+                            mini_app_conf: MiniAppConf {
+                                skip_sha1: true,
+                                skip_cron: false,
+                                buf_len: None,
+                            },
                         };
                         Ok(Some(app_conf))
                     }
@@ -284,8 +285,8 @@ where
     pub fn load_server_yml(
         &self,
         yml_file_name: impl AsRef<str>,
-    ) -> Result<Server<M, D>, failure::Error> {
-        let server = load_server_from_yml(&self, yml_file_name.as_ref())?;
+    ) -> Result<(Server<M, D>, Indicator), failure::Error> {
+        let server = self.load_server_from_yml(yml_file_name.as_ref())?;
         eprintln!(
             "load server yml from: {}",
             server
@@ -293,10 +294,11 @@ where
                 .as_ref()
                 .map_or("O", |b| b.to_str().unwrap_or("O"))
         );
-        Ok(server)
+        let indicator = Indicator::new(self.progress_bar.clone());
+        Ok((server, indicator))
     }
 
-    pub fn load_all_server_yml(&self) -> Vec<Server<M, D>> {
+    pub fn load_all_server_yml(&self) -> Vec<(Server<M, D>, Indicator)> {
         if let Ok(rd) = self.servers_dir.read_dir() {
             rd.filter_map(|ery| match ery {
                 Err(err) => {
@@ -329,6 +331,141 @@ where
 
     pub fn get_log_conf(&self) -> &LogConf {
         &self.inner.log_conf
+    }
+
+    pub fn load_server_from_yml(
+        &self,
+        name: impl AsRef<str>,
+    ) -> Result<Server<M, D>, failure::Error> {
+        let name = name.as_ref();
+        trace!("got server yml name: {:?}", name);
+        let mut server_yml_path = Path::new(name).to_path_buf();
+        if (server_yml_path.is_absolute() || name.starts_with('/')) && !server_yml_path.exists() {
+            bail!(
+                "server yml file does't exist, please create one: {:?}",
+                server_yml_path
+            );
+        } else {
+            if !(name.contains('/') || name.contains('\\')) {
+                server_yml_path = self.servers_dir.as_path().join(name);
+            }
+            if !server_yml_path.exists() {
+                bail!("server yml file does't exist: {:?}", server_yml_path);
+            }
+        }
+        let mut f = fs::OpenOptions::new().read(true).open(&server_yml_path)?;
+        let mut buf = String::new();
+        f.read_to_string(&mut buf)?;
+        let server_yml: ServerYml = serde_yaml::from_str(&buf)?;
+
+        let data_dir = self.data_dir_full_path.as_path();
+        let maybe_local_server_base_dir = data_dir.join(&server_yml.host);
+        let report_dir = data_dir.join("report").join(&server_yml.host);
+        let tar_dir = data_dir.join("tar").join(&server_yml.host);
+        let working_dir = data_dir.join("working").join(&server_yml.host);
+
+        if !report_dir.exists() {
+            fs::create_dir_all(&report_dir)?;
+        }
+        if !tar_dir.exists() {
+            fs::create_dir_all(&tar_dir)?;
+        }
+
+        if !working_dir.exists() {
+            fs::create_dir_all(&working_dir)?;
+        }
+
+        // let multi_bar = self.progress_bar.clone();
+
+        let mut server = Server::new(
+            self.mini_app_conf.clone(),
+            server_yml,
+            self.db_access.clone(),
+            report_dir,
+            tar_dir,
+            working_dir,
+        );
+        //  {
+        //     server_yml,
+        //     multi_bar,
+        //     db_access: self.db_access.clone(),
+        //     // pb: Indicator::new(multi_bar.as_ref().cloned()),
+        //     report_dir,
+        //     session: None,
+        //     tar_dir,
+        //     working_dir,
+        //     yml_location: None,
+        //     app_conf: &self,
+        //     _m: PhantomData,
+        // };
+
+        if let Some(bl) = self.mini_app_conf.buf_len {
+            server.server_yml.buf_len = bl;
+        }
+
+        // if let Some(mb) = server.multi_bar.as_ref() {
+        //     let pb_total = ProgressBar::new(!0);
+        //     let ps = ProgressStyle::default_spinner(); // {spinner} {msg}
+        //     pb_total.set_style(ps);
+        //     let pb_total = mb.add(pb_total);
+
+        //     let pb_item = ProgressBar::new(!0);
+        //     let ps = ProgressStyle::default_spinner(); // {spinner} {msg}
+        //     pb_item.set_style(ps);
+        //     let pb_item = mb.add(pb_item);
+
+        //     server.pb = Some((pb_total, pb_item));
+        // }
+
+        let ab = server_yml_path.canonicalize()?;
+        server.yml_location.replace(ab);
+
+        server.server_yml.directories.iter_mut().try_for_each(|d| {
+            d.compile_patterns().unwrap();
+            trace!("origin directory: {:?}", d);
+            let ld = d.local_dir.trim();
+            if ld.is_empty() || ld == "~" || ld == "null" {
+                let mut splited = d.remote_dir.trim().rsplitn(3, &['/', '\\'][..]);
+                let mut s = splited.next().expect("remote_dir should has dir name.");
+                if s.is_empty() {
+                    s = splited.next().expect("remote_dir should has dir name.");
+                }
+                d.local_dir = s.to_string();
+                trace!("local_dir is empty. change to {}", s);
+            } else {
+                d.local_dir = ld.to_string();
+            }
+
+            let dpath = Path::new(&d.local_dir);
+            if dpath.is_absolute() {
+                bail!("the local_dir of a server can't be absolute. {:?}", dpath);
+            } else {
+                let ld_path = maybe_local_server_base_dir.join(&d.local_dir);
+                d.local_dir = ld_path
+                    .to_str()
+                    .expect("local_dir to_str should success.")
+                    .to_string();
+
+                if d.local_dir.starts_with(string_path::VERBATIM_PREFIX) {
+                    trace!("local dir start with VERBATIM_PREFIX, stripping it.");
+                    d.local_dir = d.local_dir.split_at(4).1.to_string();
+                }
+                if ld_path.exists() {
+                    fs::create_dir_all(ld_path)?;
+                }
+                Ok(())
+            }
+        })?;
+        trace!(
+            "loaded server: {:?}",
+            server
+                .server_yml
+                .directories
+                .iter()
+                .map(|d| format!("{}, {}", d.local_dir, d.remote_dir))
+                .collect::<Vec<String>>()
+        );
+        Ok(server)
     }
 
     #[allow(dead_code)]

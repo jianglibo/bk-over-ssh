@@ -130,6 +130,17 @@ subcommands:
         about: print out the current configuration of application.
     - print-env:
         about: print out environment variables.
+    - polling-file:
+        about: polling the file properties.
+        args:
+            - file:
+                help: the file name to polling.
+                required: true
+                index: 1
+            - period:
+                help: the interval of seconds between polling.
+                required: false
+                index: 2
     - create-db:
         about: create database.
         args:

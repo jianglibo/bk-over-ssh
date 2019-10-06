@@ -1,4 +1,5 @@
 use super::{record, DeltaReader, DeltaWriter, WINDOW_FIELD_TYPE};
+use crate::data_shape::{Indicator};
 use log::*;
 use std::convert::TryInto;
 use std::path::Path;
@@ -182,16 +183,17 @@ impl<W> DeltaFileWriter<W>
 where
     W: io::Write,
 {
-    #[allow(dead_code)]
+    /// create a delta file writer, which contains a field name wr which is a record writer.
+    /// the compare method of delta file writer will write all bytes into delta file.
     pub fn create_delta_file(
-        file: impl AsRef<Path>,
+        out_delta_file: impl AsRef<Path>,
         window: usize,
         pending_valve: Option<usize>,
     ) -> Result<DeltaFileWriter<impl io::Write>, failure::Error> {
         let writer = fs::OpenOptions::new()
             .create(true)
             .write(true)
-            .open(file.as_ref())?;
+            .open(out_delta_file.as_ref())?;
 
         let mut wr = record::RecordWriter::new(writer);
         wr.write_field_usize(WINDOW_FIELD_TYPE, window)?;
@@ -280,7 +282,8 @@ mod tests {
                                       // total size: 78
         let modified = source.clone();
         let buf = [0; WINDOW];
-        let source_sig = Signature::signature(&source[..], buf, None)?;
+        let mut indicator = Indicator::new(None);
+        let source_sig = Signature::signature(&source[..], buf, &mut indicator)?;
         let delta_file = "target/cc.delta";
         DeltaFileWriter::<fs::File>::create_delta_file(delta_file, WINDOW, Some(10))?
             .compare(&source_sig, &modified[..])?;
@@ -311,7 +314,8 @@ mod tests {
                     ((source.as_bytes()[index] as usize + 1) & 255) as u8
             }
             let buf = [0; WINDOW];
-            let source_sig = Signature::signature(source.as_bytes(), buf, None)?;
+            let mut indicator = Indicator::new(None);
+            let source_sig = Signature::signature(source.as_bytes(), buf, &mut indicator)?;
             let delta_file = "target/cc.delta";
             DeltaFileWriter::<fs::File>::create_delta_file(delta_file, WINDOW, Some(3))?
                 .compare(&source_sig, modified.as_bytes())?;

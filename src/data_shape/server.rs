@@ -1,14 +1,13 @@
 use super::{
-    load_remote_item, load_remote_item_to_sqlite, rolling_files, string_path, AppConf, AuthMethod,
-    CountWriter, Directory, FileItem, FileItemProcessResult, FileItemProcessResultStats,
-    PruneStrategy, RemoteFileItem, ScheduleItem, SyncType,
+    load_remote_item, load_remote_item_to_sqlite, rolling_files, string_path, AuthMethod, MiniAppConf,
+    CountWriter, Directory, FileItem, FileItemProcessResult, FileItemProcessResultStats, Indicator,
+    PbProperties, PruneStrategy, RemoteFileItem, ScheduleItem, SyncType,
 };
-use crate::actions::{copy_a_file_item, SyncDirReport, channel_util};
+use crate::actions::{channel_util, copy_a_file_item, SyncDirReport};
 use crate::db_accesses::{scheduler_util, DbAccess};
-use crate::ioutil::SharedMpb;
 use bzip2::write::BzEncoder;
 use bzip2::Compression;
-use indicatif::{ProgressBar, ProgressStyle};
+use indicatif::ProgressStyle;
 use log::*;
 use r2d2;
 use serde::{Deserialize, Serialize};
@@ -16,7 +15,6 @@ use ssh2;
 use std::io::prelude::{BufRead, Read};
 use std::marker::PhantomData;
 use std::net::TcpStream;
-use std::ops::Drop;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 use std::{fs, io, io::Seek};
@@ -64,7 +62,7 @@ pub struct ServerYml {
     pub yml_location: Option<PathBuf>,
 }
 
-pub struct Server<'sv, M, D>
+pub struct Server<M, D>
 where
     M: r2d2::ManageConnection,
     D: DbAccess<M>,
@@ -75,35 +73,50 @@ where
     tar_dir: PathBuf,
     working_dir: PathBuf,
     pub yml_location: Option<PathBuf>,
-    pub multi_bar: Option<SharedMpb>,
-    pub pb: Option<(ProgressBar, ProgressBar)>,
     pub db_access: Option<D>,
     _m: PhantomData<M>,
-    app_conf: &'sv AppConf<M, D>,
+    app_conf: MiniAppConf,
 }
 
-impl<'sv, M, D> Drop for Server<'sv, M, D>
+unsafe impl<M, D> Sync for Server<M, D>
 where
     M: r2d2::ManageConnection,
     D: DbAccess<M>,
 {
-    fn drop(&mut self) {
-        self.pb_finish();
+}
+
+unsafe impl<M, D> Send for Server<M, D>
+where
+    M: r2d2::ManageConnection,
+    D: DbAccess<M>,
+{
+}
+
+impl< M, D> Server< M, D>
+where
+    M: r2d2::ManageConnection,
+    D: DbAccess<M>,
+{
+    pub fn new(
+        app_conf: MiniAppConf,
+        server_yml: ServerYml,
+        db_access: Option<D>,
+        report_dir: PathBuf,
+        tar_dir: PathBuf,
+        working_dir: PathBuf,
+    ) -> Self {
+        Self {
+            server_yml,
+            db_access,
+            report_dir,
+            session: None,
+            tar_dir,
+            working_dir,
+            yml_location: None,
+            app_conf,
+            _m: PhantomData,
+        }
     }
-}
-
-unsafe impl<'sv, M, D> Sync for Server<'sv, M, D>
-where
-    M: r2d2::ManageConnection,
-    D: DbAccess<M>,
-{
-}
-
-impl<'sv, M, D> Server<'sv, M, D>
-where
-    M: r2d2::ManageConnection,
-    D: DbAccess<M>,
-{
     pub fn get_host(&self) -> &str {
         self.server_yml.host.as_str()
     }
@@ -136,13 +149,9 @@ where
         Ok(())
     }
 
-    pub fn pb_finish(&self) {
-        if let Some((pb_total, pb_item)) = self.pb.as_ref() {
-            pb_total.finish();
-            // pb_item.finish();
-            pb_item.finish_and_clear();
-        }
-    }
+    // pub fn pb_finish(&self) {
+    //     self.pb.pb_finish();
+    // }
 
     pub fn dir_equals(&self, directories: &[Directory]) -> bool {
         let ss: Vec<&String> = self
@@ -237,18 +246,21 @@ where
         ))
     }
 
-    pub fn tar_local(&self) -> Result<(), failure::Error> {
+    pub fn tar_local(&self, pb: &mut Indicator) -> Result<(), failure::Error> {
         let total_size = self.count_local_dirs_size();
-        if let Some((pp, _pb)) = self.pb.as_ref() {
-            let style = ProgressStyle::default_bar()
-                .template(
-                    "{spinner} {decimal_bytes:>8}/{decimal_total_bytes:8}  {percent:>4}% {wide_msg}",
-                )
-                .progress_chars("#-");
-            pp.set_style(style);
-            pp.enable_steady_tick(200);
-            pp.set_length(total_size);
-        }
+
+        let style = ProgressStyle::default_bar()
+            .template(
+                "{spinner} {decimal_bytes:>8}/{decimal_total_bytes:8}  {percent:>4}% {wide_msg}",
+            )
+            .progress_chars("#-");
+
+        pb.active_pb_total().alter_pb(PbProperties {
+            set_style: Some(style),
+            enable_steady_tick: Some(200),
+            set_length: Some(total_size),
+            ..PbProperties::default()
+        });
         let cur = self.current_tar_file();
         trace!("open file to write archive: {:?}", cur);
 
@@ -260,22 +272,16 @@ where
                 .open(cur.as_path())
         };
 
-        let cc = |num| {
-            if let Some((pp, _pb)) = self.pb.as_ref() {
-                pp.inc(num);
-            }
-        };
-
         let writer: Box<dyn io::Write> = if let Some(ref sm) = self.server_yml.compress_archive {
             match sm {
                 CompressionImpl::Bzip2 => {
                     let w = BzEncoder::new(writer_c()?, Compression::Best);
-                    let w = CountWriter::new(w, cc);
+                    let w = CountWriter::new(w, pb);
                     Box::new(w)
                 }
             }
         } else {
-            let w = CountWriter::new(writer_c()?, cc);
+            let w = CountWriter::new(writer_c()?, pb);
             Box::new(w)
         };
 
@@ -286,13 +292,13 @@ where
             let d_path = Path::new(&dir.local_dir);
             if let Some(d_path_name) = d_path.file_name() {
                 if d_path.exists() {
-                    if let Some((pp, _pb)) = self.pb.as_ref() {
-                        pp.set_message(format!("[{}] processing directory: {:?}", self.get_host(), d_path_name).as_str());
-                    }
+                    pb.set_message_pb_total(format!(
+                        "[{}] processing directory: {:?}",
+                        self.get_host(),
+                        d_path_name
+                    ));
                     archive.append_dir_all(d_path_name, d_path)?;
-                    if let Some((pp, _pb)) = self.pb.as_ref() {
-                        pp.inc(len);
-                    }
+                    pb.inc_pb_total(len);
                 } else {
                     warn!("unexist directory: {:?}", d_path);
                 }
@@ -306,7 +312,6 @@ where
         fs::rename(cur, nf)?;
         Ok(())
     }
-    
     pub fn prune_backups(&self) -> Result<(), failure::Error> {
         rolling_files::do_prune_dir(
             &self.server_yml.prune_strategy,
@@ -395,7 +400,7 @@ where
     }
 
     pub fn is_skip_sha1(&self) -> bool {
-        if !self.app_conf.is_skip_sha1() {
+        if !self.app_conf.skip_sha1 {
             // if force not to skip.
             false
         } else {
@@ -418,21 +423,8 @@ where
         );
         trace!("invoking remote command: {:?}", cmd);
         channel.exec(cmd.as_str())?;
-        let mut contents = String::new();
-        if let Err(err) = channel.read_to_string(&mut contents) {
-            bail!("is remote exec executable? {:?}", err);
-        }
-        trace!("list-local-files output: {:?}", contents);
-        contents.clear();
+        channel_util::get_stdout_eprintln_stderr(&mut channel, true);
 
-        if let Err(err) = channel.stderr().read_to_string(&mut contents) {
-            eprintln!("read stderr failed: {:?}", err);
-        }
-
-        trace!("list-local-files stderr: {:?}", contents);
-        if !contents.is_empty() {
-            eprintln!("server side message: {:?}", contents);
-        }
         let sftp = self.session.as_ref().unwrap().sftp()?;
         let mut f = sftp.open(Path::new(&self.server_yml.file_list_file))?;
 
@@ -481,8 +473,7 @@ where
         let mut channel: ssh2::Channel = self.create_channel()?;
         let cmd = format!(
             "{} confirm-local-sync {}",
-            self.server_yml.remote_exec,
-            self.server_yml.remote_server_yml,
+            self.server_yml.remote_exec, self.server_yml.remote_server_yml,
         );
         info!("invoking remote command: {:?}", cmd);
         channel.exec(cmd.as_str())?;
@@ -572,36 +563,51 @@ where
         Ok(self.count_and_len(&mut wfb))
     }
 
-    fn start_sync_working_file_list(&self) -> Result<FileItemProcessResultStats, failure::Error> {
+    fn start_sync_working_file_list(
+        &self,
+        pb: &mut Indicator,
+    ) -> Result<FileItemProcessResultStats, failure::Error> {
         self.prepare_file_list()?;
         let working_file = &self.get_working_file_list_file();
         let rb = io::BufReader::new(fs::File::open(working_file)?);
-        self.start_sync(rb)
+        self.start_sync(rb, pb)
     }
 
     /// Do not try to return item stream from this function. consume it locally, pass in function to alter the behavior.
     fn start_sync<R: BufRead>(
         &self,
         file_item_lines: R,
+        pb: &mut Indicator,
     ) -> Result<FileItemProcessResultStats, failure::Error> {
         let mut current_remote_dir = Option::<String>::None;
         let mut current_local_dir = Option::<&Path>::None;
         let mut consume_count = 0u64;
-        let count_and_len_op = self.pb.as_ref().map(|_pb| {
-            self.get_pb_count_and_len()
-                .expect("get_pb_count_and_len should success.")
-        });
+        let count_and_len_op = if pb.is_some() {
+            self.get_pb_count_and_len().ok()
+        } else {
+            None
+        };
         let total_count = count_and_len_op.map(|cl| cl.0).unwrap_or_default();
 
-        if let Some((pb_total, pb_item)) = self.pb.as_ref() {
-            // let style = ProgressStyle::default_bar().template("[{eta_precise}] {prefix:.bold.dim} {bytes_per_sec} {decimal_bytes}/{decimal_total_bytes} {bar:30.cyan/blue} {spinner} {wide_msg}").progress_chars("#-");
-            let style = ProgressStyle::default_bar().template("{prefix} {bytes_per_sec} {decimal_bytes}/{decimal_total_bytes} {bar:30.cyan/blue} {percent}% {eta}").progress_chars("#-");
-            pb_total.set_length(count_and_len_op.map(|cl| cl.1).unwrap_or(0u64));
-            pb_total.set_style(style);
+        // if let Some((pb_total, pb_item)) = self.pb.as_ref() {
+        // // let style = ProgressStyle::default_bar().template("[{eta_precise}] {prefix:.bold.dim} {bytes_per_sec} {decimal_bytes}/{decimal_total_bytes} {bar:30.cyan/blue} {spinner} {wide_msg}").progress_chars("#-");
+        // let style = ProgressStyle::default_bar().template("{prefix} {bytes_per_sec} {decimal_bytes}/{decimal_total_bytes} {bar:30.cyan/blue} {percent}% {eta}").progress_chars("#-");
+        // pb_total.set_length(count_and_len_op.map(|cl| cl.1).unwrap_or(0u64));
+        // pb_total.set_style(style);
 
-            let style = ProgressStyle::default_bar().template("{bytes_per_sec:10} {decimal_bytes:>8}/{decimal_total_bytes:8} {spinner} {percent:>4}% {eta:5} {wide_msg}").progress_chars("#-");
-            pb_item.set_style(style);
-        }
+        //     let style = ProgressStyle::default_bar().template("{bytes_per_sec:10} {decimal_bytes:>8}/{decimal_total_bytes:8} {spinner} {percent:>4}% {eta:5} {wide_msg}").progress_chars("#-");
+        //     pb_item.set_style(style);
+        // }
+        pb.active_pb_total().alter_pb(PbProperties {
+            set_style: Some(ProgressStyle::default_bar().template("{prefix} {bytes_per_sec} {decimal_bytes}/{decimal_total_bytes} {bar:30.cyan/blue} {percent}% {eta}").progress_chars("#-")),
+            set_length: count_and_len_op.map(|cl| cl.1),
+            ..PbProperties::default()
+        });
+
+        pb.active_pb_item().alter_pb(PbProperties {
+            set_style: Some(ProgressStyle::default_bar().template("{bytes_per_sec:10} {decimal_bytes:>8}/{decimal_total_bytes:8} {spinner} {percent:>4}% {eta:5} {wide_msg}").progress_chars("#-")),
+            ..PbProperties::default()
+        });
 
         let sftp = self.session.as_ref().unwrap().sftp()?;
         let mut buff = vec![0_u8; self.server_yml.buf_len];
@@ -632,28 +638,28 @@ where
                                 let local_item =
                                     FileItem::new(ld, rd.as_str(), remote_item, sync_type);
                                 consume_count += 1;
-                                if let Some((_pb_total, pb_item)) = self.pb.as_ref() {
-                                    pb_item.reset();
-                                    pb_item.set_length(remote_len);
-                                    pb_item.set_message(local_item.get_remote_item().get_path());
-                                }
+
+                                // if let Some((_pb_total, pb_item)) = self.pb.as_ref() {
+                                //     pb_item.reset();
+                                //     pb_item.set_length(remote_len);
+                                //     pb_item.set_message(local_item.get_remote_item().get_path());
+                                // }
+
+                                pb.active_pb_item().alter_pb(PbProperties {
+                                    set_length: Some(remote_len),
+                                    set_message: Some(
+                                        local_item.get_remote_item().get_path().to_owned(),
+                                    ),
+                                    reset: true,
+                                    ..PbProperties::default()
+                                });
+
                                 let mut skiped = false;
                                 // if use_db all received item are changed.
                                 // let r = if self.server_yml.use_db || local_item.had_changed() { // even use_db still check change or not.
                                 let r = if local_item.had_changed() {
                                     trace!("file had changed. start copy_a_file_item.");
-                                    copy_a_file_item(
-                                        &self,
-                                        &sftp,
-                                        local_item,
-                                        &mut buff,
-                                        |num| {
-                                            if let Some((_pp, pb_item)) = self.pb.as_ref() {
-                                                pb_item.inc(num);
-                                            }
-                                        }
-                                        
-                                    )
+                                    copy_a_file_item(&self, &sftp, local_item, &mut buff, pb)
                                 } else {
                                     skiped = true;
                                     FileItemProcessResult::Skipped(
@@ -662,17 +668,19 @@ where
                                         ),
                                     )
                                 };
-                                if let Some((pb_total, pb_item)) = self.pb.as_ref() {
-                                    let prefix = format!(
-                                        "[{}] {}/{} ",
-                                        self.get_host(),
-                                        total_count - consume_count,
-                                        total_count
-                                    );
-                                    pb_total.set_prefix(prefix.as_str());
-                                    pb_total.inc(remote_len); // no matter skiped or processed.
+                                if pb.is_some() {
+                                    pb.active_pb_total().alter_pb(PbProperties {
+                                        set_prefix: Some(format!(
+                                            "[{}] {}/{} ",
+                                            self.get_host(),
+                                            total_count - consume_count,
+                                            total_count
+                                        )),
+                                        inc: Some(remote_len),
+                                        ..PbProperties::default()
+                                    });
                                     if skiped {
-                                        pb_item.inc(remote_len);
+                                        pb.active_pb_item().inc_pb_item(remote_len);
                                     }
                                 }
                                 r
@@ -746,7 +754,7 @@ where
     }
 
     fn check_skip_cron(&self) -> bool {
-        self.app_conf.is_skip_cron()
+        self.app_conf.skip_cron
             || if let Some(si) = self
                 .server_yml
                 .schedules
@@ -772,13 +780,12 @@ where
             } else {
                 true
             }
-        
     }
 
-    pub fn sync_dirs(&self) -> Result<Option<SyncDirReport>, failure::Error> {
+    pub fn sync_dirs(&self, pb: &mut Indicator) -> Result<Option<SyncDirReport>, failure::Error> {
         if self.check_skip_cron() {
             let start = Instant::now();
-            let rs = self.start_sync_working_file_list()?;
+            let rs = self.start_sync_working_file_list(pb)?;
             self.remove_working_file_list_file();
             self.confirm_remote_sync()?;
             Ok(Some(SyncDirReport::new(start.elapsed(), rs)))
@@ -799,23 +806,25 @@ where
                 self.db_access
                     .as_ref()
                     .unwrap()
-                    .iterate_files_by_directory_changed_or_unconfirmed(|fidb_or_path| match fidb_or_path {
-                        (Some(fidb), None) => {
-                            if fidb.changed {
-                                match serde_json::to_string(&RemoteFileItem::from(fidb)) {
-                                    Ok(line) => {
-                                        writeln!(out, "{}", line).ok();
+                    .iterate_files_by_directory_changed_or_unconfirmed(|fidb_or_path| {
+                        match fidb_or_path {
+                            (Some(fidb), None) => {
+                                if fidb.changed {
+                                    match serde_json::to_string(&RemoteFileItem::from(fidb)) {
+                                        Ok(line) => {
+                                            writeln!(out, "{}", line).ok();
+                                        }
+                                        Err(err) => error!("serialize item line failed: {:?}", err),
                                     }
-                                    Err(err) => error!("serialize item line failed: {:?}", err),
                                 }
                             }
-                        }
-                        (None, Some(path)) => {
-                            if let Err(err) = writeln!(out, "{}", path) {
-                                error!("write path failed: {:?}", err);
+                            (None, Some(path)) => {
+                                if let Err(err) = writeln!(out, "{}", path) {
+                                    error!("write path failed: {:?}", err);
+                                }
                             }
+                            _ => {}
                         }
-                        _ => {}
                     })?;
             }
         } else {
@@ -825,136 +834,6 @@ where
         }
         Ok(())
     }
-}
-pub fn load_server_from_yml<M, D>(
-    app_conf: &AppConf<M, D>,
-    name: impl AsRef<str>,
-) -> Result<Server<M, D>, failure::Error>
-where
-    M: r2d2::ManageConnection,
-    D: DbAccess<M>,
-{
-    let name = name.as_ref();
-    trace!("got server yml name: {:?}", name);
-    let mut server_yml_path = Path::new(name).to_path_buf();
-    if (server_yml_path.is_absolute() || name.starts_with('/')) && !server_yml_path.exists() {
-        bail!(
-            "server yml file does't exist, please create one: {:?}",
-            server_yml_path
-        );
-    } else {
-        if !(name.contains('/') || name.contains('\\')) {
-            server_yml_path = app_conf.servers_dir.as_path().join(name);
-        }
-        if !server_yml_path.exists() {
-            bail!("server yml file does't exist: {:?}", server_yml_path);
-        }
-    }
-    let mut f = fs::OpenOptions::new().read(true).open(&server_yml_path)?;
-    let mut buf = String::new();
-    f.read_to_string(&mut buf)?;
-    let server_yml: ServerYml = serde_yaml::from_str(&buf)?;
-
-    let data_dir = app_conf.data_dir_full_path.as_path();
-    let maybe_local_server_base_dir = data_dir.join(&server_yml.host);
-    let report_dir = data_dir.join("report").join(&server_yml.host);
-    let tar_dir = data_dir.join("tar").join(&server_yml.host);
-    let working_dir = data_dir.join("working").join(&server_yml.host);
-
-    if !report_dir.exists() {
-        fs::create_dir_all(&report_dir)?;
-    }
-    if !tar_dir.exists() {
-        fs::create_dir_all(&tar_dir)?;
-    }
-
-    if !working_dir.exists() {
-        fs::create_dir_all(&working_dir)?;
-    }
-
-    let multi_bar = app_conf.progress_bar.clone();
-
-    let mut server = Server {
-        server_yml,
-        multi_bar,
-        db_access: app_conf.db_access.clone(),
-        pb: None,
-        report_dir,
-        session: None,
-        tar_dir,
-        working_dir,
-        yml_location: None,
-        app_conf,
-        _m: PhantomData,
-    };
-
-    if let Some(bl) = app_conf.buf_len {
-        server.server_yml.buf_len = bl;
-    }
-
-    if let Some(mb) = server.multi_bar.as_ref() {
-        let pb_total = ProgressBar::new(!0);
-        let ps = ProgressStyle::default_spinner(); // {spinner} {msg}
-        pb_total.set_style(ps);
-        let pb_total = mb.add(pb_total);
-
-        let pb_item = ProgressBar::new(!0);
-        let ps = ProgressStyle::default_spinner(); // {spinner} {msg}
-        pb_item.set_style(ps);
-        let pb_item = mb.add(pb_item);
-
-        server.pb = Some((pb_total, pb_item));
-    }
-
-    let ab = server_yml_path.canonicalize()?;
-    server.yml_location.replace(ab);
-
-    server.server_yml.directories.iter_mut().try_for_each(|d| {
-        d.compile_patterns().unwrap();
-        trace!("origin directory: {:?}", d);
-        let ld = d.local_dir.trim();
-        if ld.is_empty() || ld == "~" || ld == "null" {
-            let mut splited = d.remote_dir.trim().rsplitn(3, &['/', '\\'][..]);
-            let mut s = splited.next().expect("remote_dir should has dir name.");
-            if s.is_empty() {
-                s = splited.next().expect("remote_dir should has dir name.");
-            }
-            d.local_dir = s.to_string();
-            trace!("local_dir is empty. change to {}", s);
-        } else {
-            d.local_dir = ld.to_string();
-        }
-
-        let dpath = Path::new(&d.local_dir);
-        if dpath.is_absolute() {
-            bail!("the local_dir of a server can't be absolute. {:?}", dpath);
-        } else {
-            let ld_path = maybe_local_server_base_dir.join(&d.local_dir);
-            d.local_dir = ld_path
-                .to_str()
-                .expect("local_dir to_str should success.")
-                .to_string();
-
-            if d.local_dir.starts_with(string_path::VERBATIM_PREFIX) {
-                trace!("local dir start with VERBATIM_PREFIX, stripping it.");
-                d.local_dir = d.local_dir.split_at(4).1.to_string();
-            }
-            if ld_path.exists() {
-                fs::create_dir_all(ld_path)?;
-            }
-            Ok(())
-        }
-    })?;
-    trace!(
-        "loaded server: {:?}",
-        server
-            .server_yml
-            .directories
-            .iter()
-            .map(|d| format!("{}, {}", d.local_dir, d.remote_dir))
-            .collect::<Vec<String>>()
-    );
-    Ok(server)
 }
 
 #[cfg(test)]
@@ -1022,10 +901,9 @@ mod tests {
                 warn!("join account failure. {:?}", err);
             }
         });
-
-        server.multi_bar.replace(mb2);
+        let mut indicator = Indicator::new(Some(mb2));
         server.connect()?;
-        let stats = server.sync_dirs()?;
+        let stats = server.sync_dirs(&mut indicator)?;
 
         info!("result {:?}", stats);
         t.join().unwrap();
@@ -1073,68 +951,68 @@ mod tests {
         Ok(())
     }
 
-    fn assert_zip_content(zip_file: impl AsRef<Path>, r: Vec<&str>) -> Result<(), failure::Error> {
-        let zf = fs::OpenOptions::new().read(true).open(zip_file)?;
-        let mut zip = zip::ZipArchive::new(zf)?;
-        assert_eq!(zip.len(), 2);
-        let mut v = Vec::new();
+    // fn assert_zip_content(zip_file: impl AsRef<Path>, r: Vec<&str>) -> Result<(), failure::Error> {
+    //     let zf = fs::OpenOptions::new().read(true).open(zip_file)?;
+    //     let mut zip = zip::ZipArchive::new(zf)?;
+    //     assert_eq!(zip.len(), 2);
+    //     let mut v = Vec::new();
 
-        for i in 0..zip.len() {
-            let mut file = zip.by_index(i).unwrap();
-            eprintln!("{}", file.name());
-            let mut content = String::new();
-            file.read_to_string(&mut content)?;
-            v.push(content);
-        }
-        v.sort();
-        assert_eq!(v, r);
-        Ok(())
-    }
+    //     for i in 0..zip.len() {
+    //         let mut file = zip.by_index(i).unwrap();
+    //         eprintln!("{}", file.name());
+    //         let mut content = String::new();
+    //         file.read_to_string(&mut content)?;
+    //         v.push(content);
+    //     }
+    //     v.sort();
+    //     assert_eq!(v, r);
+    //     Ok(())
+    // }
 
-    #[test]
-    fn t_zip() -> Result<(), failure::Error> {
-        log();
-        let test_dir = tutil::create_a_dir_and_a_file_with_content("a", "cc")?;
-        test_dir.make_a_file_with_content("b", "cc1")?;
+    // #[test]
+    // fn t_zip() -> Result<(), failure::Error> {
+    //     log();
+    //     let test_dir = tutil::create_a_dir_and_a_file_with_content("a", "cc")?;
+    //     test_dir.make_a_file_with_content("b", "cc1")?;
 
-        let _zip_dir = tutil::TestDir::new();
-        let zip_file = _zip_dir.tmp_dir_path().join("cc.zip");
-        {
-            let zf = fs::OpenOptions::new()
-                .create(true)
-                .write(true)
-                .open(zip_file.as_path())?;
-            assert!(
-                zip_file.as_path().exists(),
-                "zip file should have been created."
-            );
-            let mut zip = zip::ZipWriter::new(zf);
-            let options = zip::write::FileOptions::default()
-                .compression_method(zip::CompressionMethod::Stored);
-            zip.start_file_from_path(test_dir.get_file_path("a").as_path(), options)?;
-            zip.write_all(b"hello")?;
-            zip.start_file_from_path(test_dir.get_file_path("b").as_path(), options)?;
-            zip.write_all(b"world")?;
-            zip.finish()?;
-        }
-        assert_zip_content(zip_file.as_path(), vec!["hello", "world"])?;
-        {
-            let zf = fs::OpenOptions::new()
-                .create(true)
-                .write(true)
-                .open(zip_file.as_path())?;
-            let mut zip = zip::ZipWriter::new(zf);
-            let options = zip::write::FileOptions::default()
-                .compression_method(zip::CompressionMethod::Stored);
-            zip.start_file_from_path(test_dir.get_file_path("a").as_path(), options)?;
-            zip.write_all(b"hello1")?;
-            zip.finish()?;
-        }
+    //     let _zip_dir = tutil::TestDir::new();
+    //     let zip_file = _zip_dir.tmp_dir_path().join("cc.zip");
+    //     {
+    //         let zf = fs::OpenOptions::new()
+    //             .create(true)
+    //             .write(true)
+    //             .open(zip_file.as_path())?;
+    //         assert!(
+    //             zip_file.as_path().exists(),
+    //             "zip file should have been created."
+    //         );
+    //         let mut zip = zip::ZipWriter::new(zf);
+    //         let options = zip::write::FileOptions::default()
+    //             .compression_method(zip::CompressionMethod::Stored);
+    //         zip.start_file_from_path(test_dir.get_file_path("a").as_path(), options)?;
+    //         zip.write_all(b"hello")?;
+    //         zip.start_file_from_path(test_dir.get_file_path("b").as_path(), options)?;
+    //         zip.write_all(b"world")?;
+    //         zip.finish()?;
+    //     }
+    //     assert_zip_content(zip_file.as_path(), vec!["hello", "world"])?;
+    //     {
+    //         let zf = fs::OpenOptions::new()
+    //             .create(true)
+    //             .write(true)
+    //             .open(zip_file.as_path())?;
+    //         let mut zip = zip::ZipWriter::new(zf);
+    //         let options = zip::write::FileOptions::default()
+    //             .compression_method(zip::CompressionMethod::Stored);
+    //         zip.start_file_from_path(test_dir.get_file_path("a").as_path(), options)?;
+    //         zip.write_all(b"hello1")?;
+    //         zip.finish()?;
+    //     }
 
-        assert_zip_content(zip_file.as_path(), vec!["hello1", "world"])?;
+    //     assert_zip_content(zip_file.as_path(), vec!["hello1", "world"])?;
 
-        Ok(())
-    }
+    //     Ok(())
+    // }
 
     /// you cannot change a tar file.
     #[test]
@@ -1290,7 +1168,6 @@ mod tests {
 
         Ok(())
     }
-    
     #[test]
     fn t_main_password() {
         // Connect to the local SSH server
@@ -1299,8 +1176,7 @@ mod tests {
         sess.set_tcp_stream(tcp);
         sess.handshake().unwrap();
 
-        sess.userauth_password("Administrator", "kass.")
-            .unwrap();
+        sess.userauth_password("Administrator", "kass.").unwrap();
         assert!(sess.authenticated());
     }
 }

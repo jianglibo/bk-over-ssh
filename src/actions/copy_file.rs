@@ -1,4 +1,4 @@
-use crate::data_shape::{FileItem, FileItemProcessResult, Server, SyncType, CountWriter};
+use crate::data_shape::{FileItem, FileItemProcessResult, Server, SyncType, CountWriter, Indicator, PbProperties};
 use crate::db_accesses::DbAccess;
 use crate::rustsync::{DeltaFileReader, DeltaReader, Signature};
 use log::*;
@@ -8,7 +8,8 @@ use ssh2;
 use std::ffi::OsStr;
 use std::io::prelude::Write;
 use std::path::Path;
-use std::{fs, io, io::Read};
+use std::{fs, io, io::Read, io::BufRead};
+use indicatif::{ProgressStyle};
 
 #[allow(dead_code)]
 pub fn copy_file_to_stream(
@@ -21,11 +22,12 @@ pub fn copy_file_to_stream(
     Ok(())
 }
 
-pub fn copy_stream_to_file_with_cb<T: AsRef<Path>, F: FnMut(u64) -> ()>(
+pub fn copy_stream_to_file_with_cb<T: AsRef<Path>>(
     from: &mut impl std::io::Read,
     to_file: T,
     buf: &mut [u8],
-    mut counter: F,
+    // mut counter: F,
+    pb: &Indicator,
 ) -> Result<u64, failure::Error> {
     let mut length = 0_u64;
     let path = to_file.as_ref();
@@ -42,7 +44,7 @@ pub fn copy_stream_to_file_with_cb<T: AsRef<Path>, F: FnMut(u64) -> ()>(
                 let nn = n as u64;
                 length += nn;
                 wf.write_all(&buf[..n])?;
-                counter(nn);
+                pb.inc_pb(nn);
             }
             Ok(_) => {
                 trace!("end copy_stream_to_file_with_cb when readed zero byte.");
@@ -89,11 +91,12 @@ pub fn copy_stream_to_file<T: AsRef<Path>, F: FnMut(u64) -> ()>(
     Ok(length)
 }
 
-pub fn copy_stream_to_file_return_sha1_with_cb<T: AsRef<Path>, F: FnMut(u64) -> ()>(
+pub fn copy_stream_to_file_return_sha1_with_cb<T: AsRef<Path>>(
     from: &mut impl std::io::Read,
     to_file: T,
     buf: &mut [u8],
-    mut counter: F,
+    // mut counter: F,
+    pb: &Indicator,
 ) -> Result<(u64, String), failure::Error> {
     // let u8_buf = &mut vec![0; buf_len];
     let mut length = 0_u64;
@@ -112,7 +115,8 @@ pub fn copy_stream_to_file_return_sha1_with_cb<T: AsRef<Path>, F: FnMut(u64) -> 
                 length += n as u64;
                 wf.write_all(&buf[..n])?;
                 hasher.input(&buf[..n]);
-                counter(length);
+                // counter(length);
+                pb.inc_pb(length);
             }
             Ok(_) => {
                 trace!("end copy_stream_to_file_return_sha1_with_cb when readed zero byte");
@@ -193,22 +197,22 @@ pub fn visit_dirs(dir: &Path, cb: &dyn Fn(&fs::DirEntry)) -> io::Result<()> {
     }
     Ok(())
 }
-
-pub fn copy_a_file_item_scp<'a, F: FnMut(u64) -> ()>(
+#[allow(dead_code)]
+pub fn copy_a_file_item_scp<'a>(
     session: &mut ssh2::Session,
     local_file_path: String,
     file_item: &FileItem<'a>,
     buf: &mut [u8],
-    counter: F,
+    pb: &mut Indicator,
 ) -> FileItemProcessResult {
         match session.scp_recv(Path::new(file_item.get_remote_path().as_str())) {
-        Ok((mut file, stat)) => {
+        Ok((mut file, _stat)) => {
             if let Some(_r_sha1) = file_item.get_remote_item().get_sha1() {
                 match copy_stream_to_file_return_sha1_with_cb(
                     &mut file,
                     &local_file_path,
                     buf,
-                    counter,
+                    pb,
                 ) {
                     Ok((length, sha1)) => {
                         if length != file_item.get_remote_item().get_len() {
@@ -231,7 +235,7 @@ pub fn copy_a_file_item_scp<'a, F: FnMut(u64) -> ()>(
                     }
                 }
             } else {
-                match copy_stream_to_file_with_cb(&mut file, &local_file_path, buf, counter) {
+                match copy_stream_to_file_with_cb(&mut file, &local_file_path, buf, pb) {
                     Ok(length) => {
                         if length != file_item.get_remote_item().get_len() {
                             FileItemProcessResult::LengthNotMatch(local_file_path)
@@ -258,12 +262,12 @@ pub fn copy_a_file_item_scp<'a, F: FnMut(u64) -> ()>(
 }
 // https://stackoverflow.com/questions/32300132/why-cant-i-store-a-value-and-a-reference-to-that-value-in-the-same-struct
 
-pub fn copy_a_file_item_sftp<'a, F: FnMut(u64) -> ()>(
+pub fn copy_a_file_item_sftp<'a>(
     sftp: &ssh2::Sftp,
     local_file_path: String,
     file_item: &FileItem<'a>,
     buf: &mut [u8],
-    counter: F,
+    pb: &Indicator,
 ) -> FileItemProcessResult {
     match sftp.open(Path::new(&file_item.get_remote_path())) {
         Ok(mut file) => {
@@ -272,7 +276,7 @@ pub fn copy_a_file_item_sftp<'a, F: FnMut(u64) -> ()>(
                     &mut file,
                     &local_file_path,
                     buf,
-                    counter,
+                    pb,
                 ) {
                     Ok((length, sha1)) => {
                         if length != file_item.get_remote_item().get_len() {
@@ -295,7 +299,7 @@ pub fn copy_a_file_item_sftp<'a, F: FnMut(u64) -> ()>(
                     }
                 }
             } else {
-                match copy_stream_to_file_with_cb(&mut file, &local_file_path, buf, counter) {
+                match copy_stream_to_file_with_cb(&mut file, &local_file_path, buf, pb) {
                     Ok(length) => {
                         if length != file_item.get_remote_item().get_len() {
                             FileItemProcessResult::LengthNotMatch(local_file_path)
@@ -320,10 +324,12 @@ pub fn copy_a_file_item_sftp<'a, F: FnMut(u64) -> ()>(
         }
     }
 }
+#[allow(dead_code)]
 pub fn copy_a_file_item_rsync_scp<'a, M, D>(
     server: &Server<M, D>,
     local_file_path: String,
     file_item: &FileItem<'a>,
+    pb: &Indicator,
 ) -> Result<FileItemProcessResult, failure::Error>
 where
     M: r2d2::ManageConnection,
@@ -334,7 +340,7 @@ where
     let mut sig = Signature::signature_a_file(
         &local_file_path,
         Some(server.server_yml.rsync_window),
-        server.pb.is_some(),
+        pb,
     )?;
     let local_sig_file_path_str = format!("{}.sig", &local_file_path);
     let local_sig_file_path = Path::new(local_sig_file_path_str.as_str());
@@ -342,7 +348,7 @@ where
     let len = local_sig_file_path.metadata()?.len();
     let remote_sig_file_path = format!("{}.sig", &remote_path);
     let sig_file = server.get_ssh_session().scp_send(Path::new(remote_sig_file_path.as_str()), 0o022, len, None)?;
-    let cw = CountWriter::new(sig_file, |_|{});
+    let cw = CountWriter::new(sig_file, pb);
     let delta_file_name = format!("{}.delta", &remote_path);
     let cmd = format!(
         "{} rsync delta-a-file --new-file {} --sig-file {} --out-file {}",
@@ -366,7 +372,7 @@ where
         chout,
         delta_file_name
     );
-    if let Ok((file, stat)) = server.get_ssh_session().scp_recv(Path::new(&delta_file_name)) {
+    if let Ok((file, _stat)) = server.get_ssh_session().scp_recv(Path::new(&delta_file_name)) {
         let mut delta_file = DeltaFileReader::<ssh2::File>::read_delta_stream(file)?;
         let restore_path = fs::OpenOptions::new()
             .create(true)
@@ -392,6 +398,7 @@ pub fn copy_a_file_item_rsync<'a, M, D>(
     sftp: &ssh2::Sftp,
     local_file_path: String,
     file_item: &FileItem<'a>,
+    pb: &Indicator,
 ) -> Result<FileItemProcessResult, failure::Error>
 where
     M: r2d2::ManageConnection,
@@ -402,11 +409,28 @@ where
     let mut sig = Signature::signature_a_file(
         &local_file_path,
         Some(server.server_yml.rsync_window),
-        server.pb.is_some(),
+        pb,
     )?;
+
+    let local_sig_file_path = format!("{}.sig", local_file_path);
+    sig.write_to_file(&local_sig_file_path)?;
+
     let remote_sig_file_path = format!("{}.sig", &remote_path);
     let sig_file = sftp.create(Path::new(&remote_sig_file_path))?;
-    sig.write_to_stream(sig_file)?;
+
+    pb.alter_pb(PbProperties {
+        reset: true,
+        set_style: Some(ProgressStyle::default_bar().template("[{eta_precise}] {bytes_per_sec} {decimal_bytes}/{decimal_total_bytes} {bar:30.cyan/blue} {wide_msg}").progress_chars("#-")),
+        set_message: Some(format!("start upload signature file. {}", local_sig_file_path)),
+        set_length: Some(Path::new(&local_sig_file_path).metadata()?.len()),
+        ..PbProperties::default()
+    });
+
+    let mut cw = CountWriter::new(sig_file, pb);
+    
+    let mut local_sig_file = fs::OpenOptions::new().read(true).open(Path::new(&local_sig_file_path))?;
+    io::copy(&mut local_sig_file, &mut cw)?;
+
     let delta_file_name = format!("{}.delta", &remote_path);
     let cmd = format!(
         "{} rsync delta-a-file --new-file {} --sig-file {} --out-file {}",
@@ -415,25 +439,12 @@ where
     trace!("about to invoke command: {:?}", cmd);
     let mut channel: ssh2::Channel = server.create_channel()?;
     channel.exec(cmd.as_str())?;
-    let mut ch_stderr = channel.stderr();
-    let mut chout = String::new();
-    if let Err(err) = ch_stderr.read_to_string(&mut chout) {
-        eprintln!("read stdout failed: {:?}", err);
-    }
-    if !chout.is_empty() {
-        trace!(
-            "after invoke delta command, there maybe err in channel: {:?}",
-            chout
-        );
-    }
-    if let Err(err) = channel.read_to_string(&mut chout) {
-        eprintln!("read channel failed: {:?}", err);
-    }
-    trace!(
-        "delta-a-file output: {:?}, delta_file_name: {:?}",
-        chout,
-        delta_file_name
-    );
+
+    let bufr = io::BufReader::new(channel);
+    bufr.lines().for_each(|line| {
+        eprintln!("{}", line.ok().unwrap_or_else(|| "".to_string()));
+    });
+
     if let Ok(file) = sftp.open(Path::new(&delta_file_name)) {
         let mut delta_file = DeltaFileReader::<ssh2::File>::read_delta_stream(file)?;
         let restore_path = fs::OpenOptions::new()
@@ -470,33 +481,32 @@ fn update_local_file_from_restored(local_file_path: impl AsRef<str>) -> Result<(
     Ok(())
 }
 
-pub fn copy_a_file_item<'a, M, D, F>(
+pub fn copy_a_file_item<'a, M, D>(
     server: &Server<M, D>,
     sftp: &ssh2::Sftp,
     file_item: FileItem<'a>,
     buf: &mut [u8],
-    counter: F,
+    pb: &mut Indicator,
 ) -> FileItemProcessResult
 where
     M: r2d2::ManageConnection,
     D: DbAccess<M>,
-    F: FnMut(u64) -> (),
 {
     if let Some(local_file_path) = file_item.get_local_path_str() {
         let copy_result = match file_item.sync_type {
             SyncType::Sftp => {
-                copy_a_file_item_sftp(sftp, local_file_path, &file_item, buf, counter)
+                copy_a_file_item_sftp(sftp, local_file_path, &file_item, buf, pb)
             }
             SyncType::Rsync => {
                 if !Path::new(&local_file_path).exists() {
-                    copy_a_file_item_sftp(sftp, local_file_path, &file_item, buf, counter)
+                    copy_a_file_item_sftp(sftp, local_file_path, &file_item, buf, pb)
                 } else {
-                    match copy_a_file_item_rsync(server, sftp, local_file_path.clone(), &file_item)
+                    match copy_a_file_item_rsync(server, sftp, local_file_path.clone(), &file_item, pb)
                     {
                         Ok(r) => r,
                         Err(err) => {
                             error!("rsync file failed: {:?}, {:?}", file_item, err);
-                            copy_a_file_item_sftp(sftp, local_file_path, &file_item, buf, counter)
+                            copy_a_file_item_sftp(sftp, local_file_path, &file_item, buf, pb)
                         }
                     }
                 }
@@ -558,6 +568,7 @@ mod tests {
         remote_relative_path: &'a str,
         remote_file_len: u64,
         sync_type: SyncType,
+        pb: &mut Indicator,
     ) -> Result<FileItemProcessResult, failure::Error>
     where
         M: r2d2::ManageConnection,
@@ -570,7 +581,7 @@ mod tests {
         let app_conf = tutil::load_demo_app_conf_sqlite(None);
         let mut another_server = tutil::load_demo_server_sqlite(&app_conf, None);
         another_server.connect()?;
-        let r = copy_a_file_item(&another_server, &sftp, fi, &mut buf, |_| {});
+        let r = copy_a_file_item(&another_server, &sftp, fi, &mut buf, pb);
         Ok(r)
     }
 
@@ -596,6 +607,7 @@ mod tests {
         let remote_file_name = test_dir2.tmp_file_name_only()?;
 
         info!("{:?}, local: {:?}", remote_file_name, local_file_name);
+        let mut indicator = Indicator::new(None);
         let r = copy_a_file(
             &mut server,
             test_dir1.tmp_dir_path(),
@@ -603,6 +615,7 @@ mod tests {
             remote_file_name.as_str(),
             test_dir2.tmp_file_len()?,
             SyncType::Sftp,
+            &mut indicator,
         )?;
         assert!(
             if let FileItemProcessResult::Successed(_, _, SyncType::Sftp) = r {
@@ -622,6 +635,7 @@ mod tests {
             test_dir2.tmp_file_name_only()?.as_str(),
             test_dir2.tmp_file_len()?,
             SyncType::Rsync,
+            &mut indicator,
         )?;
 
         tutil::change_file_content(&local_file_name)?;
@@ -642,6 +656,7 @@ mod tests {
             test_dir2.tmp_file_name_only()?.as_str(),
             test_dir2.tmp_file_len()?,
             SyncType::Rsync,
+            &mut indicator,
         )?;
         Ok(())
     }

@@ -41,13 +41,14 @@ use log::*;
 use mail::send_test_mail;
 use rayon::prelude::*;
 use std::env;
+use std::path::Path;
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 use std::{fs, io, io::BufRead, io::Write};
 
 use actions::SyncDirReport;
-use data_shape::{AppConf, Server, ServerYml, CONF_FILE_NAME};
+use data_shape::{AppConf, CountReadr, Indicator, Server, ServerYml, CONF_FILE_NAME};
 use r2d2_sqlite::SqliteConnectionManager;
 
 fn demonstrate_pbr() -> Result<(), failure::Error> {
@@ -184,7 +185,7 @@ where
     M: r2d2::ManageConnection,
     D: DbAccess<M>,
 {
-    let mut servers: Vec<Server<M, D>> = Vec::new();
+    let mut servers: Vec<(Server<M, D>, Indicator)> = Vec::new();
 
     if sub_matches.value_of("server-yml").is_some() {
         let server = app_conf.load_server_yml(sub_matches.value_of("server-yml").unwrap())?;
@@ -205,18 +206,44 @@ where
             servers.len()
         );
     }
-    servers.iter_mut().filter_map(|s|{
-        if let Err(err) = s.connect() {
-            eprintln!("{:?}", err);
-            None
-        } else {
-            Some(s)
-        }
-        }).count();
+    servers
+        .iter_mut()
+        .filter_map(|s| {
+            if let Err(err) = s.0.connect() {
+                eprintln!("{:?}", err);
+                None
+            } else {
+                Some(s)
+            }
+        })
+        .count();
 
-        servers.into_par_iter().for_each(|server| {
-        match server.sync_dirs() {
+    // let handlers = servers.into_iter().map(|(server, mut indicator)| {
+    //     thread::spawn(move || {
+    //     match server.sync_dirs(&mut indicator) {
+    //         Ok(result) => {
+    //             indicator.pb_finish();
+    //             actions::write_dir_sync_result(&server, result.as_ref());
+    //             if console_log {
+    //                 let result_yml = serde_yaml::to_string(&result)
+    //                     .expect("SyncDirReport should deserialize success.");
+    //                 println!("{}:\n{}", server.get_host(), result_yml);
+    //             }
+    //         }
+    //         Err(err) => println!("sync-dirs failed: {:?}", err),
+    //     }
+    //     })
+    // }).collect::<Vec<thread::JoinHandle<_>>>();
+
+    // for child in handlers {
+    //     // Wait for the thread to finish. Returns a result.
+    //     let _ = child.join();
+    // }
+
+    servers.into_par_iter().for_each(|(server, mut indicator)| {
+        match server.sync_dirs(&mut indicator) {
             Ok(result) => {
+                indicator.pb_finish();
                 actions::write_dir_sync_result(&server, result.as_ref());
                 if console_log {
                     let result_yml = serde_yaml::to_string(&result)
@@ -228,7 +255,7 @@ where
         }
     });
 
-    servers.iter().for_each(|sv|sv.pb_finish());
+    // servers.iter().for_each(|sv|sv.1.pb_finish());
     wait_progresss_bar_finish(t);
     Ok(())
 }
@@ -255,7 +282,7 @@ fn main() -> Result<(), failure::Error> {
             .replace(Arc::new(MultiProgress::new()));
     }
     if let Some(buf_len) = m.value_of("buf-len") {
-        app_conf.buf_len = Some(buf_len.parse()?);
+        app_conf.mini_app_conf.buf_len = Some(buf_len.parse()?);
     }
 
     let verbose = if m.is_present("vv") {
@@ -274,7 +301,8 @@ fn main() -> Result<(), failure::Error> {
     )?;
 
     if let ("create-remote-db", Some(sub_matches)) = m.subcommand() {
-        let mut server = app_conf.load_server_yml(sub_matches.value_of("server-yml").unwrap())?;
+        let (mut server, _indicator) =
+            app_conf.load_server_yml(sub_matches.value_of("server-yml").unwrap())?;
         let db_type = sub_matches.value_of("db-type").unwrap_or("sqlite");
         let force = sub_matches.is_present("force");
         server.connect()?;
@@ -357,8 +385,30 @@ where
             let to = sub_matches.value_of("to").unwrap();
             send_test_mail(&app_conf.get_mail_conf(), to)?;
         }
+        ("polling-file", Some(sub_matches)) => {
+            let file = sub_matches.value_of("file").unwrap();
+            let period = sub_matches.value_of("period").unwrap_or("3").parse::<u64>().ok().unwrap_or(3);
+            let path = Path::new(file);
+            let mut last_len = 0;
+            let mut count = 0;
+            loop {
+                if count > 1 {
+                    break;
+                }
+                thread::sleep(Duration::from_secs(period));
+                let ln = path.metadata()?.len();
+                if ln == last_len {
+                    count += 1;
+                } else {
+                    last_len = ln;
+                }
+                println!("{}", ln);
+
+            }
+            
+        }
         ("copy-executable", Some(sub_matches)) => {
-            let mut server =
+            let (mut server, _indicator) =
                 app_conf.load_server_yml(sub_matches.value_of("server-yml").unwrap())?;
             let executable = sub_matches.value_of("executable").unwrap();
             let remote = server.server_yml.remote_exec.clone();
@@ -371,7 +421,8 @@ where
             );
         }
         ("print-report", Some(sub_matches)) => {
-            let server = app_conf.load_server_yml(sub_matches.value_of("server-yml").unwrap())?;
+            let (server, _indicator) =
+                app_conf.load_server_yml(sub_matches.value_of("server-yml").unwrap())?;
             let fbuf = io::BufReader::new(
                 fs::OpenOptions::new()
                     .read(true)
@@ -387,7 +438,7 @@ where
             }
         }
         ("copy-server-yml", Some(sub_matches)) => {
-            let mut server =
+            let (mut server, _indicator) =
                 app_conf.load_server_yml(sub_matches.value_of("server-yml").unwrap())?;
             let remote = server.server_yml.remote_server_yml.clone();
             let local = server
@@ -430,7 +481,7 @@ where
             }
         }
         ("archive-local", Some(sub_matches)) => {
-            let mut servers: Vec<Server<M, D>> = Vec::new();
+            let mut servers: Vec<(Server<M, D>, Indicator)> = Vec::new();
 
             if sub_matches.value_of("server-yml").is_some() {
                 let server =
@@ -455,46 +506,49 @@ where
             let prune_op = sub_matches.value_of("prune");
             let prune_only_op = sub_matches.value_of("prune-only");
 
-            servers.into_par_iter().map(|server| {
-                if prune_op.is_some() {
-                    if let Err(err) = server.tar_local() {
+            servers
+                .into_par_iter()
+                .map(|(server, mut indicator)| {
+                    if prune_op.is_some() {
+                        if let Err(err) = server.tar_local(&mut indicator) {
+                            error!("{:?}", err);
+                            eprintln!("{:?}", err);
+                        }
+                        if let Err(err) = server.prune_backups() {
+                            error!("{:?}", err);
+                            eprintln!("{:?}", err);
+                        }
+                    } else if prune_only_op.is_some() {
+                        if let Err(err) = server.prune_backups() {
+                            error!("{:?}", err);
+                            eprintln!("{:?}", err);
+                        }
+                    } else if let Err(err) = server.tar_local(&mut indicator) {
                         error!("{:?}", err);
                         eprintln!("{:?}", err);
                     }
-                    if let Err(err) = server.prune_backups() {
-                        error!("{:?}", err);
-                        eprintln!("{:?}", err);
-                    }
-                } else if prune_only_op.is_some() {
-                    if let Err(err) = server.prune_backups() {
-                        error!("{:?}", err);
-                        eprintln!("{:?}", err);
-                    }
-                } else if let Err(err) = server.tar_local() {
-                    error!("{:?}", err);
-                    eprintln!("{:?}", err);
-                }
-            }).count();
+                    indicator.pb_finish();
+                })
+                .count();
 
-            servers.iter().for_each(|sv| sv.pb_finish());
             wait_progresss_bar_finish(t);
         }
         ("confirm-remote-sync", Some(sub_matches)) => {
             let start = Instant::now();
-            let mut server =
+            let (mut server, _indicator) =
                 app_conf.load_server_yml(sub_matches.value_of("server-yml").unwrap())?;
             server.connect()?;
             server.confirm_remote_sync()?;
             eprintln!("time costs: {:?}", start.elapsed().as_secs());
         }
         ("confirm-local-sync", Some(sub_matches)) => {
-            let mut server =
+            let (server, _indicator) =
                 app_conf.load_server_yml(sub_matches.value_of("server-yml").unwrap())?;
             server.confirm_local_sync()?;
         }
         ("list-remote-files", Some(sub_matches)) => {
             let start = Instant::now();
-            let mut server =
+            let (mut server, _indicator) =
                 app_conf.load_server_yml(sub_matches.value_of("server-yml").unwrap())?;
             server.connect()?;
             server.list_remote_file_exec(no_db)?;
@@ -519,7 +573,7 @@ where
             println!("time costs: {:?}", start.elapsed().as_secs());
         }
         ("list-local-files", Some(sub_matches)) => {
-            let mut server =
+            let (mut server, _indicator) =
                 app_conf.load_server_yml(sub_matches.value_of("server-yml").unwrap())?;
             if no_db {
                 server.server_yml.use_db = false;
@@ -536,7 +590,7 @@ where
             }
         }
         ("verify-server-yml", Some(sub_matches)) => {
-            let mut server =
+            let (mut server, _indicator) =
                 app_conf.load_server_yml(sub_matches.value_of("server-yml").unwrap())?;
             eprintln!(
                 "found server configuration yml at: {:?}",
@@ -580,71 +634,26 @@ where
         }
         ("rsync", Some(sub_matches)) => match sub_matches.subcommand() {
             ("restore-a-file", Some(sub_sub_matches)) => {
-                let old_file = sub_sub_matches.value_of("old-file").unwrap();
-                let maybe_delta_file = sub_sub_matches.value_of("delta-file");
-                let maybe_out_file = sub_sub_matches.value_of("out-file");
-                let delta_file = if let Some(f) = maybe_delta_file {
-                    f.to_string()
-                } else {
-                    format!("{}.delta", old_file)
-                };
-
-                let out_file = if let Some(f) = maybe_out_file {
-                    f.to_string()
-                } else {
-                    format!("{}.restore", old_file)
-                };
-
-                let mut dr = rustsync::DeltaFileReader::<fs::File>::read_delta_file(delta_file)?;
-                dr.restore_from_file_to_file(out_file, old_file)?;
+                restore_a_file(
+                    sub_sub_matches.value_of("old-file"),
+                    sub_sub_matches.value_of("delta-file"),
+                    sub_sub_matches.value_of("out-file"),
+                )?;
             }
             ("delta-a-file", Some(sub_sub_matches)) => {
-                let new_file = sub_sub_matches.value_of("new-file").unwrap();
-                let maybe_sig_file = sub_sub_matches.value_of("sig-file");
-                let maybe_out_file = sub_sub_matches.value_of("out-file");
-                let sig_file = if let Some(f) = maybe_sig_file {
-                    f.to_string()
-                } else {
-                    format!("{}.sig", new_file)
-                };
-
-                let out_file = if let Some(f) = maybe_out_file {
-                    f.to_string()
-                } else {
-                    format!("{}.delta", new_file)
-                };
-
-                let sig = rustsync::Signature::load_signature_file(sig_file)?;
-
-                let new_file_input = fs::OpenOptions::new().read(true).open(new_file)?;
-                rustsync::DeltaFileWriter::<fs::File>::create_delta_file(
-                    out_file, sig.window, None,
-                )?
-                .compare(&sig, new_file_input)?;
+                delta_a_file(
+                    sub_sub_matches.value_of("new-file"),
+                    sub_sub_matches.value_of("sig-file"),
+                    sub_sub_matches.value_of("out-file"),
+                )?;
             }
             ("signature", Some(sub_sub_matches)) => {
-                let file = sub_sub_matches.value_of("file").unwrap();
-                let block_size: Option<usize> = sub_sub_matches
-                    .value_of("block-size")
-                    .and_then(|s| s.parse().ok());
-                let sig_file = format!("{}.sig", file);
-                let out = sub_sub_matches
-                    .value_of("out")
-                    .unwrap_or_else(|| sig_file.as_str());
-                let start = Instant::now();
-                match rustsync::Signature::signature_a_file(file, block_size, true) {
-                    Ok(mut sig) => {
-                        if let Err(err) = sig.write_to_file(out) {
-                            error!("rsync signature write_to_file failed: {:?}", err);
-                        }
-                    }
-                    Err(err) => {
-                        error!("rsync signature failed: {:?}", err);
-                    }
-                }
-                eprintln!("time costs: {:?}", start.elapsed().as_secs());
+                signature(
+                    sub_sub_matches.value_of("file"),
+                    sub_sub_matches.value_of("block-size"),
+                    sub_sub_matches.value_of("out"),
+                )?;
             }
-
             (_, _) => {
                 println!("please add --help to view usage help.");
             }
@@ -670,110 +679,106 @@ where
     Ok(())
 }
 
-// struct MyHelper {
-//     completer: FilenameCompleter,
-//     highlighter: MatchingBracketHighlighter,
-//     hinter: HistoryHinter,
-//     colored_prompt: String,
-// }
+fn restore_a_file(
+    old_file: Option<&str>,
+    maybe_delta_file: Option<&str>,
+    maybe_out_file: Option<&str>,
+) -> Result<String, failure::Error> {
+    let old_file = old_file.unwrap();
+    let delta_file = if let Some(f) = maybe_delta_file {
+        f.to_string()
+    } else {
+        format!("{}.delta", old_file)
+    };
 
-// impl Completer for MyHelper {
-//     type Candidate = Pair;
+    let out_file = if let Some(f) = maybe_out_file {
+        f.to_string()
+    } else {
+        format!("{}.restore", old_file)
+    };
 
-//     fn complete(
-//         &self,
-//         line: &str,
-//         pos: usize,
-//         ctx: &Context<'_>,
-//     ) -> Result<(usize, Vec<Pair>), ReadlineError> {
-//         self.completer.complete(line, pos, ctx)
-//     }
-// }
+    let mut dr = rustsync::DeltaFileReader::<fs::File>::read_delta_file(delta_file)?;
+    dr.restore_from_file_to_file(&out_file, old_file)?;
+    Ok(out_file)
+}
 
-// impl Hinter for MyHelper {
-//     fn hint(&self, line: &str, pos: usize, ctx: &Context<'_>) -> Option<String> {
-//         self.hinter.hint(line, pos, ctx)
-//     }
-// }
+fn delta_a_file(
+    new_file: Option<&str>,
+    maybe_sig_file: Option<&str>,
+    maybe_out_file: Option<&str>,
+) -> Result<String, failure::Error> {
+    let new_file = new_file.unwrap();
+    let new_file_length = Path::new(new_file).metadata()?.len();
+    println!("size:{}", new_file_length);
+    let sig_file = if let Some(f) = maybe_sig_file {
+        f.to_string()
+    } else {
+        format!("{}.sig", new_file)
+    };
 
-// impl Highlighter for MyHelper {
-//     fn highlight_prompt<'b, 's: 'b, 'p: 'b>(
-//         &'s self,
-//         prompt: &'p str,
-//         default: bool,
-//     ) -> Cow<'b, str> {
-//         if default {
-//             Borrowed(&self.colored_prompt)
-//         } else {
-//             Borrowed(prompt)
-//         }
-//     }
+    let out_file = if let Some(f) = maybe_out_file {
+        f.to_string()
+    } else {
+        format!("{}.delta", new_file)
+    };
 
-//     fn highlight_hint<'h>(&self, hint: &'h str) -> Cow<'h, str> {
-//         Owned("\x1b[1m".to_owned() + hint + "\x1b[m")
-//     }
+    let sig = rustsync::Signature::load_signature_file(sig_file)?;
 
-//     fn highlight<'l>(&self, line: &'l str, pos: usize) -> Cow<'l, str> {
-//         self.highlighter.highlight(line, pos)
-//     }
+    let new_file_input = fs::OpenOptions::new().read(true).open(new_file)?;
 
-//     fn highlight_char(&self, line: &str, pos: usize) -> bool {
-//         self.highlighter.highlight_char(line, pos)
-//     }
-// }
+    let nr = CountReadr::new(new_file_input, |num| println!("{:?}", num));
+    rustsync::DeltaFileWriter::<fs::File>::create_delta_file(&out_file, sig.window, None)?
+        .compare(&sig, nr)?;
+    Ok(out_file)
+}
 
-// impl Helper for MyHelper {}
+fn signature(
+    file: Option<&str>,
+    block_size: Option<&str>,
+    out: Option<&str>,
+) -> Result<String, failure::Error> {
+    let file = file.unwrap();
+    let block_size: Option<usize> = block_size.and_then(|s| s.parse().ok());
+    let sig_file = format!("{}.sig", file);
+    let out = out.unwrap_or_else(|| sig_file.as_str());
+    let start = Instant::now();
+    let indicator = Indicator::new(None);
+    match rustsync::Signature::signature_a_file(file, block_size, &indicator) {
+        Ok(mut sig) => {
+            if let Err(err) = sig.write_to_file(out) {
+                error!("rsync signature write_to_file failed: {:?}", err);
+            }
+        }
+        Err(err) => {
+            error!("rsync signature failed: {:?}", err);
+        }
+    }
+    eprintln!("time costs: {:?}", start.elapsed().as_secs());
+    Ok(out.to_owned())
+}
 
-// fn main_client() {
-//     // env_logger::init();
-//     let config = Config::builder()
-//         .history_ignore_space(true)
-//         .completion_type(CompletionType::List)
-//         .edit_mode(EditMode::Emacs)
-//         .output_stream(OutputStreamType::Stdout)
-//         .build();
 
-//     let h = MyHelper {
-//         completer: FilenameCompleter::new(),
-//         highlighter: MatchingBracketHighlighter::new(),
-//         hinter: HistoryHinter {},
-//         colored_prompt: "".to_owned(),
-//     };
-//     let mut rl = Editor::with_config(config);
-//     rl.set_helper(Some(h));
-//     rl.bind_sequence(KeyPress::Meta('N'), Cmd::HistorySearchForward);
-//     rl.bind_sequence(KeyPress::Meta('P'), Cmd::HistorySearchBackward);
-//     if rl.load_history("history.txt").is_err() {
-//         println!("No previous history.");
-//     }
-//     let mut count = 1;
-//     loop {
-//         let p = format!("{}> ", count);
-//         rl.helper_mut().unwrap().colored_prompt = format!("\x1b[1;32m{}\x1b[0m", p);
-//         let readline = rl.readline(&p);
-//         match readline {
-//             Ok(line) => {
-//                 rl.add_history_entry(line.as_str());
-//                 println!("Line: {}", line);
-//                 if line.starts_with("hash ") {
-//                     let (_s1, s2) = line.split_at(5);
-//                     actions::hash_file_sha1(s2).expect("hash should success.");
-//                 }
-//             }
-//             Err(ReadlineError::Interrupted) => {
-//                 println!("CTRL-C");
-//                 break;
-//             }
-//             Err(ReadlineError::Eof) => {
-//                 println!("CTRL-D");
-//                 break;
-//             }
-//             Err(err) => {
-//                 println!("Error: {:?}", err);
-//                 break;
-//             }
-//         }
-//         count += 1;
-//     }
-//     rl.save_history("history.txt").unwrap();
-// }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::develope::tutil;
+    use std::path::PathBuf;
+    use crate::actions::{hash_file_sha1};
+
+    #[test]
+    fn t_sig_delta_restore() -> Result<(), failure::Error> {
+        let tu = tutil::TestDir::new();
+        let old_file_path = tu.make_a_file_with_len("abc", 100_000)?;
+        let old_file_name = old_file_path.as_path().to_str();
+        let sig_file_name = signature(old_file_name, None, None)?;
+        eprintln!("sig_file_name: {:?}", sig_file_name);
+        assert!(PathBuf::from(&sig_file_name).exists());
+        let delta_file = delta_a_file(old_file_name, None, None)?;
+        eprintln!("delta_file {:?}", delta_file);
+        assert!(PathBuf::from(&delta_file).exists());
+        let restored = restore_a_file(old_file_name, None, None)?;
+        assert_eq!(hash_file_sha1(restored), hash_file_sha1(old_file_name.unwrap()));
+        Ok(())
+    }
+
+}

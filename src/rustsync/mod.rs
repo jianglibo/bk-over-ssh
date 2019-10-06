@@ -8,6 +8,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use std::collections::HashMap;
 use std::path::Path;
 use std::{fs, io};
+use crate::data_shape::{Indicator, PbProperties};
 
 pub use delta_file::{DeltaFileReader, DeltaFileWriter};
 // use tokio_io::{AsyncRead, AsyncWrite};
@@ -38,11 +39,11 @@ pub struct Signature {
 }
 
 impl Signature {
-    #[allow(dead_code)]
     pub fn write_to_file(&mut self, file_name: impl AsRef<Path>) -> Result<(), failure::Error> {
         let writer = fs::OpenOptions::new()
             .create(true)
             .write(true)
+            .truncate(true)
             .open(file_name.as_ref())?;
         self.write_to_stream(writer)
     }
@@ -103,10 +104,10 @@ impl Signature {
     /// map of blocks. The first step of the protocol is to run this
     /// function on the "source" (the remote file when downloading, the
     /// local file while uploading).
-    pub fn signature<R: io::BufRead, B: AsRef<[u8]> + AsMut<[u8]>>(
+    pub fn signature<R: io::BufRead, B: AsRef<[u8]> + AsMut<[u8]>> (
         mut r: R,
         mut buff: B,
-        pb: Option<&ProgressBar>,
+        pb: &Indicator,
     ) -> Result<Signature, failure::Error> {
         let mut chunks = HashMap::new();
         let mut i = 0;
@@ -117,9 +118,11 @@ impl Signature {
             while j < buff.len() {
                 // full fill the block. for the last block, maybe not full.
                 let r = r.read(&mut buff[j..])?;
-                if let Some(pb) = pb.as_ref() {
-                    pb.inc(r as u64);
-                }
+                // if let Some(pb) = pb.as_ref() {
+                //     pb.inc(r as u64);
+                // }
+                // bp(r as u64);
+                pb.inc_pb(r as u64);
                 if r == 0 {
                     eof = true;
                     break;
@@ -150,27 +153,22 @@ impl Signature {
     pub fn signature_a_file(
         file_name: impl AsRef<Path>,
         buf_size: Option<usize>,
-        show_pb: bool,
+        pb: &Indicator,
     ) -> Result<Signature, failure::Error> {
         let file_name = file_name.as_ref();
         let f = fs::OpenOptions::new().read(true).open(file_name)?;
         let total_bytes = f.metadata()?.len();
-        let pb = if show_pb {
-            let style = ProgressStyle::default_bar().template("[{eta_precise}] {bytes_per_sec} {decimal_bytes}/{decimal_total_bytes} {bar:30.cyan/blue} {wide_msg}").progress_chars("#-");
-            let pb1 = ProgressBar::new(total_bytes).with_style(style);
-            pb1.set_message(&format!("start signature file: {:?}", file_name));
-            Some(pb1)
-        } else {
-            None
-        };
+
+        pb.alter_pb(PbProperties{
+            set_style: Some(ProgressStyle::default_bar().template("[{eta_precise}] {bytes_per_sec} {decimal_bytes}/{decimal_total_bytes} {bar:30.cyan/blue} {wide_msg}").progress_chars("#-")),
+            set_message: Some(format!("start signature file: {:?}", file_name)),
+            set_length: Some(total_bytes),
+            ..PbProperties::default()
+        });
+        
         let mut br = io::BufReader::new(f);
         let mut buf = vec![0_u8; buf_size.unwrap_or(2048)];
-        let r = Signature::signature(&mut br, &mut buf[..], pb.as_ref());
-
-        if let Some(pb) = pb.as_ref() {
-            pb.finish_and_clear();
-        }
-        r
+        Signature::signature(&mut br, &mut buf[..], pb)
     }
 }
 
@@ -230,10 +228,12 @@ pub trait DeltaReader {
 }
 
 pub trait DeltaWriter {
+    /// means the block is identical to origin, don't nedd to download.
     fn push_from_source(&mut self, position: u64) -> Result<(), failure::Error>;
     fn push_byte(&mut self, byte: u8) -> Result<(), failure::Error>;
     fn finishup(&mut self) -> Result<(), failure::Error>;
 
+    /// compare the sig file make out of old file to the new file.
     fn compare<R: io::Read>(&mut self, sig: &Signature, mut r: R) -> Result<(), failure::Error> {
         let mut st = State::new();
         let mut buff = vec![0_u8; sig.window];
@@ -352,7 +352,8 @@ mod tests {
                     ((source.as_bytes()[index] as usize + 1) & 255) as u8
             }
             let block = [0; WINDOW];
-            let source_sig = Signature::signature(source.as_bytes(), block, None)?;
+            let mut indicator = Indicator::new(None);
+            let source_sig = Signature::signature(source.as_bytes(), block, &mut indicator)?;
             // println!("source_sig: {:?}", source_sig);
             // let mut blocks = Vec::new();
             let mut delta = delta_mem::DeltaMem::new(WINDOW);
@@ -420,7 +421,8 @@ mod tests {
         let start = Instant::now();
         let test_dir = tutil::create_a_dir_and_a_file_with_len("xx.bin", 1024 * 1024 * 4)?;
         let demo_file = test_dir.tmp_file_str()?;
-        let mut sig = Signature::signature_a_file(&demo_file, Some(4096), false)?;
+        let mut indicator = Indicator::new(None);
+        let mut sig = Signature::signature_a_file(&demo_file, Some(4096), &mut indicator)?;
 
         let sig_out = "target/cc.sig";
         sig.write_to_file(sig_out)?;

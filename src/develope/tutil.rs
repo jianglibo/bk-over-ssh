@@ -1,4 +1,4 @@
-use crate::data_shape::{demo_app_conf, AppConf, Server, load_server_from_yml};
+use crate::data_shape::{demo_app_conf, AppConf, Server};
 use crate::db_accesses::{DbAccess, SqliteDbAccess};
 use r2d2_sqlite::SqliteConnectionManager;
 use rand::Rng;
@@ -13,13 +13,12 @@ pub fn load_demo_app_conf_sqlite(data_dir: Option<&str>) -> AppConf<SqliteConnec
 }
 
 #[allow(dead_code)]
-pub fn load_demo_server_sqlite<'a> (
-    app_conf: &'a AppConf<SqliteConnectionManager, SqliteDbAccess>,
+pub fn load_demo_server_sqlite (
+    app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
     server_yml: Option<&str>,
-) -> Server<'a, SqliteConnectionManager, SqliteDbAccess> {
+) -> Server<SqliteConnectionManager, SqliteDbAccess> {
     let server_yml = server_yml.unwrap_or_else(||"localhost.yml");
-    load_server_from_yml(
-        app_conf,
+    app_conf.load_server_from_yml(
         server_yml,
     )
     .unwrap()
@@ -157,7 +156,7 @@ impl TestDir {
         &self,
         file_name: impl AsRef<str>,
         file_len: usize,
-    ) -> Result<(), failure::Error> {
+    ) -> Result<PathBuf, failure::Error> {
         let tmp_file = self.tmp_dir.path().join(file_name.as_ref());
 
         let mut tmp_file_writer = BufWriter::new(
@@ -179,7 +178,7 @@ impl TestDir {
                     .map_err(|e| e.into());
                 x
             })?;
-        Ok(())
+        Ok(tmp_file)
     }
 }
 

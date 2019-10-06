@@ -1,7 +1,7 @@
 use std::sync::{Arc};
 use indicatif::{MultiProgress};
 
-pub type SharedMpb = Arc<MultiProgress>;
+// pub type SharedMpb = Arc<MultiProgress>;
 
 // pub type ArcedMultiBar = Arc<Mutex<MultiBar<io::Stdout>>>;
 // pub type ArcedMultiBar = Arc<MultiBar<io::Stdout>>;
