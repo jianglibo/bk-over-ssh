@@ -318,6 +318,9 @@ subcommands:
                         long: out-file
                         required: false
                         takes_value: true
+                    - print-progress:
+                        long: print-progress
+                        required: false
             - restore-a-file:
                 args:
                     - old-file:

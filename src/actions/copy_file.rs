@@ -1,6 +1,9 @@
-use crate::data_shape::{FileItem, FileItemProcessResult, Server, SyncType, CountWriter, Indicator, PbProperties};
+use crate::data_shape::{
+    CountWriter, FileItem, FileItemProcessResult, Indicator, PbProperties, Server, SyncType,
+};
 use crate::db_accesses::DbAccess;
 use crate::rustsync::{DeltaFileReader, DeltaReader, Signature};
+use indicatif::ProgressStyle;
 use log::*;
 use r2d2;
 use sha1::{Digest, Sha1};
@@ -8,8 +11,7 @@ use ssh2;
 use std::ffi::OsStr;
 use std::io::prelude::Write;
 use std::path::Path;
-use std::{fs, io, io::Read, io::BufRead};
-use indicatif::{ProgressStyle};
+use std::{fs, io, io::BufRead, io::Read};
 
 #[allow(dead_code)]
 pub fn copy_file_to_stream(
@@ -205,15 +207,11 @@ pub fn copy_a_file_item_scp<'a>(
     buf: &mut [u8],
     pb: &mut Indicator,
 ) -> FileItemProcessResult {
-        match session.scp_recv(Path::new(file_item.get_remote_path().as_str())) {
+    match session.scp_recv(Path::new(file_item.get_remote_path().as_str())) {
         Ok((mut file, _stat)) => {
             if let Some(_r_sha1) = file_item.get_remote_item().get_sha1() {
-                match copy_stream_to_file_return_sha1_with_cb(
-                    &mut file,
-                    &local_file_path,
-                    buf,
-                    pb,
-                ) {
+                match copy_stream_to_file_return_sha1_with_cb(&mut file, &local_file_path, buf, pb)
+                {
                     Ok((length, sha1)) => {
                         if length != file_item.get_remote_item().get_len() {
                             error!("length didn't match: {:?}", file_item);
@@ -272,12 +270,8 @@ pub fn copy_a_file_item_sftp<'a>(
     match sftp.open(Path::new(&file_item.get_remote_path())) {
         Ok(mut file) => {
             if let Some(_r_sha1) = file_item.get_remote_item().get_sha1() {
-                match copy_stream_to_file_return_sha1_with_cb(
-                    &mut file,
-                    &local_file_path,
-                    buf,
-                    pb,
-                ) {
+                match copy_stream_to_file_return_sha1_with_cb(&mut file, &local_file_path, buf, pb)
+                {
                     Ok((length, sha1)) => {
                         if length != file_item.get_remote_item().get_len() {
                             error!("length didn't match: {:?}", file_item);
@@ -337,17 +331,19 @@ where
 {
     let remote_path = file_item.get_remote_path();
     trace!("start signature_a_file {}", &local_file_path);
-    let mut sig = Signature::signature_a_file(
-        &local_file_path,
-        Some(server.server_yml.rsync_window),
-        pb,
-    )?;
+    let mut sig =
+        Signature::signature_a_file(&local_file_path, Some(server.server_yml.rsync_window), pb)?;
     let local_sig_file_path_str = format!("{}.sig", &local_file_path);
     let local_sig_file_path = Path::new(local_sig_file_path_str.as_str());
     sig.write_to_file(local_sig_file_path)?;
     let len = local_sig_file_path.metadata()?.len();
     let remote_sig_file_path = format!("{}.sig", &remote_path);
-    let sig_file = server.get_ssh_session().scp_send(Path::new(remote_sig_file_path.as_str()), 0o022, len, None)?;
+    let sig_file = server.get_ssh_session().scp_send(
+        Path::new(remote_sig_file_path.as_str()),
+        0o022,
+        len,
+        None,
+    )?;
     let cw = CountWriter::new(sig_file, pb);
     let delta_file_name = format!("{}.delta", &remote_path);
     let cmd = format!(
@@ -372,7 +368,10 @@ where
         chout,
         delta_file_name
     );
-    if let Ok((file, _stat)) = server.get_ssh_session().scp_recv(Path::new(&delta_file_name)) {
+    if let Ok((file, _stat)) = server
+        .get_ssh_session()
+        .scp_recv(Path::new(&delta_file_name))
+    {
         let mut delta_file = DeltaFileReader::<ssh2::File>::read_delta_stream(file)?;
         let restore_path = fs::OpenOptions::new()
             .create(true)
@@ -406,11 +405,8 @@ where
 {
     let remote_path = file_item.get_remote_path();
     trace!("start signature_a_file {}", &local_file_path);
-    let mut sig = Signature::signature_a_file(
-        &local_file_path,
-        Some(server.server_yml.rsync_window),
-        pb,
-    )?;
+    let mut sig =
+        Signature::signature_a_file(&local_file_path, Some(server.server_yml.rsync_window), pb)?;
 
     let local_sig_file_path = format!("{}.sig", local_file_path);
     sig.write_to_file(&local_sig_file_path)?;
@@ -427,13 +423,15 @@ where
     });
 
     let mut cw = CountWriter::new(sig_file, pb);
-    
-    let mut local_sig_file = fs::OpenOptions::new().read(true).open(Path::new(&local_sig_file_path))?;
+
+    let mut local_sig_file = fs::OpenOptions::new()
+        .read(true)
+        .open(Path::new(&local_sig_file_path))?;
     io::copy(&mut local_sig_file, &mut cw)?;
 
     let delta_file_name = format!("{}.delta", &remote_path);
     let cmd = format!(
-        "{} rsync delta-a-file --new-file {} --sig-file {} --out-file {}",
+        "{} rsync delta-a-file --print-progress --new-file {} --sig-file {} --out-file {}",
         server.server_yml.remote_exec, &remote_path, &remote_sig_file_path, &delta_file_name,
     );
     trace!("about to invoke command: {:?}", cmd);
@@ -442,7 +440,21 @@ where
 
     let bufr = io::BufReader::new(channel);
     bufr.lines().for_each(|line| {
-        eprintln!("{}", line.ok().unwrap_or_else(|| "".to_string()));
+        let line = line.ok().unwrap_or_else(|| "".to_string());
+        if line.starts_with("size:") {
+            let (_, d) = line.split_at(5);
+            let i = d.parse::<u64>().ok().unwrap_or(!0);
+                pb.alter_pb(PbProperties {
+        reset: true,
+        set_style: Some(ProgressStyle::default_bar().template("[{eta_precise}] {bytes_per_sec} {decimal_bytes}/{decimal_total_bytes} {bar:30.cyan/blue} {wide_msg}").progress_chars("#-")),
+        set_message: Some("start calculating delta file.".to_string()),
+        set_length: Some(i),
+        ..PbProperties::default()
+    });
+        } else {
+            let i =  line.parse::<u64>().ok().unwrap_or(0);
+            pb.inc_pb(i);
+        }
     });
 
     if let Ok(file) = sftp.open(Path::new(&delta_file_name)) {
@@ -494,15 +506,18 @@ where
 {
     if let Some(local_file_path) = file_item.get_local_path_str() {
         let copy_result = match file_item.sync_type {
-            SyncType::Sftp => {
-                copy_a_file_item_sftp(sftp, local_file_path, &file_item, buf, pb)
-            }
+            SyncType::Sftp => copy_a_file_item_sftp(sftp, local_file_path, &file_item, buf, pb),
             SyncType::Rsync => {
                 if !Path::new(&local_file_path).exists() {
                     copy_a_file_item_sftp(sftp, local_file_path, &file_item, buf, pb)
                 } else {
-                    match copy_a_file_item_rsync(server, sftp, local_file_path.clone(), &file_item, pb)
-                    {
+                    match copy_a_file_item_rsync(
+                        server,
+                        sftp,
+                        local_file_path.clone(),
+                        &file_item,
+                        pb,
+                    ) {
                         Ok(r) => r,
                         Err(err) => {
                             error!("rsync file failed: {:?}, {:?}", file_item, err);

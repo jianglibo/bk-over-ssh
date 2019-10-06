@@ -56,14 +56,22 @@ impl Indicator {
         self
     }
 
-    pub fn alter_pb(&self, pb_properties: PbProperties) {
-        let pb = if self.active_pb == 0 {
+    fn get_active_pb(&self) -> Option<&ProgressBar> {
+        if self.active_pb == 0 {
             self.pb_total.as_ref()
         } else {
             self.pb_item.as_ref()
-        };
+        }
+    }
 
-        if let Some(pb) = pb {
+    pub fn set_length(&self, len: u64) {
+        if let Some(pb) = self.get_active_pb() {
+            pb.set_length(len);
+        }
+    }
+
+    pub fn alter_pb(&self, pb_properties: PbProperties) {
+        if let Some(pb) = self.get_active_pb() {
             if let Some(style) = pb_properties.set_style {
                 pb.set_style(style);
             }

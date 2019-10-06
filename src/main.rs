@@ -387,7 +387,12 @@ where
         }
         ("polling-file", Some(sub_matches)) => {
             let file = sub_matches.value_of("file").unwrap();
-            let period = sub_matches.value_of("period").unwrap_or("3").parse::<u64>().ok().unwrap_or(3);
+            let period = sub_matches
+                .value_of("period")
+                .unwrap_or("3")
+                .parse::<u64>()
+                .ok()
+                .unwrap_or(3);
             let path = Path::new(file);
             let mut last_len = 0;
             let mut count = 0;
@@ -403,9 +408,7 @@ where
                     last_len = ln;
                 }
                 println!("{}", ln);
-
             }
-            
         }
         ("copy-executable", Some(sub_matches)) => {
             let (mut server, _indicator) =
@@ -645,6 +648,7 @@ where
                     sub_sub_matches.value_of("new-file"),
                     sub_sub_matches.value_of("sig-file"),
                     sub_sub_matches.value_of("out-file"),
+                    sub_sub_matches.is_present("print-progress"),
                 )?;
             }
             ("signature", Some(sub_sub_matches)) => {
@@ -706,10 +710,13 @@ fn delta_a_file(
     new_file: Option<&str>,
     maybe_sig_file: Option<&str>,
     maybe_out_file: Option<&str>,
+    print_progress: bool,
 ) -> Result<String, failure::Error> {
     let new_file = new_file.unwrap();
-    let new_file_length = Path::new(new_file).metadata()?.len();
-    println!("size:{}", new_file_length);
+    if print_progress {
+        let new_file_length = Path::new(new_file).metadata()?.len();
+        println!("size:{}", new_file_length);
+    }
     let sig_file = if let Some(f) = maybe_sig_file {
         f.to_string()
     } else {
@@ -724,11 +731,22 @@ fn delta_a_file(
 
     let sig = rustsync::Signature::load_signature_file(sig_file)?;
 
-    let new_file_input = fs::OpenOptions::new().read(true).open(new_file)?;
-
-    let nr = CountReadr::new(new_file_input, |num| println!("{:?}", num));
-    rustsync::DeltaFileWriter::<fs::File>::create_delta_file(&out_file, sig.window, None)?
-        .compare(&sig, nr)?;
+    let new_file_input = io::BufReader::new(fs::OpenOptions::new().read(true).open(new_file)?);
+    if print_progress {
+        let mut sum = 0;
+        let f = |num| {
+            sum += num;
+            if sum > 5_0000 {
+                println!("{:?}", num);
+            }
+        };
+        let nr = CountReadr::new(new_file_input, f);
+        rustsync::DeltaFileWriter::<fs::File>::create_delta_file(&out_file, sig.window, None)?
+            .compare(&sig, nr)?;
+    } else {
+        rustsync::DeltaFileWriter::<fs::File>::create_delta_file(&out_file, sig.window, None)?
+            .compare(&sig, new_file_input)?;
+    }
     Ok(out_file)
 }
 
@@ -757,13 +775,12 @@ fn signature(
     Ok(out.to_owned())
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::actions::hash_file_sha1;
     use crate::develope::tutil;
     use std::path::PathBuf;
-    use crate::actions::{hash_file_sha1};
 
     #[test]
     fn t_sig_delta_restore() -> Result<(), failure::Error> {
@@ -773,12 +790,14 @@ mod tests {
         let sig_file_name = signature(old_file_name, None, None)?;
         eprintln!("sig_file_name: {:?}", sig_file_name);
         assert!(PathBuf::from(&sig_file_name).exists());
-        let delta_file = delta_a_file(old_file_name, None, None)?;
+        let delta_file = delta_a_file(old_file_name, None, None, true)?;
         eprintln!("delta_file {:?}", delta_file);
         assert!(PathBuf::from(&delta_file).exists());
         let restored = restore_a_file(old_file_name, None, None)?;
-        assert_eq!(hash_file_sha1(restored), hash_file_sha1(old_file_name.unwrap()));
+        assert_eq!(
+            hash_file_sha1(restored),
+            hash_file_sha1(old_file_name.unwrap())
+        );
         Ok(())
     }
-
 }
