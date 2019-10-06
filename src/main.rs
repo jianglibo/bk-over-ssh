@@ -737,7 +737,8 @@ fn delta_a_file(
         let f = |num| {
             sum += num;
             if sum > 5_0000 {
-                println!("{:?}", num);
+                println!("{:?}", sum);
+                sum = 0;
             }
         };
         let nr = CountReadr::new(new_file_input, f);
