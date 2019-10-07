@@ -1,5 +1,5 @@
 use crate::data_shape::{
-    CountWriter, FileItem, FileItemProcessResult, Indicator, PbProperties, Server, SyncType,
+    FileItem, FileItemProcessResult, Indicator, PbProperties, ProgressWriter, Server, SyncType,
 };
 use crate::db_accesses::DbAccess;
 use crate::rustsync::{DeltaFileReader, DeltaReader, Signature};
@@ -207,7 +207,7 @@ pub fn copy_a_file_item_scp<'a>(
     buf: &mut [u8],
     pb: &mut Indicator,
 ) -> FileItemProcessResult {
-    match session.scp_recv(Path::new(file_item.get_remote_path().as_str())) {
+    match session.scp_recv(Path::new(file_item.get_remote_file_name().as_str())) {
         Ok((mut file, _stat)) => {
             if let Some(_r_sha1) = file_item.get_remote_item().get_sha1() {
                 match copy_stream_to_file_return_sha1_with_cb(&mut file, &local_file_path, buf, pb)
@@ -267,7 +267,7 @@ pub fn copy_a_file_item_sftp<'a>(
     buf: &mut [u8],
     pb: &Indicator,
 ) -> FileItemProcessResult {
-    match sftp.open(Path::new(&file_item.get_remote_path())) {
+    match sftp.open(Path::new(&file_item.get_remote_file_name())) {
         Ok(mut file) => {
             if let Some(_r_sha1) = file_item.get_remote_item().get_sha1() {
                 match copy_stream_to_file_return_sha1_with_cb(&mut file, &local_file_path, buf, pb)
@@ -318,125 +318,157 @@ pub fn copy_a_file_item_sftp<'a>(
         }
     }
 }
-#[allow(dead_code)]
-pub fn copy_a_file_item_rsync_scp<'a, M, D>(
-    server: &Server<M, D>,
-    local_file_path: String,
-    file_item: &FileItem<'a>,
+
+pub fn scp_upload_file_with_progress(
+    session: &ssh2::Session,
+    source: impl AsRef<Path>,
+    dest: impl AsRef<Path>,
+    message: impl AsRef<str>,
     pb: &Indicator,
-) -> Result<FileItemProcessResult, failure::Error>
-where
-    M: r2d2::ManageConnection,
-    D: DbAccess<M>,
-{
-    let remote_path = file_item.get_remote_path();
-    trace!("start signature_a_file {}", &local_file_path);
-    let mut sig =
-        Signature::signature_a_file(&local_file_path, Some(server.server_yml.rsync_window), pb)?;
-    let local_sig_file_path_str = format!("{}.sig", &local_file_path);
-    let local_sig_file_path = Path::new(local_sig_file_path_str.as_str());
-    sig.write_to_file(local_sig_file_path)?;
-    let len = local_sig_file_path.metadata()?.len();
-    let remote_sig_file_path = format!("{}.sig", &remote_path);
-    let sig_file = server.get_ssh_session().scp_send(
-        Path::new(remote_sig_file_path.as_str()),
-        0o022,
-        len,
-        None,
-    )?;
-    let cw = CountWriter::new(sig_file, pb);
-    let delta_file_name = format!("{}.delta", &remote_path);
-    let cmd = format!(
-        "{} rsync delta-a-file --new-file {} --sig-file {} --out-file {}",
-        server.server_yml.remote_exec, &remote_path, &remote_sig_file_path, &delta_file_name,
-    );
-    trace!("about to invoke command: {:?}", cmd);
-    let mut channel: ssh2::Channel = server.create_channel()?;
-    channel.exec(cmd.as_str())?;
-    let mut ch_stderr = channel.stderr();
-    let mut chout = String::new();
-    ch_stderr.read_to_string(&mut chout)?;
-    if !chout.is_empty() {
-        trace!(
-            "after invoke delta command, there maybe err in channel: {:?}",
-            chout
-        );
-    }
-    channel.read_to_string(&mut chout)?;
-    trace!(
-        "delta-a-file output: {:?}, delta_file_name: {:?}",
-        chout,
-        delta_file_name
-    );
-    if let Ok((file, _stat)) = server
-        .get_ssh_session()
-        .scp_recv(Path::new(&delta_file_name))
-    {
-        let mut delta_file = DeltaFileReader::<ssh2::File>::read_delta_stream(file)?;
-        let restore_path = fs::OpenOptions::new()
-            .create(true)
-            .truncate(true)
-            .write(true)
-            .open(format!("{}.restore", local_file_path))?;
-        trace!("restore_path: {:?}", restore_path);
-        let old_file = fs::OpenOptions::new().read(true).open(&local_file_path)?;
-        delta_file.restore_seekable(restore_path, old_file)?;
-        update_local_file_from_restored(&local_file_path)?;
-        Ok(FileItemProcessResult::Successed(
-            0,
-            local_file_path,
-            SyncType::Rsync,
-        ))
-    } else {
-        bail!("scp open delta_file: {:?} failed.", delta_file_name);
-    }
+) -> Result<(), failure::Error> {
+    scp_file_with_progress(session, true, source, dest, message, pb)
 }
 
-pub fn copy_a_file_item_rsync<'a, M, D>(
-    server: &Server<M, D>,
-    sftp: &ssh2::Sftp,
-    local_file_path: String,
-    file_item: &FileItem<'a>,
+pub fn scp_download_file_with_progress(
+    session: &ssh2::Session,
+    source: impl AsRef<Path>,
+    dest: impl AsRef<Path>,
+    message: impl AsRef<str>,
     pb: &Indicator,
-) -> Result<FileItemProcessResult, failure::Error>
-where
-    M: r2d2::ManageConnection,
-    D: DbAccess<M>,
-{
-    let remote_path = file_item.get_remote_path();
-    trace!("start signature_a_file {}", &local_file_path);
-    let mut sig =
-        Signature::signature_a_file(&local_file_path, Some(server.server_yml.rsync_window), pb)?;
+) -> Result<(), failure::Error> {
+    scp_file_with_progress(session, false, source, dest, message, pb)
+}
 
-    let local_sig_file_path = format!("{}.sig", local_file_path);
-    sig.write_to_file(&local_sig_file_path)?;
+fn scp_file_with_progress(
+    session: &ssh2::Session,
+    upload: bool,
+    source: impl AsRef<Path>,
+    dest: impl AsRef<Path>,
+    message: impl AsRef<str>,
+    pb: &Indicator,
+) -> Result<(), failure::Error> {
+    let dest = dest.as_ref();
+    let source = source.as_ref();
+    trace!(
+        "scp a file source: {:?}, dest: {:?}, upload: {}",
+        source,
+        dest,
+        upload
+    );
+    let (mut scp_channel, len) = if upload {
+        let len = source.metadata()?.len();
+        trace!("len: {}", len);
+        let v = (session.scp_send(dest, 0o_0022, len, None)?, len);
+        trace!("len: {}", len);
+        v
+    } else {
+        let (channel, stat) = session.scp_recv(source)?;
+        (channel, stat.size())
+    };
+    pb.alter_pb(PbProperties {
+        reset: true,
+        set_style: Some(ProgressStyle::default_bar().template("[{eta_precise}] {bytes_per_sec} {decimal_bytes}/{decimal_total_bytes} {bar:30.cyan/blue} {wide_msg}").progress_chars("#-")),
+        set_message: Some(message.as_ref().to_owned()),
+        set_length: Some(len),
+        ..PbProperties::default()
+    });
 
-    let remote_sig_file_path = format!("{}.sig", &remote_path);
-    let sig_file = sftp.create(Path::new(&remote_sig_file_path))?;
+    if upload {
+        let mut source_file = fs::OpenOptions::new().read(true).open(source)?;
+        let mut dest_file = ProgressWriter::new(scp_channel, pb);
+        io::copy(&mut source_file, &mut dest_file)?;
+    } else {
+        let w = fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(dest)?;
+        let mut dest_file = ProgressWriter::new(w, pb);
+        io::copy(&mut scp_channel, &mut dest_file)?;
+    };
+    Ok(())
+}
+
+pub fn sftp_upload_file_with_progress(
+    sftp: &ssh2::Sftp,
+    source: impl AsRef<Path>,
+    dest: impl AsRef<Path>,
+    message: impl AsRef<str>,
+    pb: &Indicator,
+) -> Result<(), failure::Error> {
+    sftp_file_with_progress(sftp, true, source, dest, message, pb)
+}
+
+pub fn sftp_download_file_with_progress(
+    sftp: &ssh2::Sftp,
+    source: impl AsRef<Path>,
+    dest: impl AsRef<Path>,
+    message: impl AsRef<str>,
+    pb: &Indicator,
+) -> Result<(), failure::Error> {
+    sftp_file_with_progress(sftp, false, source, dest, message, pb)
+}
+
+fn sftp_file_with_progress(
+    sftp: &ssh2::Sftp,
+    upload: bool,
+    source: impl AsRef<Path>,
+    dest: impl AsRef<Path>,
+    message: impl AsRef<str>,
+    pb: &Indicator,
+) -> Result<(), failure::Error> {
+    let dest = dest.as_ref();
+    let source = source.as_ref();
+    trace!(
+        "sftp a file source: {:?}, dest: {:?}, upload: {}",
+        source,
+        dest,
+        upload
+    );
+    let mut sftp_file = if upload {
+        sftp.create(dest)?
+    } else {
+        sftp.open(source)?
+    };
+
+    let len = if upload {
+        Some(source.metadata()?.len())
+    } else {
+        None
+    };
 
     pb.alter_pb(PbProperties {
         reset: true,
         set_style: Some(ProgressStyle::default_bar().template("[{eta_precise}] {bytes_per_sec} {decimal_bytes}/{decimal_total_bytes} {bar:30.cyan/blue} {wide_msg}").progress_chars("#-")),
-        set_message: Some(format!("start upload signature file. {}", local_sig_file_path)),
-        set_length: Some(Path::new(&local_sig_file_path).metadata()?.len()),
+        set_message: Some(message.as_ref().to_owned()),
+        set_length: len,
         ..PbProperties::default()
     });
 
-    let mut cw = CountWriter::new(sig_file, pb);
+    if upload {
+        let mut source_file = fs::OpenOptions::new().read(true).open(source)?;
+        let mut dest_file = ProgressWriter::new(sftp_file, pb);
+        io::copy(&mut source_file, &mut dest_file)?;
+    } else {
+        let w = fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(dest)?;
+        let mut dest_file = ProgressWriter::new(w, pb);
+        io::copy(&mut sftp_file, &mut dest_file)?;
+    };
+    Ok(())
+}
 
-    let mut local_sig_file = fs::OpenOptions::new()
-        .read(true)
-        .open(Path::new(&local_sig_file_path))?;
-    io::copy(&mut local_sig_file, &mut cw)?;
-
-    let delta_file_name = format!("{}.delta", &remote_path);
-    let cmd = format!(
-        "{} rsync delta-a-file --print-progress --new-file {} --sig-file {} --out-file {}",
-        server.server_yml.remote_exec, &remote_path, &remote_sig_file_path, &delta_file_name,
-    );
+pub fn invoke_remote_ssh_command_receive_progress(
+    cmd: impl AsRef<str>,
+    mut channel: ssh2::Channel,
+    pb: &Indicator,
+) -> Result<(), failure::Error> {
+    let cmd = cmd.as_ref();
     trace!("about to invoke command: {:?}", cmd);
-    let mut channel: ssh2::Channel = server.create_channel()?;
-    channel.exec(cmd.as_str())?;
+    channel.exec(cmd)?;
 
     let bufr = io::BufReader::new(channel);
     bufr.lines().for_each(|line| {
@@ -456,26 +488,80 @@ where
             pb.inc_pb(i);
         }
     });
+    Ok(())
+}
 
-    if let Ok(file) = sftp.open(Path::new(&delta_file_name)) {
-        let mut delta_file = DeltaFileReader::<ssh2::File>::read_delta_stream(file)?;
-        let restore_path = fs::OpenOptions::new()
-            .create(true)
-            .truncate(true)
-            .write(true)
-            .open(format!("{}.restore", local_file_path))?;
-        trace!("restore_path: {:?}", restore_path);
-        let old_file = fs::OpenOptions::new().read(true).open(&local_file_path)?;
-        delta_file.restore_seekable(restore_path, old_file)?;
-        update_local_file_from_restored(&local_file_path)?;
-        Ok(FileItemProcessResult::Successed(
-            0,
-            local_file_path,
-            SyncType::Rsync,
-        ))
-    } else {
-        bail!("sftp open delta_file: {:?} failed.", delta_file_name);
-    }
+pub fn copy_a_file_item_rsync<'a, M, D>(
+    server: &Server<M, D>,
+    sftp: &ssh2::Sftp,
+    local_file_path: String,
+    file_item: &FileItem<'a>,
+    pb: &Indicator,
+) -> Result<FileItemProcessResult, failure::Error>
+where
+    M: r2d2::ManageConnection,
+    D: DbAccess<M>,
+{
+    let remote_file_name = file_item.get_remote_file_name();
+    trace!("start signature_a_file {}", &local_file_path);
+    let mut sig =
+        Signature::signature_a_file(&local_file_path, Some(server.server_yml.rsync_window), pb)?;
+
+    let local_sig_file_name = format!("{}.sig", local_file_path);
+    sig.write_to_file(&local_sig_file_name)?;
+
+    let remote_sig_file_name = format!("{}.sig", &remote_file_name);
+
+    sftp_upload_file_with_progress(
+        sftp,
+        &local_sig_file_name,
+        &remote_sig_file_name,
+        format!("start upload signature file. {:?}", &local_sig_file_name),
+        pb,
+    )?;
+
+    let remote_delta_file_name = format!("{}.delta", &remote_file_name);
+    let cmd = format!(
+        "{} rsync delta-a-file --print-progress --new-file {} --sig-file {} --out-file {}",
+        server.server_yml.remote_exec,
+        &remote_file_name,
+        &remote_sig_file_name,
+        &remote_delta_file_name,
+    );
+
+    let channel: ssh2::Channel = server.create_channel()?;
+    invoke_remote_ssh_command_receive_progress(cmd, channel, pb)?;
+
+    let local_delta_file_name = format!("{}.delta", local_file_path);
+
+    scp_download_file_with_progress(
+        server.get_ssh_session(),
+        &remote_delta_file_name,
+        &local_delta_file_name,
+        format!("start download delta file. {:?}", &local_delta_file_name),
+        pb,
+    )?;
+
+    let local_delta_file = fs::OpenOptions::new()
+        .read(true)
+        .open(&local_delta_file_name)?;
+
+    let mut delta_file = DeltaFileReader::<ssh2::File>::read_delta_stream(local_delta_file)?;
+
+    let restore_path = fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(format!("{}.restore", local_file_path))?;
+    trace!("restore_path: {:?}", restore_path);
+    let old_file = fs::OpenOptions::new().read(true).open(&local_file_path)?;
+    delta_file.restore_seekable(restore_path, old_file)?;
+    update_local_file_from_restored(&local_file_path)?;
+    Ok(FileItemProcessResult::Successed(
+        0,
+        local_file_path,
+        SyncType::Rsync,
+    ))
 }
 
 fn update_local_file_from_restored(local_file_path: impl AsRef<str>) -> Result<(), failure::Error> {

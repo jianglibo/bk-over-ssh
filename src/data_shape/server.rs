@@ -1,7 +1,7 @@
 use super::{
-    load_remote_item, load_remote_item_to_sqlite, rolling_files, string_path, AuthMethod, MiniAppConf,
-    CountWriter, Directory, FileItem, FileItemProcessResult, FileItemProcessResultStats, Indicator,
-    PbProperties, PruneStrategy, RemoteFileItem, ScheduleItem, SyncType,
+    load_remote_item, load_remote_item_to_sqlite, rolling_files, string_path, AuthMethod,
+    Directory, FileItem, FileItemProcessResult, FileItemProcessResultStats, Indicator, MiniAppConf,
+    PbProperties, ProgressWriter, PruneStrategy, RemoteFileItem, ScheduleItem, SyncType,
 };
 use crate::actions::{channel_util, copy_a_file_item, SyncDirReport};
 use crate::db_accesses::{scheduler_util, DbAccess};
@@ -92,7 +92,7 @@ where
 {
 }
 
-impl< M, D> Server< M, D>
+impl<M, D> Server<M, D>
 where
     M: r2d2::ManageConnection,
     D: DbAccess<M>,
@@ -247,69 +247,72 @@ where
     }
 
     pub fn tar_local(&self, pb: &mut Indicator) -> Result<(), failure::Error> {
-        let total_size = self.count_local_dirs_size();
+        if self.check_skip_cron("archive-local") {
+            let total_size = self.count_local_dirs_size();
 
-        let style = ProgressStyle::default_bar()
+            let style = ProgressStyle::default_bar()
             .template(
                 "{spinner} {decimal_bytes:>8}/{decimal_total_bytes:8}  {percent:>4}% {wide_msg}",
             )
             .progress_chars("#-");
 
-        pb.active_pb_total().alter_pb(PbProperties {
-            set_style: Some(style),
-            enable_steady_tick: Some(200),
-            set_length: Some(total_size),
-            ..PbProperties::default()
-        });
-        let cur = self.current_tar_file();
-        trace!("open file to write archive: {:?}", cur);
+            pb.active_pb_total().alter_pb(PbProperties {
+                set_style: Some(style),
+                enable_steady_tick: Some(200),
+                set_length: Some(total_size),
+                ..PbProperties::default()
+            });
+            let cur = self.current_tar_file();
+            trace!("open file to write archive: {:?}", cur);
 
-        let writer_c = || {
-            fs::OpenOptions::new()
-                .create(true)
-                .truncate(true)
-                .write(true)
-                .open(cur.as_path())
-        };
+            let writer_c = || {
+                fs::OpenOptions::new()
+                    .create(true)
+                    .truncate(true)
+                    .write(true)
+                    .open(cur.as_path())
+            };
 
-        let writer: Box<dyn io::Write> = if let Some(ref sm) = self.server_yml.compress_archive {
-            match sm {
-                CompressionImpl::Bzip2 => {
-                    let w = BzEncoder::new(writer_c()?, Compression::Best);
-                    let w = CountWriter::new(w, pb);
-                    Box::new(w)
-                }
-            }
-        } else {
-            let w = CountWriter::new(writer_c()?, pb);
-            Box::new(w)
-        };
-
-        let mut archive = Builder::new(writer);
-
-        for dir in self.server_yml.directories.iter() {
-            let len = dir.count_total_size();
-            let d_path = Path::new(&dir.local_dir);
-            if let Some(d_path_name) = d_path.file_name() {
-                if d_path.exists() {
-                    pb.set_message_pb_total(format!(
-                        "[{}] processing directory: {:?}",
-                        self.get_host(),
-                        d_path_name
-                    ));
-                    archive.append_dir_all(d_path_name, d_path)?;
-                    pb.inc_pb_total(len);
-                } else {
-                    warn!("unexist directory: {:?}", d_path);
+            let writer: Box<dyn io::Write> = if let Some(ref sm) = self.server_yml.compress_archive
+            {
+                match sm {
+                    CompressionImpl::Bzip2 => {
+                        let w = BzEncoder::new(writer_c()?, Compression::Best);
+                        let w = ProgressWriter::new(w, pb);
+                        Box::new(w)
+                    }
                 }
             } else {
-                error!("dir.local_dir get file_name failed: {:?}", d_path);
+                let w = ProgressWriter::new(writer_c()?, pb);
+                Box::new(w)
+            };
+
+            let mut archive = Builder::new(writer);
+
+            for dir in self.server_yml.directories.iter() {
+                let len = dir.count_total_size();
+                let d_path = Path::new(&dir.local_dir);
+                if let Some(d_path_name) = d_path.file_name() {
+                    if d_path.exists() {
+                        pb.set_message_pb_total(format!(
+                            "[{}] processing directory: {:?}",
+                            self.get_host(),
+                            d_path_name
+                        ));
+                        archive.append_dir_all(d_path_name, d_path)?;
+                        pb.inc_pb_total(len);
+                    } else {
+                        warn!("unexist directory: {:?}", d_path);
+                    }
+                } else {
+                    error!("dir.local_dir get file_name failed: {:?}", d_path);
+                }
             }
+            archive.finish()?;
+            let nf = self.next_tar_file();
+            trace!("move fie to {:?}", nf);
+            fs::rename(cur, nf)?;
         }
-        archive.finish()?;
-        let nf = self.next_tar_file();
-        trace!("move fie to {:?}", nf);
-        fs::rename(cur, nf)?;
         Ok(())
     }
     pub fn prune_backups(&self) -> Result<(), failure::Error> {
@@ -753,13 +756,13 @@ where
             .sum()
     }
 
-    fn check_skip_cron(&self) -> bool {
+    fn check_skip_cron(&self, cron_name: &str) -> bool {
         self.app_conf.skip_cron
             || if let Some(si) = self
                 .server_yml
                 .schedules
                 .iter()
-                .find(|it| it.name == "sync-dir")
+                .find(|it| it.name == cron_name)
             {
                 match scheduler_util::need_execute(
                     self.db_access.as_ref(),
@@ -778,12 +781,13 @@ where
                     (_, _) => false,
                 }
             } else {
-                true
+                eprintln!("Can't find cron item with name: {}", cron_name);
+                false
             }
     }
 
     pub fn sync_dirs(&self, pb: &mut Indicator) -> Result<Option<SyncDirReport>, failure::Error> {
-        if self.check_skip_cron() {
+        if self.check_skip_cron("sync-dirs") {
             let start = Instant::now();
             let rs = self.start_sync_working_file_list(pb)?;
             self.remove_working_file_list_file();

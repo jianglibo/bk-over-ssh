@@ -176,19 +176,15 @@ fn delay_exec(delay: &str) {
     thread::sleep(Duration::from_secs(delay));
 }
 
-fn sync_dirs<'a, M, D>(
-    app_conf: &AppConf<M, D>,
-    sub_matches: &'a clap::ArgMatches<'a>,
-    console_log: bool,
-) -> Result<(), failure::Error>
+fn sync_dirs<M, D>(app_conf: &AppConf<M, D>, server_yml: Option<&str>) -> Result<(), failure::Error>
 where
     M: r2d2::ManageConnection,
     D: DbAccess<M>,
 {
     let mut servers: Vec<(Server<M, D>, Indicator)> = Vec::new();
 
-    if sub_matches.value_of("server-yml").is_some() {
-        let server = app_conf.load_server_yml(sub_matches.value_of("server-yml").unwrap())?;
+    if let Some(server_yml) = server_yml {
+        let server = app_conf.load_server_yml(server_yml)?;
         servers.push(server);
     } else {
         servers.append(&mut app_conf.load_all_server_yml());
@@ -245,17 +241,10 @@ where
             Ok(result) => {
                 indicator.pb_finish();
                 actions::write_dir_sync_result(&server, result.as_ref());
-                if console_log {
-                    let result_yml = serde_yaml::to_string(&result)
-                        .expect("SyncDirReport should deserialize success.");
-                    println!("{}:\n{}", server.get_host(), result_yml);
-                }
             }
             Err(err) => println!("sync-dirs failed: {:?}", err),
         }
     });
-
-    // servers.iter().for_each(|sv|sv.1.pb_finish());
     wait_progresss_bar_finish(t);
     Ok(())
 }
@@ -346,27 +335,10 @@ fn main() -> Result<(), failure::Error> {
         error!("{:?}", err);
         eprintln!("{:?}", err);
     }
-    // wait_progresss_bar_finish(t);
     Ok(())
 }
 
 fn main_entry<'a, M, D>(
-    app1: App,
-    app_conf: &AppConf<M, D>,
-    m: &'a clap::ArgMatches<'a>,
-    console_log: bool,
-) -> Result<(), failure::Error>
-where
-    M: r2d2::ManageConnection,
-    D: DbAccess<M>,
-{
-    if let ("sync-dirs", Some(sub_matches)) = m.subcommand() {
-        return sync_dirs(&app_conf, sub_matches, console_log);
-    }
-    main_entry_1(app1, app_conf, m, console_log)
-}
-
-fn main_entry_1<'a, M, D>(
     mut app1: App,
     app_conf: &AppConf<M, D>,
     m: &'a clap::ArgMatches<'a>,
@@ -378,6 +350,13 @@ where
 {
     let no_db = m.is_present("no-db");
     match m.subcommand() {
+        ("run-round", Some(_sub_matches)) => {
+            sync_dirs(&app_conf, None)?;
+            archive_local(&app_conf, None, None, None)?;
+        }
+        ("sync-dirs", Some(sub_matches)) => {
+            sync_dirs(&app_conf, sub_matches.value_of("server-yml"))?;
+        }
         ("pbr", Some(_sub_matches)) => {
             demonstrate_pbr()?;
         }
@@ -484,57 +463,12 @@ where
             }
         }
         ("archive-local", Some(sub_matches)) => {
-            let mut servers: Vec<(Server<M, D>, Indicator)> = Vec::new();
-
-            if sub_matches.value_of("server-yml").is_some() {
-                let server =
-                    app_conf.load_server_yml(sub_matches.value_of("server-yml").unwrap())?;
-                servers.push(server);
-            } else {
-                servers.append(&mut app_conf.load_all_server_yml());
-            }
-
-            // all progress bars already create from here on.
-
-            let t = join_multi_bars(app_conf.progress_bar.clone());
-
-            if servers.is_empty() {
-                println!("found no server yml!");
-            } else {
-                println!(
-                    "found {} server yml files. start processing...",
-                    servers.len()
-                );
-            }
-            let prune_op = sub_matches.value_of("prune");
-            let prune_only_op = sub_matches.value_of("prune-only");
-
-            servers
-                .into_par_iter()
-                .map(|(server, mut indicator)| {
-                    if prune_op.is_some() {
-                        if let Err(err) = server.tar_local(&mut indicator) {
-                            error!("{:?}", err);
-                            eprintln!("{:?}", err);
-                        }
-                        if let Err(err) = server.prune_backups() {
-                            error!("{:?}", err);
-                            eprintln!("{:?}", err);
-                        }
-                    } else if prune_only_op.is_some() {
-                        if let Err(err) = server.prune_backups() {
-                            error!("{:?}", err);
-                            eprintln!("{:?}", err);
-                        }
-                    } else if let Err(err) = server.tar_local(&mut indicator) {
-                        error!("{:?}", err);
-                        eprintln!("{:?}", err);
-                    }
-                    indicator.pb_finish();
-                })
-                .count();
-
-            wait_progresss_bar_finish(t);
+            archive_local(
+                app_conf,
+                sub_matches.value_of("server-yml"),
+                sub_matches.value_of("prune"),
+                sub_matches.value_of("prune-only"),
+            )?;
         }
         ("confirm-remote-sync", Some(sub_matches)) => {
             let start = Instant::now();
@@ -683,6 +617,66 @@ where
     Ok(())
 }
 
+fn archive_local<M, D>(
+    app_conf: &AppConf<M, D>,
+    server_yml: Option<&str>,
+    prune_op: Option<&str>,
+    prune_only_op: Option<&str>,
+) -> Result<(), failure::Error>
+where
+    M: r2d2::ManageConnection,
+    D: DbAccess<M>,
+{
+    let mut servers: Vec<(Server<M, D>, Indicator)> = Vec::new();
+
+    if server_yml.is_some() {
+        let server = app_conf.load_server_yml(server_yml.unwrap())?;
+        servers.push(server);
+    } else {
+        servers.append(&mut app_conf.load_all_server_yml());
+    }
+
+    // all progress bars already create from here on.
+
+    let t = join_multi_bars(app_conf.progress_bar.clone());
+
+    if servers.is_empty() {
+        println!("found no server yml!");
+    } else {
+        println!(
+            "found {} server yml files. start processing...",
+            servers.len()
+        );
+    }
+    servers
+        .into_par_iter()
+        .map(|(server, mut indicator)| {
+            if prune_op.is_some() {
+                if let Err(err) = server.tar_local(&mut indicator) {
+                    error!("{:?}", err);
+                    eprintln!("{:?}", err);
+                }
+                if let Err(err) = server.prune_backups() {
+                    error!("{:?}", err);
+                    eprintln!("{:?}", err);
+                }
+            } else if prune_only_op.is_some() {
+                if let Err(err) = server.prune_backups() {
+                    error!("{:?}", err);
+                    eprintln!("{:?}", err);
+                }
+            } else if let Err(err) = server.tar_local(&mut indicator) {
+                error!("{:?}", err);
+                eprintln!("{:?}", err);
+            }
+            indicator.pb_finish();
+        })
+        .count();
+
+    wait_progresss_bar_finish(t);
+    Ok(())
+}
+
 fn restore_a_file(
     old_file: Option<&str>,
     maybe_delta_file: Option<&str>,
@@ -736,7 +730,7 @@ fn delta_a_file(
         let mut sum = 0;
         let f = |num| {
             sum += num;
-            if sum > 5_0000 {
+            if sum > 5_0000 || num == 0 {
                 println!("{:?}", sum);
                 sum = 0;
             }

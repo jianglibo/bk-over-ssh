@@ -120,7 +120,7 @@ impl<'a> FileItem<'a> {
         self.base_dir.join(&rp).to_str().map(str::to_string)
     }
 
-    pub fn get_remote_path(&self) -> String {
+    pub fn get_remote_file_name(&self) -> String {
         if let Some(rbd) = self.remote_base_dir {
             string_path::join_path(rbd, self.remote_item.get_path())
         } else {
