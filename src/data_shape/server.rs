@@ -58,6 +58,7 @@ pub struct ServerYml {
     pub skip_sha1: bool,
     pub sql_batch_size: usize,
     pub schedules: Vec<ScheduleItem>,
+    pub exclude_by_sql: Vec<String>,
     #[serde(skip)]
     pub yml_location: Option<PathBuf>,
 }
@@ -800,36 +801,38 @@ where
 
     pub fn load_dirs<O: io::Write>(&self, out: &mut O) -> Result<(), failure::Error> {
         if self.db_access.is_some() && self.server_yml.use_db {
+            let db_access = self.db_access.as_ref().unwrap();
             for one_dir in self.server_yml.directories.iter() {
                 load_remote_item_to_sqlite(
                     one_dir,
-                    self.db_access.as_ref().unwrap(),
+                    db_access,
                     self.is_skip_sha1(),
                     self.server_yml.sql_batch_size,
                 )?;
-                self.db_access
-                    .as_ref()
-                    .unwrap()
-                    .iterate_files_by_directory_changed_or_unconfirmed(|fidb_or_path| {
-                        match fidb_or_path {
-                            (Some(fidb), None) => {
-                                if fidb.changed {
-                                    match serde_json::to_string(&RemoteFileItem::from(fidb)) {
-                                        Ok(line) => {
-                                            writeln!(out, "{}", line).ok();
-                                        }
-                                        Err(err) => error!("serialize item line failed: {:?}", err),
+
+                for sql in self.server_yml.exclude_by_sql.iter() {
+                    db_access.exclude_by_sql(sql)?;
+                }
+                db_access.iterate_files_by_directory_changed_or_unconfirmed(|fidb_or_path| {
+                    match fidb_or_path {
+                        (Some(fidb), None) => {
+                            if fidb.changed {
+                                match serde_json::to_string(&RemoteFileItem::from(fidb)) {
+                                    Ok(line) => {
+                                        writeln!(out, "{}", line).ok();
                                     }
+                                    Err(err) => error!("serialize item line failed: {:?}", err),
                                 }
                             }
-                            (None, Some(path)) => {
-                                if let Err(err) = writeln!(out, "{}", path) {
-                                    error!("write path failed: {:?}", err);
-                                }
-                            }
-                            _ => {}
                         }
-                    })?;
+                        (None, Some(path)) => {
+                            if let Err(err) = writeln!(out, "{}", path) {
+                                error!("write path failed: {:?}", err);
+                            }
+                        }
+                        _ => {}
+                    }
+                })?;
             }
         } else {
             for one_dir in self.server_yml.directories.iter() {

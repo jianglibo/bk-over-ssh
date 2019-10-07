@@ -197,7 +197,7 @@ where
     fn find_directory(&self, path: impl AsRef<str>) -> Result<i64, failure::Error>;
     fn count_directory(&self) -> Result<u64, failure::Error>;
     fn count_remote_file_item(&self, cc: CountItemParam) -> Result<u64, failure::Error>;
-    fn iterate_all_file_items<P>(&self, processor: P) -> (usize, usize)
+    fn iterate_all_file_items<P>(&self, processor: P) -> Result<(usize, usize), failure::Error>
     where
         P: Fn(RemoteFileItemInDb) -> ();
     fn iterate_files_by_directory<F>(&self, processor: F) -> Result<(), failure::Error>
@@ -226,6 +226,8 @@ where
     fn execute_batch(&self, sit: impl Iterator<Item = String>);
 
     fn confirm_all(&self) -> Result<u64, failure::Error>;
+
+    fn exclude_by_sql(&self, select_id_sql: impl AsRef<str>) -> Result<u64, failure::Error>;
 }
 
 #[cfg(test)]
