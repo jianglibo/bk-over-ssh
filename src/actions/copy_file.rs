@@ -505,7 +505,7 @@ where
     let remote_file_name = file_item.get_remote_file_name();
     trace!("start signature_a_file {}", &local_file_path);
     let mut sig =
-        Signature::signature_a_file(&local_file_path, Some(server.server_yml.rsync_window), pb)?;
+        Signature::signature_a_file(&local_file_path, Some(server.server_yml.rsync.window), pb)?;
 
     let local_sig_file_name = format!("{}.sig", local_file_path);
     sig.write_to_file(&local_sig_file_name)?;
@@ -688,7 +688,7 @@ mod tests {
         let app_conf = tutil::load_demo_app_conf_sqlite(None);
         let mut server = tutil::load_demo_server_sqlite(&app_conf, None);
         server.connect()?;
-        server.server_yml.rsync_valve = 4;
+        server.server_yml.rsync.valve = 4;
         let test_dir1 = tutil::create_a_dir_and_a_file_with_content("xx.txt", "")?;
         let local_file_name = test_dir1.tmp_dir.path().join("yy.txt");
         let test_dir2 = tutil::create_a_dir_and_a_file_with_content("yy.txt", "hello")?;

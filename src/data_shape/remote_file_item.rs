@@ -18,6 +18,8 @@ pub struct RemoteFileItem {
     len: u64,
     modified: Option<u64>,
     created: Option<u64>,
+    changed: bool,
+    confirmed: bool,
 }
 
 impl RemoteFileItem {
@@ -47,6 +49,8 @@ impl RemoteFileItem {
                             .ok()
                             .and_then(|st| st.duration_since(SystemTime::UNIX_EPOCH).ok())
                             .map(|d| d.as_secs()),
+                        changed: false,
+                        confirmed: false,
                     });
                 } else {
                     error!("RemoteFileItem path name to_str() failed. {:?}", path);
@@ -69,6 +73,8 @@ impl std::convert::From<RemoteFileItemInDb> for RemoteFileItem {
             len: rfidb.len as u64,
             modified: rfidb.modified.map(|dt| dt.timestamp() as u64),
             created: rfidb.created.map(|dt| dt.timestamp() as u64),
+            changed: rfidb.changed,
+            confirmed: rfidb.confirmed,
         }
     }
 }
@@ -82,6 +88,8 @@ impl RemoteFileItem {
             len,
             created: None,
             modified: None,
+            changed: false,
+            confirmed: false,
         }
     }
 
@@ -113,6 +121,8 @@ pub fn load_remote_item_to_sqlite<M, D>(
     db_access: &D,
     skip_sha1: bool,
     sql_batch_size: usize,
+    sig_ext: &str,
+    delta_ext: &str,
 ) -> Result<(), failure::Error>
 where
     M: r2d2::ManageConnection,
@@ -131,6 +141,7 @@ where
                 .filter_map(|d| d.path().canonicalize().ok())
                 .filter_map(|d| directory.match_path(d))
                 .filter_map(|d| RemoteFileItemInDb::from_path(&base_path, d, skip_sha1, dir_id))
+                .filter(|rfi| !(rfi.path.ends_with(sig_ext) || rfi.path.ends_with(delta_ext)))
                 .filter_map(|rfi| db_access.insert_or_update_remote_file_item(rfi, true))
                 .map(|(rfi, da)| rfi.to_sql_string(&da))
                 .chunks(sql_batch_size)
@@ -206,6 +217,8 @@ mod tests {
             len: 5,
             modified: Some(554),
             created: Some(666),
+            changed: false,
+            confirmed: false,
         };
 
         // let item: RemoteFileItem = RemoteFileItem::from(&item_owned);

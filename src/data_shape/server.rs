@@ -36,18 +36,26 @@ pub enum CompressionImpl {
 }
 
 #[derive(Deserialize, Serialize)]
+pub struct RsyncConfig {
+    pub window: usize,
+    pub valve: u64,
+    pub sig_ext: String,
+    pub delta_ext: String,
+}
+
+#[derive(Deserialize, Serialize)]
 pub struct ServerYml {
     pub id_rsa: String,
     pub id_rsa_pub: Option<String>,
     pub auth_method: AuthMethod,
     pub host: String,
     pub port: u16,
+    pub rsync: RsyncConfig,
     pub remote_exec: String,
     pub file_list_file: String,
     pub remote_server_yml: String,
     pub username: String,
     pub password: String,
-    pub rsync_valve: u64,
     pub directories: Vec<Directory>,
     pub role: ServerRole,
     pub prune_strategy: PruneStrategy,
@@ -55,7 +63,6 @@ pub struct ServerYml {
     pub archive_postfix: String,
     pub compress_archive: Option<CompressionImpl>,
     pub buf_len: usize,
-    pub rsync_window: usize,
     pub use_db: bool,
     pub skip_sha1: bool,
     pub sql_batch_size: usize,
@@ -694,8 +701,8 @@ where
                         match serde_json::from_str::<RemoteFileItem>(&line) {
                             Ok(remote_item) => {
                                 let remote_len = remote_item.get_len();
-                                let sync_type = if self.server_yml.rsync_valve > 0
-                                    && remote_item.get_len() > self.server_yml.rsync_valve
+                                let sync_type = if self.server_yml.rsync.valve > 0
+                                    && remote_item.get_len() > self.server_yml.rsync.valve
                                 {
                                     SyncType::Rsync
                                 } else {
@@ -870,6 +877,8 @@ where
                     db_access,
                     self.is_skip_sha1(),
                     self.server_yml.sql_batch_size,
+                    self.server_yml.rsync.sig_ext.as_str(),
+                    self.server_yml.rsync.delta_ext.as_str(),
                 )?;
 
                 for sql in self.server_yml.exclude_by_sql.iter() {
@@ -973,7 +982,7 @@ mod tests {
         let mut indicator = Indicator::new(Some(mb2));
         server.connect()?;
         let stats = server.sync_dirs(&mut indicator)?;
-
+        indicator.pb_finish();
         info!("result {:?}", stats);
         t.join().unwrap();
         Ok(())
@@ -1016,148 +1025,6 @@ mod tests {
             10000,
             "len should equal to file before compress."
         );
-
-        Ok(())
-    }
-
-    // fn assert_zip_content(zip_file: impl AsRef<Path>, r: Vec<&str>) -> Result<(), failure::Error> {
-    //     let zf = fs::OpenOptions::new().read(true).open(zip_file)?;
-    //     let mut zip = zip::ZipArchive::new(zf)?;
-    //     assert_eq!(zip.len(), 2);
-    //     let mut v = Vec::new();
-
-    //     for i in 0..zip.len() {
-    //         let mut file = zip.by_index(i).unwrap();
-    //         eprintln!("{}", file.name());
-    //         let mut content = String::new();
-    //         file.read_to_string(&mut content)?;
-    //         v.push(content);
-    //     }
-    //     v.sort();
-    //     assert_eq!(v, r);
-    //     Ok(())
-    // }
-
-    // #[test]
-    // fn t_zip() -> Result<(), failure::Error> {
-    //     log();
-    //     let test_dir = tutil::create_a_dir_and_a_file_with_content("a", "cc")?;
-    //     test_dir.make_a_file_with_content("b", "cc1")?;
-
-    //     let _zip_dir = tutil::TestDir::new();
-    //     let zip_file = _zip_dir.tmp_dir_path().join("cc.zip");
-    //     {
-    //         let zf = fs::OpenOptions::new()
-    //             .create(true)
-    //             .write(true)
-    //             .open(zip_file.as_path())?;
-    //         assert!(
-    //             zip_file.as_path().exists(),
-    //             "zip file should have been created."
-    //         );
-    //         let mut zip = zip::ZipWriter::new(zf);
-    //         let options = zip::write::FileOptions::default()
-    //             .compression_method(zip::CompressionMethod::Stored);
-    //         zip.start_file_from_path(test_dir.get_file_path("a").as_path(), options)?;
-    //         zip.write_all(b"hello")?;
-    //         zip.start_file_from_path(test_dir.get_file_path("b").as_path(), options)?;
-    //         zip.write_all(b"world")?;
-    //         zip.finish()?;
-    //     }
-    //     assert_zip_content(zip_file.as_path(), vec!["hello", "world"])?;
-    //     {
-    //         let zf = fs::OpenOptions::new()
-    //             .create(true)
-    //             .write(true)
-    //             .open(zip_file.as_path())?;
-    //         let mut zip = zip::ZipWriter::new(zf);
-    //         let options = zip::write::FileOptions::default()
-    //             .compression_method(zip::CompressionMethod::Stored);
-    //         zip.start_file_from_path(test_dir.get_file_path("a").as_path(), options)?;
-    //         zip.write_all(b"hello1")?;
-    //         zip.finish()?;
-    //     }
-
-    //     assert_zip_content(zip_file.as_path(), vec!["hello1", "world"])?;
-
-    //     Ok(())
-    // }
-
-    /// you cannot change a tar file.
-    #[test]
-    fn t_tar() -> Result<(), failure::Error> {
-        use tar::{Archive, Builder};
-        log();
-        let test_dir = tutil::create_a_dir_and_a_file_with_content("a", "cc")?;
-        test_dir.make_a_file_with_content("b", "cc1")?;
-
-        let archives_dir = tutil::TestDir::new();
-        let archives_file_path = archives_dir.tmp_dir_path().join("aa.tar");
-
-        {
-            let tar_file = fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&archives_file_path)?;
-            let mut a = Builder::new(tar_file);
-            let p = test_dir.get_file_path("a");
-            let p1 = test_dir.get_file_path("b");
-            info!("file path: {:?}", p);
-            a.append_file("xx.xx", &mut fs::File::open(&p)?)?;
-            a.append_file("yy.yy", &mut fs::File::open(&p1)?)?;
-            a.finish()?;
-        }
-
-        {
-            let tar_file = fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&archives_file_path)?;
-            let mut a = Builder::new(tar_file);
-            let p = test_dir.get_file_path("b");
-            info!("file path: {:?}", p);
-            a.append_file("xx.xx", &mut fs::File::open(&p)?)?;
-            a.finish()?;
-        }
-
-        {
-            let file = fs::File::open(&archives_file_path)?;
-            let mut a = Archive::new(file);
-            let et = a.entries()?.find(|it| {
-                it.as_ref()
-                    .ok()
-                    .and_then(|ite| ite.header().path().ok().map(|co| co.into_owned()))
-                    == Some(PathBuf::from("xx.xx"))
-            });
-            assert!(et.is_some());
-        }
-
-        {
-            let file = fs::File::open(&archives_file_path)?;
-            let mut a = Archive::new(file);
-            assert_eq!(a.entries()?.count(), 2);
-        }
-
-        {
-            let tar_dir = tutil::TestDir::new();
-            let file = fs::File::open(&archives_file_path)?;
-            let mut a = Archive::new(file);
-            for et in a.entries()? {
-                let mut et = et.unwrap();
-                eprintln!("all et: {:?}", et.header().path().unwrap());
-                et.unpack_in(tar_dir.tmp_dir_path())?;
-            }
-
-            for p in tar_dir.tmp_dir_path().read_dir()? {
-                let p = p.unwrap();
-                assert!(p.file_name() == "xx.xx" || p.file_name() == "yy.yy");
-
-                let mut f = fs::OpenOptions::new().read(true).open(p.path())?;
-                let mut content = String::new();
-                f.read_to_string(&mut content)?;
-                assert_eq!(content, "cc1");
-            }
-        }
 
         Ok(())
     }

@@ -9,14 +9,17 @@ auth_method: IdentityFile # Password, Agent, IdentityFile.
 remote_exec: /home/osboxes/ws/ssh-client-demo/target/debug/bk-over-ssh
 remote_server_yml: /home/osboxes/ws/ssh-client-demo/data/servers/localhost.yml
 file_list_file: /home/jianglibo/file_list_file.txt
-rsync_valve: 419430400
 buf_len: 8192
-rsync_window: 2048
 use_db: true
 skip_sha1: true
 sql_batch_size: 50000
 exclude_by_sql: [] # selected item will delete from database, that's as if excluded too.
 #SELECT id FROM remote_file_item WHERE path LIKE '%.zip' ORDER BY path DESC LIMIT 100000 OFFSET 1 # both limit and offset are required.
+rsync:
+  window: 4096
+  valve: 419430400
+  sig_ext: .sig
+  delta_ext: .delta
 directories:
   - remote_dir: /home/jianglibo/ws/ssh-client-demo/fixtures/adir
     local_dir: ~

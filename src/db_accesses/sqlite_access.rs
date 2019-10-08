@@ -49,6 +49,7 @@ fn map_to_file_item(row: &Row) -> Result<RemoteFileItemInDb, rusqlite::Error> {
         created: row.get(5)?,
         dir_id: row.get(6)?,
         changed: row.get(7)?,
+        confirmed: row.get(8)?,
     })
 }
 
@@ -79,7 +80,7 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
 
     fn get_file_item(&self, num: usize) -> Result<Vec<RemoteFileItemInDb>, failure::Error> {
         let conn = self.0.get().unwrap();
-        let mut stmt = conn.prepare("SELECT id, path, sha1, len, time_modified, time_created, dir_id, changed FROM remote_file_item LIMIT :num")?;
+        let mut stmt = conn.prepare("SELECT id, path, sha1, len, time_modified, time_created, dir_id, changed, confirmed FROM remote_file_item LIMIT :num")?;
         let r = stmt
             .query_map_named(
                 named_params! {
@@ -105,7 +106,7 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
     ) -> Result<RemoteFileItemInDb, failure::Error> {
         let conn = self.0.get().unwrap();
         let path = path.as_ref();
-        let r = match conn.prepare("SELECT id, path, sha1, len, time_modified, time_created, dir_id, changed FROM remote_file_item where dir_id = :dir_id and path = :path") {
+        let r = match conn.prepare("SELECT id, path, sha1, len, time_modified, time_created, dir_id, changed, confirmed FROM remote_file_item where dir_id = :dir_id and path = :path") {
             Ok(mut stmt) => {
         match stmt.query_row_named(
             named_params! {
@@ -136,7 +137,7 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
         P: Fn(RemoteFileItemInDb) -> (),
     {
         let conn = self.get_pool().get().unwrap();
-        let mut stmt = conn.prepare("SELECT id, path, sha1, len, time_modified, time_created, dir_id, changed FROM remote_file_item")?;
+        let mut stmt = conn.prepare("SELECT id, path, sha1, len, time_modified, time_created, dir_id, changed, confirmed FROM remote_file_item")?;
         let files = stmt.query_map(NO_PARAMS, map_to_file_item)?;
 
         files.filter_map(|fi| fi.ok()).for_each(|fi| processor(fi));
@@ -156,7 +157,7 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
             let dir_id: i64 = dir.0;
             let path = dir.1;
             processor((None, Some(path)));
-            let mut stmt = conn.prepare("SELECT id, path, sha1, len, time_modified, time_created, dir_id, changed FROM remote_file_item where dir_id = :dir_id")?;
+            let mut stmt = conn.prepare("SELECT id, path, sha1, len, time_modified, time_created, dir_id, changed, confirmed FROM remote_file_item where dir_id = :dir_id")?;
             let files = stmt.query_map_named(
                 named_params! {
                     ":dir_id": dir_id
@@ -188,7 +189,7 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
             let dir_id: i64 = dir.0;
             let path = dir.1;
             processor((None, Some(path)));
-            let mut stmt = conn.prepare("SELECT id, path, sha1, len, time_modified, time_created, dir_id, changed FROM remote_file_item where dir_id = :dir_id and (changed = :changed or confirmed = :confirmed)")?;
+            let mut stmt = conn.prepare("SELECT id, path, sha1, len, time_modified, time_created, dir_id, changed, confirmed FROM remote_file_item where dir_id = :dir_id and (changed = :changed or confirmed = :confirmed)")?;
             let files = stmt.query_map_named(
                 named_params! {
                     ":dir_id": dir_id,
@@ -540,6 +541,7 @@ mod tests {
             created: None,
             dir_id,
             changed: false,
+            confirmed: false,
         }
     }
 
@@ -637,6 +639,7 @@ mod tests {
             modified: None,
             created: None,
             changed: false,
+            confirmed: false,
             dir_id,
         };
         conn.execute(rfi.to_insert_sql_string().as_str(), NO_PARAMS)?;
@@ -649,6 +652,7 @@ mod tests {
             modified: None,
             created: None,
             changed: false,
+            confirmed: false,
             dir_id,
         };
         conn.execute(rfi.to_insert_sql_string().as_str(), NO_PARAMS)?;
@@ -661,6 +665,7 @@ mod tests {
             modified: Some(now),
             created: None,
             changed: false,
+            confirmed: false,
             dir_id,
         };
         conn.execute(rfi.to_insert_sql_string().as_str(), NO_PARAMS)?;
@@ -673,6 +678,7 @@ mod tests {
             modified: Some(now),
             created: None,
             changed: false,
+            confirmed: false,
             dir_id,
         };
         let (mut rfi, _) = db_access
@@ -700,7 +706,8 @@ mod tests {
         let db_dir = tutil::TestDir::new();
         let db_access = tutil::create_a_sqlite_file_db(&db_dir)?;
 
-        load_remote_item_to_sqlite(&dir, &db_access, false, 50000)?;
+        // after load to db, result in changed 3 items.
+        load_remote_item_to_sqlite(&dir, &db_access, false, 50000, ".sig", ".delta")?;
 
         assert_eq!(db_access.count_directory()?, 1);
         assert_eq!(
@@ -716,8 +723,28 @@ mod tests {
             0
         );
 
+        let mut c = 0;
+        db_access.iterate_files_by_directory_changed_or_unconfirmed(|(file, _)| {
+            if let Some(file) = file {
+                eprintln!("{:?}", file);
+                c+=1;
+            } 
+        })?;
+        assert_eq!(c, 3);
+
+
         // if invoke successly again. we cannot get the result from changed field alone.
-        load_remote_item_to_sqlite(&dir, &db_access, false, 50000)?;
+        load_remote_item_to_sqlite(&dir, &db_access, false, 50000, ".sig", ".delta")?;
+
+        let mut c = 0;
+        db_access.iterate_files_by_directory_changed_or_unconfirmed(|(file, _)| {
+            if let Some(file) = file {
+                eprintln!("{:?}", file);
+                c+=1;
+            } 
+        })?;
+        assert_eq!(c, 3);
+
 
         assert_eq!(
             db_access.count_remote_file_item(CountItemParam::default())?,
@@ -750,7 +777,7 @@ mod tests {
             assert_eq!(buf.as_str(), "abc")
         }
 
-        load_remote_item_to_sqlite(&dir, &db_access, false, 50000)?;
+        load_remote_item_to_sqlite(&dir, &db_access, false, 50000, ".sig", ".delta")?;
 
         assert_eq!(db_access.count_directory()?, 1);
         assert_eq!(
@@ -782,7 +809,7 @@ mod tests {
         let db_dir = tutil::TestDir::new();
         let db_access = tutil::create_a_sqlite_file_db(&db_dir)?;
 
-        load_remote_item_to_sqlite(&dir, &db_access, false, 50000)?;
+        load_remote_item_to_sqlite(&dir, &db_access, false, 50000, ".sig", ".delta")?;
         assert_eq!(
             db_access.count_remote_file_item(CountItemParam::default())?,
             4,

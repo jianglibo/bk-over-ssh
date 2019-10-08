@@ -71,6 +71,7 @@ pub struct RemoteFileItemInDb {
     pub created: Option<DateTime<Utc>>,
     pub dir_id: i64,
     pub changed: bool,
+    pub confirmed: bool,
 }
 
 impl RemoteFileItemInDb {
@@ -85,6 +86,7 @@ impl RemoteFileItemInDb {
             created: self.created,
             dir_id: self.dir_id,
             changed: self.changed,
+            confirmed: self.confirmed,
         }
     }
 
@@ -113,6 +115,7 @@ impl RemoteFileItemInDb {
                         created: metadata.created().ok().map(Into::into),
                         dir_id,
                         changed: false,
+                        confirmed: false,
                     });
                 } else {
                     error!("RemoteFileItem path name to_str() failed. {:?}", path);
