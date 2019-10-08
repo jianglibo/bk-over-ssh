@@ -1,4 +1,5 @@
 use std::fmt;
+use log::*;
 
 pub const VERBATIM_PREFIX: &str = r#"\\?\"#;
 
@@ -11,9 +12,19 @@ pub fn is_windows_path_start(s: &str) -> bool {
     }
 }
 
-pub fn path_equal(win_or_linx_path_str_a: impl AsRef<str>, win_or_linx_path_str_b: impl AsRef<str>) -> bool {
-    let mut a = win_or_linx_path_str_a.as_ref();
-    let mut b = win_or_linx_path_str_b.as_ref();
+pub fn strip_verbatim_prefixed(s: impl AsRef<str>) -> String {
+    let s = s.as_ref();
+    if s.starts_with(VERBATIM_PREFIX) {
+        trace!("dir start with VERBATIM_PREFIX, stripping it. {}", s);
+        s.split_at(4).1.to_string()
+    } else {
+        s.to_string()
+    }
+}
+
+pub fn path_equal(win_or_linux_path_str_a: impl AsRef<str>, win_or_linux_path_str_b: impl AsRef<str>) -> bool {
+    let mut a = win_or_linux_path_str_a.as_ref();
+    let mut b = win_or_linux_path_str_b.as_ref();
 
     if a.starts_with(VERBATIM_PREFIX) { // it's a windows path.
         a = a.split_at(4).1;

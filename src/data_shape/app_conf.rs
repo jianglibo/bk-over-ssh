@@ -342,7 +342,7 @@ where
         let mut server_yml_path = Path::new(name).to_path_buf();
         if (server_yml_path.is_absolute() || name.starts_with('/')) && !server_yml_path.exists() {
             bail!(
-                "server yml file does't exist, please create one: {:?}",
+                "server yml file doesn't exist, please create one: {:?}",
                 server_yml_path
             );
         } else {
@@ -350,7 +350,7 @@ where
                 server_yml_path = self.servers_dir.as_path().join(name);
             }
             if !server_yml_path.exists() {
-                bail!("server yml file does't exist: {:?}", server_yml_path);
+                bail!("server yml file doesn't exist: {:?}", server_yml_path);
             }
         }
         let mut f = fs::OpenOptions::new().read(true).open(&server_yml_path)?;
@@ -375,8 +375,6 @@ where
             fs::create_dir_all(&working_dir)?;
         }
 
-        // let multi_bar = self.progress_bar.clone();
-
         let mut server = Server::new(
             self.mini_app_conf.clone(),
             server_yml,
@@ -385,37 +383,10 @@ where
             tar_dir,
             working_dir,
         );
-        //  {
-        //     server_yml,
-        //     multi_bar,
-        //     db_access: self.db_access.clone(),
-        //     // pb: Indicator::new(multi_bar.as_ref().cloned()),
-        //     report_dir,
-        //     session: None,
-        //     tar_dir,
-        //     working_dir,
-        //     yml_location: None,
-        //     app_conf: &self,
-        //     _m: PhantomData,
-        // };
 
         if let Some(bl) = self.mini_app_conf.buf_len {
             server.server_yml.buf_len = bl;
         }
-
-        // if let Some(mb) = server.multi_bar.as_ref() {
-        //     let pb_total = ProgressBar::new(!0);
-        //     let ps = ProgressStyle::default_spinner(); // {spinner} {msg}
-        //     pb_total.set_style(ps);
-        //     let pb_total = mb.add(pb_total);
-
-        //     let pb_item = ProgressBar::new(!0);
-        //     let ps = ProgressStyle::default_spinner(); // {spinner} {msg}
-        //     pb_item.set_style(ps);
-        //     let pb_item = mb.add(pb_item);
-
-        //     server.pb = Some((pb_total, pb_item));
-        // }
 
         let ab = server_yml_path.canonicalize()?;
         server.yml_location.replace(ab);
@@ -425,10 +396,10 @@ where
             trace!("origin directory: {:?}", d);
             let ld = d.local_dir.trim();
             if ld.is_empty() || ld == "~" || ld == "null" {
-                let mut splited = d.remote_dir.trim().rsplitn(3, &['/', '\\'][..]);
-                let mut s = splited.next().expect("remote_dir should has dir name.");
+                let mut split = d.remote_dir.trim().rsplitn(3, &['/', '\\'][..]);
+                let mut s = split.next().expect("remote_dir should has dir name.");
                 if s.is_empty() {
-                    s = splited.next().expect("remote_dir should has dir name.");
+                    s = split.next().expect("remote_dir should has dir name.");
                 }
                 d.local_dir = s.to_string();
                 trace!("local_dir is empty. change to {}", s);
@@ -446,10 +417,8 @@ where
                     .expect("local_dir to_str should success.")
                     .to_string();
 
-                if d.local_dir.starts_with(string_path::VERBATIM_PREFIX) {
-                    trace!("local dir start with VERBATIM_PREFIX, stripping it.");
-                    d.local_dir = d.local_dir.split_at(4).1.to_string();
-                }
+                d.local_dir = string_path::strip_verbatim_prefixed(&d.local_dir);
+
                 if ld_path.exists() {
                     fs::create_dir_all(ld_path)?;
                 }

@@ -253,7 +253,7 @@ where
 
             let style = ProgressStyle::default_bar()
             .template(
-                "{spinner} {decimal_bytes:>8}/{decimal_total_bytes:8}  {percent:>4}% {wide_msg}",
+                "{spinner} {bytes_per_sec} {decimal_bytes:>8}/{decimal_total_bytes:8}  {percent:>4}% {wide_msg}",
             )
             .progress_chars("#-");
 
@@ -714,11 +714,11 @@ where
                         current_local_dir = Some(Path::new(rd.local_dir.as_str()));
                         FileItemProcessResult::Directory(line)
                     } else {
-                        // cannot find corepsonding local_dir, skipping following lines.
-                        error!("can't find corepsonding local_dir: {:?}", line);
+                        // cannot find corresponding local_dir, skipping following lines.
+                        error!("can't find corresponding local_dir: {:?}", line);
                         current_remote_dir = None;
                         current_local_dir = None;
-                        FileItemProcessResult::NoCorresponedLocalDir(line)
+                        FileItemProcessResult::NoCorrespondedLocalDir(line)
                     }
                 }
             })
@@ -726,8 +726,8 @@ where
                 match item {
                     FileItemProcessResult::DeserializeFailed(_) => accu.deserialize_failed += 1,
                     FileItemProcessResult::Skipped(_) => accu.skipped += 1,
-                    FileItemProcessResult::NoCorresponedLocalDir(_) => {
-                        accu.no_corresponed_local_dir += 1
+                    FileItemProcessResult::NoCorrespondedLocalDir(_) => {
+                        accu.no_corresponded_local_dir += 1
                     }
                     FileItemProcessResult::Directory(_) => accu.directory += 1,
                     FileItemProcessResult::LengthNotMatch(_) => accu.length_not_match += 1,

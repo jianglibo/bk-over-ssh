@@ -17,7 +17,7 @@ pub enum SyncType {
 pub enum FileItemProcessResult {
     DeserializeFailed(String),
     Skipped(String),
-    NoCorresponedLocalDir(String),
+    NoCorrespondedLocalDir(String),
     Directory(String),
     LengthNotMatch(String),
     Sha1NotMatch(String),
@@ -33,7 +33,7 @@ pub enum FileItemProcessResult {
 pub struct FileItemProcessResultStats {
     pub deserialize_failed: u64,
     pub skipped: u64,
-    pub no_corresponed_local_dir: u64,
+    pub no_corresponded_local_dir: u64,
     pub directory: u64,
     pub length_not_match: u64,
     pub sha1_not_match: u64,

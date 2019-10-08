@@ -352,7 +352,7 @@ where
     match m.subcommand() {
         ("run-round", Some(_sub_matches)) => {
             sync_dirs(&app_conf, None)?;
-            archive_local(&app_conf, None, None, None)?;
+            archive_local(&app_conf, Some("prune"), None, None)?;
         }
         ("sync-dirs", Some(sub_matches)) => {
             sync_dirs(&app_conf, sub_matches.value_of("server-yml"))?;
@@ -635,9 +635,7 @@ where
     } else {
         servers.append(&mut app_conf.load_all_server_yml());
     }
-
     // all progress bars already create from here on.
-
     let t = join_multi_bars(app_conf.progress_bar.clone());
 
     if servers.is_empty() {
