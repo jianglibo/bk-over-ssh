@@ -12,10 +12,12 @@ use log::*;
 use r2d2;
 use serde::{Deserialize, Serialize};
 use ssh2;
+use std::ffi::OsString;
 use std::io::prelude::{BufRead, Read};
 use std::marker::PhantomData;
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::Instant;
 use std::{fs, io, io::Seek};
 use tar::Builder;
@@ -71,7 +73,7 @@ where
     pub server_yml: ServerYml,
     session: Option<ssh2::Session>,
     report_dir: PathBuf,
-    tar_dir: PathBuf,
+    archives_dir: PathBuf,
     working_dir: PathBuf,
     pub yml_location: Option<PathBuf>,
     pub db_access: Option<D>,
@@ -103,7 +105,7 @@ where
         server_yml: ServerYml,
         db_access: Option<D>,
         report_dir: PathBuf,
-        tar_dir: PathBuf,
+        archives_dir: PathBuf,
         working_dir: PathBuf,
     ) -> Self {
         Self {
@@ -111,7 +113,7 @@ where
             db_access,
             report_dir,
             session: None,
-            tar_dir,
+            archives_dir,
             working_dir,
             yml_location: None,
             app_conf,
@@ -230,87 +232,147 @@ where
         }
     }
 
-    /// get tar_dir , archive_prefix, archive_postfix from server yml configuration file.
-    fn next_tar_file(&self) -> PathBuf {
+    /// get archives_dir , archive_prefix, archive_postfix from server yml configuration file.
+    fn next_archive_file(&self) -> PathBuf {
         rolling_files::get_next_file_name(
-            &self.tar_dir,
+            &self.archives_dir,
             &self.server_yml.archive_prefix,
             &self.server_yml.archive_postfix,
         )
     }
 
     /// current tar file will not compress.
-    fn current_tar_file(&self) -> PathBuf {
-        self.tar_dir.join(format!(
+    fn current_archive_file_path(&self) -> PathBuf {
+        self.archives_dir.join(format!(
             "{}{}",
             self.server_yml.archive_prefix, self.server_yml.archive_postfix,
         ))
     }
 
-    pub fn tar_local(&self, pb: &mut Indicator) -> Result<(), failure::Error> {
-        if self.check_skip_cron("archive-local") {
-            let total_size = self.count_local_dirs_size();
+    fn archive_internal(&self, pb: &mut Indicator) -> Result<PathBuf, failure::Error> {
+        let total_size = self.count_local_dirs_size();
 
-            let style = ProgressStyle::default_bar()
+        let style = ProgressStyle::default_bar()
             .template(
                 "{spinner} {bytes_per_sec} {decimal_bytes:>8}/{decimal_total_bytes:8}  {percent:>4}% {wide_msg}",
             )
             .progress_chars("#-");
 
-            pb.active_pb_total().alter_pb(PbProperties {
-                set_style: Some(style),
-                enable_steady_tick: Some(200),
-                set_length: Some(total_size),
-                ..PbProperties::default()
-            });
-            let cur = self.current_tar_file();
-            trace!("open file to write archive: {:?}", cur);
+        pb.active_pb_total().alter_pb(PbProperties {
+            set_style: Some(style),
+            set_length: Some(total_size),
+            ..PbProperties::default()
+        });
+        let cur_archive_path = self.current_archive_file_path();
+        trace!("open file to write archive: {:?}", cur_archive_path);
 
-            let writer_c = || {
-                fs::OpenOptions::new()
-                    .create(true)
-                    .truncate(true)
-                    .write(true)
-                    .open(cur.as_path())
-            };
+        let writer_c = || {
+            fs::OpenOptions::new()
+                .create(true)
+                .truncate(true)
+                .write(true)
+                .open(cur_archive_path.as_path())
+        };
 
-            let writer: Box<dyn io::Write> = if let Some(ref sm) = self.server_yml.compress_archive
-            {
-                match sm {
-                    CompressionImpl::Bzip2 => {
-                        let w = BzEncoder::new(writer_c()?, Compression::Best);
-                        let w = ProgressWriter::new(w, pb);
-                        Box::new(w)
-                    }
-                }
-            } else {
-                let w = ProgressWriter::new(writer_c()?, pb);
-                Box::new(w)
-            };
-
-            let mut archive = Builder::new(writer);
-
-            for dir in self.server_yml.directories.iter() {
-                let len = dir.count_total_size();
-                let d_path = Path::new(&dir.local_dir);
-                if let Some(d_path_name) = d_path.file_name() {
-                    if d_path.exists() {
-                        pb.set_message_pb_total(format!(
-                            "[{}] processing directory: {:?}",
-                            self.get_host(),
-                            d_path_name
-                        ));
-                        archive.append_dir_all(d_path_name, d_path)?;
-                        pb.inc_pb_total(len);
-                    } else {
-                        warn!("unexist directory: {:?}", d_path);
-                    }
-                } else {
-                    error!("dir.local_dir get file_name failed: {:?}", d_path);
+        let writer: Box<dyn io::Write> = if let Some(ref sm) = self.server_yml.compress_archive {
+            match sm {
+                CompressionImpl::Bzip2 => {
+                    let w = BzEncoder::new(writer_c()?, Compression::Best);
+                    let w = ProgressWriter::new(w, pb);
+                    Box::new(w)
                 }
             }
-            archive.finish()?;
-            let nf = self.next_tar_file();
+        } else {
+            let w = ProgressWriter::new(writer_c()?, pb);
+            Box::new(w)
+        };
+
+        let mut archive = Builder::new(writer);
+
+        for dir in self.server_yml.directories.iter() {
+            let len = dir.count_total_size();
+            let d_path = Path::new(&dir.local_dir);
+            if let Some(d_path_name) = d_path.file_name() {
+                if d_path.exists() {
+                    pb.set_message_pb_total(format!(
+                        "[{}] processing directory: {:?}",
+                        self.get_host(),
+                        d_path_name
+                    ));
+                    archive.append_dir_all(d_path_name, d_path)?;
+                    pb.inc_pb_total(len);
+                } else {
+                    warn!("unexist directory: {:?}", d_path);
+                }
+            } else {
+                error!("dir.local_dir get file_name failed: {:?}", d_path);
+            }
+        }
+        archive.finish()?;
+        Ok(cur_archive_path)
+    }
+
+    fn archive_out(&self, pb: &mut Indicator) -> Result<PathBuf, failure::Error> {
+        let cur_archive_path = self.current_archive_file_path();
+        let cur_archive_name = cur_archive_path.as_os_str();
+
+        let style = ProgressStyle::default_bar()
+            .template(
+                "{spinner} {wide_msg}",
+            );
+
+        pb.active_pb_total().alter_pb(PbProperties {
+            set_style: Some(style),
+            enable_steady_tick: Some(200),
+            set_message: None,
+            ..PbProperties::default()
+        });
+
+        for dir in self.server_yml.directories.iter() {
+            pb.set_message(format!("archive directory: {:?}, using out util: {}", dir.local_dir, self.app_conf.archive_cmd.get(0).unwrap()));
+            let archive_cmd = self
+                .app_conf
+                .archive_cmd
+                .iter()
+                .map(|s| {
+                    if s == "archive_file_name" {
+                        cur_archive_name.to_owned()
+                    } else if s == "files_and_dirs" {
+                        OsString::from(&dir.local_dir)
+                    } else {
+                        OsString::from(s)
+                    }
+                })
+                .collect::<Vec<OsString>>();
+
+            let output = if cfg!(target_os = "windows") {
+                let mut c = Command::new("cmd");
+                c.arg("/C");
+                for seg in archive_cmd {
+                    c.arg(seg);
+                }
+                c.output().expect("failed to execute process")
+            } else {
+                let mut c = Command::new("sh");
+                c.arg("-c");
+                for seg in archive_cmd {
+                    c.arg(seg);
+                }
+                c.output().expect("failed to execute process")
+            };
+            trace!("archive_cmd output: {:?}", output);
+        }
+        Ok(cur_archive_path)
+    }
+
+    pub fn archive_local(&self, pb: &mut Indicator) -> Result<(), failure::Error> {
+        if self.check_skip_cron("archive-local") {
+            let cur = if self.app_conf.archive_cmd.is_empty() {
+                self.archive_internal(pb)?
+            } else {
+                self.archive_out(pb)?
+            };
+            let nf = self.next_archive_file();
             trace!("move fie to {:?}", nf);
             fs::rename(cur, nf)?;
         }
@@ -319,7 +381,7 @@ where
     pub fn prune_backups(&self) -> Result<(), failure::Error> {
         rolling_files::do_prune_dir(
             &self.server_yml.prune_strategy,
-            &self.tar_dir,
+            &self.archives_dir,
             &self.server_yml.archive_prefix,
             &self.server_yml.archive_postfix,
         )?;
@@ -1029,14 +1091,14 @@ mod tests {
         let test_dir = tutil::create_a_dir_and_a_file_with_content("a", "cc")?;
         test_dir.make_a_file_with_content("b", "cc1")?;
 
-        let tar_dir = tutil::TestDir::new();
-        let tar_file_path = tar_dir.tmp_dir_path().join("aa.tar");
+        let archives_dir = tutil::TestDir::new();
+        let archives_file_path = archives_dir.tmp_dir_path().join("aa.tar");
 
         {
             let tar_file = fs::OpenOptions::new()
                 .create(true)
                 .append(true)
-                .open(&tar_file_path)?;
+                .open(&archives_file_path)?;
             let mut a = Builder::new(tar_file);
             let p = test_dir.get_file_path("a");
             let p1 = test_dir.get_file_path("b");
@@ -1050,7 +1112,7 @@ mod tests {
             let tar_file = fs::OpenOptions::new()
                 .create(true)
                 .append(true)
-                .open(&tar_file_path)?;
+                .open(&archives_file_path)?;
             let mut a = Builder::new(tar_file);
             let p = test_dir.get_file_path("b");
             info!("file path: {:?}", p);
@@ -1059,7 +1121,7 @@ mod tests {
         }
 
         {
-            let file = fs::File::open(&tar_file_path)?;
+            let file = fs::File::open(&archives_file_path)?;
             let mut a = Archive::new(file);
             let et = a.entries()?.find(|it| {
                 it.as_ref()
@@ -1071,14 +1133,14 @@ mod tests {
         }
 
         {
-            let file = fs::File::open(&tar_file_path)?;
+            let file = fs::File::open(&archives_file_path)?;
             let mut a = Archive::new(file);
             assert_eq!(a.entries()?.count(), 2);
         }
 
         {
             let tar_dir = tutil::TestDir::new();
-            let file = fs::File::open(&tar_file_path)?;
+            let file = fs::File::open(&archives_file_path)?;
             let mut a = Archive::new(file);
             for et in a.entries()? {
                 let mut et = et.unwrap();

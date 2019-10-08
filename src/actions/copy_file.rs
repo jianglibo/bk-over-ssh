@@ -649,19 +649,6 @@ mod tests {
         .expect("init log should success.");
     }
 
-    // fn load_server_yml(app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>) -> Server<SqliteConnectionManager, SqliteDbAccess> {
-    //     Server::<SqliteConnectionManager, SqliteDbAccess>::load_from_yml(
-    //         app_conf,
-    //         // "data/servers",
-    //         // "data",
-    //         "localhost.yml",
-    //         None,
-    //         None,
-    //         // None,
-    //     )
-    //     .unwrap()
-    // }
-
     fn copy_a_file<'a, M, D>(
         server: &mut Server<M, D>,
         local_base_dir: &'a Path,

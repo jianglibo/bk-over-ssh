@@ -45,6 +45,7 @@ pub struct AppConfYml {
     log_conf: LogConf,
     pub mail_conf: MailConf,
     role: AppRole,
+    archive_cmd: Vec<String>,
 }
 
 impl Default for AppConfYml {
@@ -54,6 +55,7 @@ impl Default for AppConfYml {
             role: AppRole::Controller,
             mail_conf: MailConf::default(),
             log_conf: LogConf::default(),
+            archive_cmd: Vec::new(),
         }
     }
 }
@@ -90,6 +92,7 @@ pub struct MiniAppConf {
     pub buf_len: Option<usize>,
     pub skip_cron: bool,
     pub skip_sha1: bool,
+    pub archive_cmd: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -133,6 +136,7 @@ where
             skip_sha1: true,
             skip_cron: false,
             buf_len: None,
+            archive_cmd: Vec::new(),
         },
     }
 }
@@ -202,6 +206,8 @@ where
                             }
                         }
 
+                        let archive_cmd = app_conf_yml.archive_cmd.clone();
+
                         let app_conf = AppConf {
                             inner: app_conf_yml,
                             config_file_path: file.to_path_buf(),
@@ -216,6 +222,7 @@ where
                                 skip_sha1: true,
                                 skip_cron: false,
                                 buf_len: None,
+                                archive_cmd,
                             },
                         };
                         Ok(Some(app_conf))
@@ -361,14 +368,14 @@ where
         let data_dir = self.data_dir_full_path.as_path();
         let maybe_local_server_base_dir = data_dir.join(&server_yml.host);
         let report_dir = data_dir.join("report").join(&server_yml.host);
-        let tar_dir = data_dir.join("tar").join(&server_yml.host);
+        let archives_dir = data_dir.join("archives").join(&server_yml.host);
         let working_dir = data_dir.join("working").join(&server_yml.host);
 
         if !report_dir.exists() {
             fs::create_dir_all(&report_dir)?;
         }
-        if !tar_dir.exists() {
-            fs::create_dir_all(&tar_dir)?;
+        if !archives_dir.exists() {
+            fs::create_dir_all(&archives_dir)?;
         }
 
         if !working_dir.exists() {
@@ -380,7 +387,7 @@ where
             server_yml,
             self.db_access.clone(),
             report_dir,
-            tar_dir,
+            archives_dir,
             working_dir,
         );
 
@@ -456,18 +463,102 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::develope::tutil;
+    use crate::log_util;
+    use std::process::Command;
+
+    fn log() {
+        log_util::setup_logger_detail(
+            true,
+            "output.log",
+            vec!["data_shape::app_conf"],
+            Some(vec!["ssh2"]),
+            "",
+        )
+        .expect("init log should success.");
+    }
 
     #[test]
     fn t_app_conf_deserd() -> Result<(), failure::Error> {
         let yml = r##"---
-servers_dir: abc"##;
-        let app_conf = serde_yaml::from_str::<AppConfYml>(&yml)?;
-        // assert_eq!(app_conf.get_servers_dir(), Path::new("abc"));
+role: controller
+archive_cmd: 
+  - C:/Program Files/7-Zip/7z.exe
+  - a
+  - archive_file_name
+  - files_and_dirs
+data_dir: data
+log_conf:
+  log_file: output.log
+  verbose_modules: []
+    # - data_shape::server
+mail_conf:
+  from: xxx@gmail.com
+  username: xxx@gmail.com
+  password: password
+  hostname: xxx.example.com
+  port: 587"##;
+        let app_conf_yml = serde_yaml::from_str::<AppConfYml>(&yml)?;
+        assert_eq!(
+            app_conf_yml.archive_cmd,
+            vec![
+                "C:/Program Files/7-Zip/7z.exe",
+                "a",
+                "archive_file_name",
+                "files_and_dirs"
+            ]
+        );
 
-        let ymld = serde_yaml::to_string(&app_conf)?;
-        eprintln!("{}", ymld);
+        log();
+        // create a directory of 3 files.
+        let a_file = "a_file.tar";
+        let t_dir = tutil::create_a_dir_and_a_file_with_content("abc_20130101010155.tar", "abc")?;
+        t_dir.make_a_file_with_content(a_file, "abc")?;
+        t_dir.make_a_file_with_content("b.tar", "abc")?;
 
-        assert_eq!(yml, ymld);
+        let t_dir_name = t_dir.tmp_dir_str();
+
+        let target_dir = tutil::TestDir::new();
+
+        let archive_path = target_dir.tmp_dir_path().join("aa.7z");
+        let archive_file_name = archive_path
+            .to_str()
+            .expect("archive name to str should success.");
+
+        let archive_cmd = app_conf_yml
+            .archive_cmd
+            .iter()
+            .map(|s| {
+                if s == "archive_file_name" {
+                    archive_file_name.to_owned()
+                } else if s == "files_and_dirs" {
+                    t_dir_name.to_owned()
+                } else {
+                    s.to_owned()
+                }
+            })
+            .collect::<Vec<String>>();
+
+        let output = if cfg!(target_os = "windows") {
+            let mut c = Command::new("cmd");
+            c.arg("/C");
+            for seg in archive_cmd {
+                c.arg(seg);
+            }
+            c.output().expect("failed to execute process")
+        } else {
+            let mut c = Command::new("sh");
+            c.arg("-c");
+            for seg in archive_cmd {
+                c.arg(seg);
+            }
+            c.output().expect("failed to execute process")
+        };
+        eprintln!("output: {:?}", output);
+        assert!(
+            archive_path.metadata()?.len() > 0,
+            "archived aa.7z should have a length great than 0."
+        );
         Ok(())
     }
 }

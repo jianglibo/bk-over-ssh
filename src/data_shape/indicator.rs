@@ -133,6 +133,12 @@ impl Indicator {
         
     }
 
+    pub fn set_message(&self, message: String) {
+        if let Some(pb) = self.get_active_pb() {
+            pb.set_message(message.as_str());
+        }
+    }
+
     pub fn set_message_pb_total(&self, message: String) {
         if let Some(pb) = self.pb_total.as_ref() {
             pb.set_message(message.as_str());

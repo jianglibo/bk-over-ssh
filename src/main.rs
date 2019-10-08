@@ -650,7 +650,7 @@ where
         .into_par_iter()
         .map(|(server, mut indicator)| {
             if prune_op.is_some() {
-                if let Err(err) = server.tar_local(&mut indicator) {
+                if let Err(err) = server.archive_local(&mut indicator) {
                     error!("{:?}", err);
                     eprintln!("{:?}", err);
                 }
@@ -663,7 +663,7 @@ where
                     error!("{:?}", err);
                     eprintln!("{:?}", err);
                 }
-            } else if let Err(err) = server.tar_local(&mut indicator) {
+            } else if let Err(err) = server.archive_local(&mut indicator) {
                 error!("{:?}", err);
                 eprintln!("{:?}", err);
             }
