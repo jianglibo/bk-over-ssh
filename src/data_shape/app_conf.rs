@@ -364,7 +364,12 @@ where
         let mut f = fs::OpenOptions::new().read(true).open(&server_yml_path)?;
         let mut buf = String::new();
         f.read_to_string(&mut buf)?;
-        let server_yml: ServerYml = serde_yaml::from_str(&buf)?;
+        let server_yml: ServerYml = match serde_yaml::from_str(&buf) {
+            Ok(server_yml) => server_yml,
+            Err(err) => {
+                bail!("parse yml file: {:?} failed: {}", server_yml_path, err);
+            }
+        };
 
         let data_dir = self.data_dir_full_path.as_path();
         let maybe_local_server_base_dir = data_dir.join(&server_yml.host);
