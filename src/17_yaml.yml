@@ -249,7 +249,7 @@ subcommands:
     - list-local-files:
         args:
             - server-yml:
-                required: true
+                required: false
                 index: 1
             - out:
                 long: out

@@ -923,8 +923,7 @@ mod tests {
     use bzip2::Compression;
     use glob::Pattern;
     use indicatif::MultiProgress;
-    use std::fs;
-    use std::io::{self, Read, Write};
+    use std::io::{self};
     use std::sync::Arc;
     use std::thread;
     use std::time::Duration;

@@ -2,6 +2,7 @@ use std::io::{self, Read};
 use crate::data_shape::{Indicator};
 use sha1::{Digest, Sha1};
 
+#[allow(dead_code)]
 pub struct Sha1Readr<'a, T> where T: Read {
     r: T,
     c: &'a Indicator,
@@ -9,6 +10,7 @@ pub struct Sha1Readr<'a, T> where T: Read {
     length: usize,
 }
 
+#[allow(dead_code)]
 impl<'a, T> Sha1Readr<'a, T> where T: Read {
     pub fn new(r: T, c: &'a Indicator) -> Self {
         Self { r, c, hasher: Some(Sha1::new()), length: 0}

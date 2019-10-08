@@ -28,6 +28,7 @@ pub struct CountItemParam {
     is_and: u8,
 }
 
+#[allow(dead_code)]
 impl CountItemParam {
     pub fn get_changed(&self) -> Option<bool> {
         self.changed

@@ -4,7 +4,7 @@ mod delta_file;
 mod delta_mem;
 mod record;
 
-use indicatif::{ProgressBar, ProgressStyle};
+use indicatif::{ProgressStyle};
 use std::collections::HashMap;
 use std::path::Path;
 use std::{fs, io};
@@ -352,8 +352,8 @@ mod tests {
                     ((source.as_bytes()[index] as usize + 1) & 255) as u8
             }
             let block = [0; WINDOW];
-            let mut indicator = Indicator::new(None);
-            let source_sig = Signature::signature(source.as_bytes(), block, &mut indicator)?;
+            let indicator = Indicator::new(None);
+            let source_sig = Signature::signature(source.as_bytes(), block, &indicator)?;
             // println!("source_sig: {:?}", source_sig);
             // let mut blocks = Vec::new();
             let mut delta = delta_mem::DeltaMem::new(WINDOW);
@@ -421,8 +421,8 @@ mod tests {
         let start = Instant::now();
         let test_dir = tutil::create_a_dir_and_a_file_with_len("xx.bin", 1024 * 1024 * 4)?;
         let demo_file = test_dir.tmp_file_str()?;
-        let mut indicator = Indicator::new(None);
-        let mut sig = Signature::signature_a_file(&demo_file, Some(4096), &mut indicator)?;
+        let indicator = Indicator::new(None);
+        let mut sig = Signature::signature_a_file(&demo_file, Some(4096), &indicator)?;
 
         let sig_out = "target/cc.sig";
         sig.write_to_file(sig_out)?;

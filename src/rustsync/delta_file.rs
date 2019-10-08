@@ -1,5 +1,4 @@
 use super::{record, DeltaReader, DeltaWriter, WINDOW_FIELD_TYPE};
-use crate::data_shape::{Indicator};
 use log::*;
 use std::convert::TryInto;
 use std::path::Path;
@@ -270,6 +269,8 @@ mod tests {
     use rand;
     use rand::distributions::Alphanumeric;
     use rand::Rng;
+    use crate::data_shape::{Indicator};
+
     const WINDOW: usize = 32;
 
     #[test]
@@ -282,8 +283,8 @@ mod tests {
                                       // total size: 78
         let modified = source.clone();
         let buf = [0; WINDOW];
-        let mut indicator = Indicator::new(None);
-        let source_sig = Signature::signature(&source[..], buf, &mut indicator)?;
+        let indicator = Indicator::new(None);
+        let source_sig = Signature::signature(&source[..], buf, &indicator)?;
         let delta_file = "target/cc.delta";
         DeltaFileWriter::<fs::File>::create_delta_file(delta_file, WINDOW, Some(10))?
             .compare(&source_sig, &modified[..])?;
@@ -314,8 +315,8 @@ mod tests {
                     ((source.as_bytes()[index] as usize + 1) & 255) as u8
             }
             let buf = [0; WINDOW];
-            let mut indicator = Indicator::new(None);
-            let source_sig = Signature::signature(source.as_bytes(), buf, &mut indicator)?;
+            let indicator = Indicator::new(None);
+            let source_sig = Signature::signature(source.as_bytes(), buf, &indicator)?;
             let delta_file = "target/cc.delta";
             DeltaFileWriter::<fs::File>::create_delta_file(delta_file, WINDOW, Some(3))?
                 .compare(&source_sig, modified.as_bytes())?;

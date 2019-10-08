@@ -11,7 +11,7 @@ use ssh2;
 use std::ffi::OsStr;
 use std::io::prelude::Write;
 use std::path::Path;
-use std::{fs, io, io::BufRead, io::Read};
+use std::{fs, io, io::BufRead};
 
 #[allow(dead_code)]
 pub fn copy_file_to_stream(
@@ -319,6 +319,7 @@ pub fn copy_a_file_item_sftp<'a>(
     }
 }
 
+#[allow(dead_code)]
 pub fn scp_upload_file_with_progress(
     session: &ssh2::Session,
     source: impl AsRef<Path>,
@@ -399,6 +400,7 @@ pub fn sftp_upload_file_with_progress(
     sftp_file_with_progress(sftp, true, source, dest, message, pb)
 }
 
+#[allow(dead_code)]
 pub fn sftp_download_file_with_progress(
     sftp: &ssh2::Sftp,
     source: impl AsRef<Path>,
@@ -637,6 +639,7 @@ mod tests {
     use crate::log_util;
     use std::panic;
     use std::{fs, io};
+    use std::io::{Read};
 
     fn log() {
         log_util::setup_logger_detail(

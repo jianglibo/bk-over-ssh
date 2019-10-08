@@ -21,7 +21,6 @@ mod actions;
 mod data_shape;
 mod db_accesses;
 mod develope;
-mod ioutil;
 mod log_util;
 mod mail;
 mod rustsync;
@@ -352,7 +351,7 @@ where
     match m.subcommand() {
         ("run-round", Some(_sub_matches)) => {
             sync_dirs(&app_conf, None)?;
-            archive_local(&app_conf, Some("prune"), None, None)?;
+            archive_local(&app_conf, None, Some("prune"), None)?;
         }
         ("sync-dirs", Some(sub_matches)) => {
             sync_dirs(&app_conf, sub_matches.value_of("server-yml"))?;
@@ -510,8 +509,17 @@ where
             println!("time costs: {:?}", start.elapsed().as_secs());
         }
         ("list-local-files", Some(sub_matches)) => {
-            let (mut server, _indicator) =
-                app_conf.load_server_yml(sub_matches.value_of("server-yml").unwrap())?;
+            let (mut server, _indicator) = if let  Some(server_yml) = sub_matches.value_of("server-yml") {
+                app_conf.load_server_yml(server_yml)?
+            } else {
+                let mut all_yml = app_conf.load_all_server_yml();
+                if all_yml.is_empty() {
+                    bail!("no server-yml found");
+                } else {
+                    all_yml.remove(0)
+                }
+            };
+                        
             if no_db {
                 server.server_yml.use_db = false;
             }
@@ -629,8 +637,8 @@ where
 {
     let mut servers: Vec<(Server<M, D>, Indicator)> = Vec::new();
 
-    if server_yml.is_some() {
-        let server = app_conf.load_server_yml(server_yml.unwrap())?;
+    if let Some(server_yml) = server_yml {
+        let server = app_conf.load_server_yml(server_yml)?;
         servers.push(server);
     } else {
         servers.append(&mut app_conf.load_all_server_yml());

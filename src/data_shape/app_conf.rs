@@ -305,6 +305,7 @@ where
         Ok((server, indicator))
     }
 
+    /// load all .yml file under servers directory.
     pub fn load_all_server_yml(&self) -> Vec<(Server<M, D>, Indicator)> {
         if let Ok(rd) = self.servers_dir.read_dir() {
             rd.filter_map(|ery| match ery {

@@ -39,5 +39,4 @@ pub mod data_shape;
 pub mod develope;
 pub mod log_util;
 pub mod rustsync;
-pub mod ioutil;
 pub mod db_accesses;
