@@ -887,7 +887,7 @@ where
                 db_access.iterate_files_by_directory_changed_or_unconfirmed(|fidb_or_path| {
                     match fidb_or_path {
                         (Some(fidb), None) => {
-                            if fidb.changed {
+                            if fidb.changed || !fidb.confirmed {
                                 match serde_json::to_string(&RemoteFileItem::from(fidb)) {
                                     Ok(line) => {
                                         writeln!(out, "{}", line).ok();
