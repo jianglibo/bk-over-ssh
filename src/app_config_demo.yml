@@ -1,5 +1,4 @@
-role: controller
-# archive_cmd: "C:/Program Files/7-Zip/7z.exe a {} {}"
+role: pull_hub
 archive_cmd: 
   - C:/Program Files/7-Zip/7z.exe
   - a
