@@ -28,6 +28,10 @@ impl LogConf {
 pub enum AppRole {
     Controller,
     Leaf,
+    PullHub,
+    ReceiveHub,
+    BeenPulledLeaf,
+    PushLeaf,
 }
 
 #[derive(Debug, Deserialize, Serialize, Default)]
@@ -278,14 +282,16 @@ where
 
     pub fn lock_working_file(&mut self) -> Result<(), failure::Error> {
         let lof = self.data_dir_full_path.as_path().join("working.lock");
+        trace!("start locking file: {:?}", lof);
         if lof.exists() {
             if fs::remove_file(lof.as_path()).is_err() {
                 eprintln!("create lock file failed: {:?}, if you can sure app isn't running, you can delete it manually.", lof);
             }
         } else {
             self.lock_file
-                .replace(fs::OpenOptions::new().write(true).create(true).open(lof)?);
+                .replace(fs::OpenOptions::new().write(true).create(true).open(&lof)?);
         }
+        trace!("locked!");
         Ok(())
     }
 
