@@ -496,7 +496,9 @@ where
         );
         trace!("invoking remote command: {:?}", cmd);
         channel.exec(cmd.as_str())?;
-        channel_util::get_stdout_eprintln_stderr(&mut channel, true);
+        let out_op = channel_util::get_stdout_eprintln_stderr(&mut channel, true);
+
+        trace!("exec output: {:?}", out_op);
 
         let sftp = self.session.as_ref().unwrap().sftp()?;
         let mut f = sftp.open(Path::new(&self.server_yml.file_list_file))?;

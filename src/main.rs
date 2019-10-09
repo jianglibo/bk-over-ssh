@@ -257,7 +257,15 @@ fn main() -> Result<(), failure::Error> {
 
     let conf = m.value_of("conf");
     // we always open db connection unless no-db parameter provided.
-    let mut app_conf = process_app_config::<SqliteConnectionManager, SqliteDbAccess>(conf, false)?;
+    let mut app_conf =
+        match process_app_config::<SqliteConnectionManager, SqliteDbAccess>(conf, false) {
+            Ok(app_conf) => app_conf,
+            Err(err) => {
+                eprintln!("parse app config failed: {:?}", err);
+                bail!("parse app config failed: {:?}", err);
+            }
+        };
+
     if m.is_present("skip-cron") {
         app_conf.skip_cron();
     }
@@ -509,17 +517,17 @@ where
             println!("time costs: {:?}", start.elapsed().as_secs());
         }
         ("list-local-files", Some(sub_matches)) => {
-            let (mut server, _indicator) = if let  Some(server_yml) = sub_matches.value_of("server-yml") {
-                app_conf.load_server_yml(server_yml)?
-            } else {
-                let mut all_yml = app_conf.load_all_server_yml();
-                if all_yml.is_empty() {
-                    bail!("no server-yml found");
+            let (mut server, _indicator) =
+                if let Some(server_yml) = sub_matches.value_of("server-yml") {
+                    app_conf.load_server_yml(server_yml)?
                 } else {
-                    all_yml.remove(0)
-                }
-            };
-                        
+                    let mut all_yml = app_conf.load_all_server_yml();
+                    if all_yml.is_empty() {
+                        bail!("no server-yml found");
+                    } else {
+                        all_yml.remove(0)
+                    }
+                };
             if no_db {
                 server.server_yml.use_db = false;
             }
