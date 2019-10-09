@@ -699,7 +699,7 @@ where
             .map(|line| {
                 if line.starts_with('{') {
                     trace!("got item line {}", line);
-                    if let (Some(rd), Some(ld)) = (current_remote_dir.as_ref(), current_local_dir) {
+                    if let (Some(rd), Some(local_dir)) = (current_remote_dir.as_ref(), current_local_dir) {
                         match serde_json::from_str::<RemoteFileItem>(&line) {
                             Ok(remote_item) => {
                                 let remote_len = remote_item.get_len();
@@ -711,14 +711,8 @@ where
                                     SyncType::Sftp
                                 };
                                 let local_item =
-                                    FileItem::new(ld, rd.as_str(), remote_item, sync_type);
+                                    FileItem::new(local_dir, rd.as_str(), remote_item, sync_type);
                                 consume_count += 1;
-
-                                // if let Some((_pb_total, pb_item)) = self.pb.as_ref() {
-                                //     pb_item.reset();
-                                //     pb_item.set_length(remote_len);
-                                //     pb_item.set_message(local_item.get_remote_item().get_path());
-                                // }
 
                                 pb.active_pb_item().alter_pb(PbProperties {
                                     set_length: Some(remote_len),
@@ -774,15 +768,15 @@ where
                         "got directory line, it's a remote represent of path, be careful: {:?}",
                         line
                     );
-                    let k = self
+                    let found_directory = self
                         .server_yml
                         .directories
                         .iter()
                         .find(|d| string_path::path_equal(&d.remote_dir, &line));
 
-                    if let Some(rd) = k {
+                    if let Some(found_directory) = found_directory {
                         current_remote_dir = Some(line.clone());
-                        current_local_dir = Some(Path::new(rd.local_dir.as_str()));
+                        current_local_dir = Some(Path::new(found_directory.local_dir.as_str()));
                         FileItemProcessResult::Directory(line)
                     } else {
                         // cannot find corresponding local_dir, skipping following lines.
