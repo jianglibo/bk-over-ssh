@@ -2,8 +2,14 @@
 extern crate derive_builder;
 #[macro_use] extern crate failure;
 
+#[allow(unused_imports)]
 #[macro_use]
 extern crate clap;
+
+#[allow(unused_imports)]
+#[macro_use]
+extern crate lazy_static;
+#[macro_use] extern crate itertools;
 
 // extern crate librsync;
 
@@ -12,6 +18,12 @@ extern crate rand;
 
 extern crate adler32;
 extern crate blake2_rfc;
+extern crate time;
+
+#[macro_use]
+extern crate rusqlite;
+
+
 // extern crate futures;
 // #[cfg(test)]
 // extern crate rand;
@@ -27,3 +39,4 @@ pub mod data_shape;
 pub mod develope;
 pub mod log_util;
 pub mod rustsync;
+pub mod db_accesses;

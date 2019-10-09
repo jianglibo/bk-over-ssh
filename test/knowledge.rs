@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
-    use super::super::super::log_util;
-    use crate::actions::copy_stream_to_file_return_sha1;
+    use crate::actions::copy_stream_to_file_return_sha1_with_cb;
+use super::super::super::log_util;
     use crate::data_shape::Server;
     use crate::develope::tutil;
     use askama::Template;
@@ -11,6 +11,7 @@ mod tests {
     use std::net::TcpStream;
     use std::path::Path;
     use walkdir::WalkDir; // bring trait in scope
+use r2d2_sqlite::SqliteConnectionManager;
 
     #[derive(Template)] // this will generate the code...
     #[template(path = "hello.html")] // using the template in this path, relative
@@ -21,19 +22,16 @@ mod tests {
     }
 
     #[derive(Template)]
-    #[template(source = "hello.html", ext="txt")]
+    #[template(source = "hello.html", ext = "txt")]
     struct SourceTpl1<'a> {
         name: &'a str,
-
     }
 
     #[derive(Template)]
-    #[template(source = "{{ name }}", ext="txt")]
+    #[template(source = "{{ name }}", ext = "txt")]
     struct SourceTpl2<'a> {
         name: &'a str,
     }
-
-
 
     #[test]
     fn t_source_tpl1() {
@@ -47,10 +45,10 @@ mod tests {
         assert_eq!(hello.render().unwrap(), "world");
     }
 
-    #[derive(Template)] 
-    #[template(source = "{% if 1 == 1 %} {{ name }} {% endif %}", ext="txt")]
+    #[derive(Template)]
+    #[template(source = "{% if 1 == 1 %} {{ name }} {% endif %}", ext = "txt")]
     struct SourceTpl3<'a> {
-        name: &'a str, 
+        name: &'a str,
     }
 
     #[test]
@@ -59,11 +57,10 @@ mod tests {
         assert_eq!(hello.render().unwrap(), " world ");
     }
 
-
-    #[derive(Template)] 
-    #[template(source = "{% if 1 == 1 -%} {{ name }} {%- endif %}", ext="txt")]
+    #[derive(Template)]
+    #[template(source = "{% if 1 == 1 -%} {{ name }} {%- endif %}", ext = "txt")]
     struct SourceTpl4<'a> {
-        name: &'a str, 
+        name: &'a str,
     }
 
     #[test]
@@ -71,7 +68,6 @@ mod tests {
         let hello = SourceTpl4 { name: "world" };
         assert_eq!(hello.render().unwrap(), "world");
     }
-
 
     #[test]
     fn t_hello_html() {
@@ -102,14 +98,14 @@ mod tests {
 
         for identity in agent.identities() {
             let identity = identity.unwrap(); // assume no I/O errors
-            println!("{}", identity.comment());
+            eprintln!("{}", identity.comment());
             let pubkey = identity.blob();
-            println!("{:?}", pubkey);
+            eprintln!("{:?}", pubkey);
         }
     }
 
-    fn load_server_yml() -> Server {
-        Server::load_from_yml("data/servers", "data", "localhost.yml").unwrap()
+    fn load_server_yml() -> Server<SqliteConnectionManager> {
+        Server::<SqliteConnectionManager>::load_from_yml("data/servers", "data", "localhost.yml", None, None, None).unwrap()
     }
 
     #[test]
@@ -121,7 +117,7 @@ mod tests {
         let test_dir = tutil::create_a_dir_and_a_file_with_len("xx.bin", 1024)?;
         let file = test_dir.tmp_file_str()?;
         let (mut remote_file, stat) = sess.scp_recv(Path::new(&file)).unwrap();
-        println!("remote file size: {}", stat.size());
+        eprintln!("remote file size: {}", stat.size());
         let mut contents = Vec::new();
         remote_file.read_to_end(&mut contents).unwrap();
         assert_eq!(stat.size(), 1024);
@@ -149,8 +145,8 @@ mod tests {
     fn t_sftp_resume_file() -> Result<(), failure::Error> {
         // log_util::setup_logger(vec![""], vec![]);
         // let (_tcp, mut sess, _dev_env) = develope_data::connect_to_ubuntu();
-        // let rdo = RemoteFileItemOwnedDirOwned::load_dir("fixtures/adir");
-        // let rd: RemoteFileItemOwnedDir = (&rdo).into();
+        // let rdo = RemoteFileItemDirOwned::load_dir("fixtures/adir");
+        // let rd: RemoteFileItemDir = (&rdo).into();
         // let remote_item = rd
         //     .get_items()
         //     .iter()
@@ -174,7 +170,9 @@ mod tests {
         let sess = server.get_ssh_session();
         let mut channel: ssh2::Channel = sess.channel_session().unwrap();
         channel.exec("ls").unwrap();
-        copy_stream_to_file_return_sha1(&mut channel, "not_in_git/t.txt")?;
+        let mut buf = vec![0;8192];
+        let cb = |_i: u64|{};
+        copy_stream_to_file_return_sha1_with_cb(&mut channel, "not_in_git/t.txt", &mut buf, Some(cb))?;
         Ok(())
     }
 
@@ -193,7 +191,7 @@ mod tests {
                 d.strip_prefix(&base_path).ok().map(|d| d.to_path_buf())
                 // .map(|dd| dd.to_str().map(|s| s.to_string()))
             })
-            .for_each(|d| println!("{:?}", d.to_str()));
+            .for_each(|d| eprintln!("{:?}", d.to_str()));
         // assert_eq!(WalkDir::new("f:/").into_iter().filter_map(|e| e.ok()).count(), 33);
     }
 
@@ -202,13 +200,13 @@ mod tests {
         let p = Path::new("./fixtures/a/b b/")
             .canonicalize()
             .expect("success");
-        println!("{:?}", p);
+        eprintln!("{:?}", p);
 
         let rp = Path::new("fixtures").canonicalize().expect("success");
 
         let pp = p.strip_prefix(rp).expect("success");
 
-        println!("{:?}", pp.as_os_str());
+        eprintln!("{:?}", pp.as_os_str());
     }
 
     #[test]
@@ -227,7 +225,7 @@ mod tests {
         match mut_value {
             ref mut r => {
                 *r += 1;
-                println!("{}", r);
+                eprintln!("{}", r);
             }
         }
         let x = Some("foo".to_string());
@@ -278,12 +276,68 @@ mod tests {
         let result = mailer.send(email.into());
 
         if result.is_ok() {
-            println!("Email sent");
+            eprintln!("Email sent");
         } else {
-            println!("Could not send email: {:?}", result);
+            eprintln!("Could not send email: {:?}", result);
         }
 
         assert!(result.is_ok());
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests1 {
+    use rusqlite::types::ToSql;
+    use rusqlite::{Connection, Result, NO_PARAMS};
+    use time::Timespec;
+
+    #[derive(Debug)]
+    struct Person {
+        id: i32,
+        name: String,
+        time_created: Timespec,
+        data: Option<Vec<u8>>,
+    }
+
+    #[test]
+    fn t_sqlite_() -> Result<()> {
+        let conn = Connection::open_in_memory()?;
+
+        conn.execute(
+            "CREATE TABLE person (
+                  id              INTEGER PRIMARY KEY,
+                  name            TEXT NOT NULL,
+                  time_created    TEXT NOT NULL,
+                  data            BLOB
+                  )",
+            NO_PARAMS,
+        )?;
+        let me = Person {
+            id: 0,
+            name: "Steven".to_string(),
+            time_created: time::get_time(),
+            data: None,
+        };
+        conn.execute(
+            "INSERT INTO person (name, time_created, data)
+                  VALUES (?1, ?2, ?3)",
+            params![me.name, me.time_created, me.data]
+        )?;
+
+        let mut stmt = conn.prepare("SELECT id, name, time_created, data FROM person")?;
+        let person_iter = stmt.query_map(NO_PARAMS, |row| {
+            Ok(Person {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                time_created: row.get(2)?,
+                data: row.get(3)?,
+            })
+        })?;
+
+        for person in person_iter {
+            eprintln!("Found person {:?}", person.unwrap());
+        }
         Ok(())
     }
 }

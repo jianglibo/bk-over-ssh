@@ -1,7 +1,28 @@
+use crate::data_shape::{demo_app_conf, AppConf, Server};
+use crate::db_accesses::{DbAccess, SqliteDbAccess};
+use r2d2_sqlite::SqliteConnectionManager;
 use rand::Rng;
 use std::path::{Path, PathBuf};
 use std::{fs, io, io::BufRead, io::BufWriter, io::Seek, io::Write};
 use tempfile::TempDir;
+
+#[allow(dead_code)]
+pub fn load_demo_app_conf_sqlite(data_dir: Option<&str>) -> AppConf<SqliteConnectionManager, SqliteDbAccess> {
+    let data_dir = data_dir.unwrap_or_else(||"data");
+    demo_app_conf::<SqliteConnectionManager, SqliteDbAccess>(data_dir)
+}
+
+#[allow(dead_code)]
+pub fn load_demo_server_sqlite (
+    app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
+    server_yml: Option<&str>,
+) -> Server<SqliteConnectionManager, SqliteDbAccess> {
+    let server_yml = server_yml.unwrap_or_else(||"localhost.yml");
+    app_conf.load_server_from_yml(
+        server_yml,
+    )
+    .unwrap()
+}
 
 #[allow(dead_code)]
 pub fn get_a_cursor_writer() -> io::Cursor<Vec<u8>> {
@@ -10,9 +31,24 @@ pub fn get_a_cursor_writer() -> io::Cursor<Vec<u8>> {
 }
 
 #[allow(dead_code)]
-pub fn count_cursor_lines(mut cursor: io::Cursor<Vec<u8>>) -> usize {
+pub fn count_cursor_lines(cursor: &mut io::Cursor<Vec<u8>>) -> usize {
     cursor.seek(io::SeekFrom::Start(0)).unwrap();
     io::BufReader::new(cursor).lines().count()
+}
+
+#[allow(dead_code)]
+pub fn create_a_sqlite_file_db(db_dir: &TestDir) -> Result<SqliteDbAccess, failure::Error> {
+    let db_file = db_dir.tmp_dir_path().join("db.db");
+    let db_access = SqliteDbAccess::new(db_file);
+    db_access.create_database()?;
+    Ok(db_access)
+}
+#[allow(dead_code)]
+pub fn print_cursor_lines(cursor: &mut io::Cursor<Vec<u8>>) {
+    cursor.seek(io::SeekFrom::Start(0)).unwrap();
+    io::BufReader::new(cursor).lines().for_each(|line| {
+        eprintln!("{}", line.unwrap());
+    });
 }
 
 #[allow(dead_code)]
@@ -29,7 +65,11 @@ impl TestDir {
     }
     #[allow(dead_code)]
     pub fn count_files(&self) -> usize {
-        self.tmp_dir.path().read_dir().expect("tmp_dir read_dir should success.").count()
+        self.tmp_dir
+            .path()
+            .read_dir()
+            .expect("tmp_dir read_dir should success.")
+            .count()
     }
 
     #[allow(dead_code)]
@@ -68,21 +108,29 @@ impl TestDir {
         Ok(self.tmp_file()?.metadata().unwrap().len())
     }
 
+    #[allow(dead_code)]
     pub fn get_file_path(&self, file_name: impl AsRef<str>) -> PathBuf {
         self.tmp_dir_path().join(file_name.as_ref())
     }
 
+    #[allow(dead_code)]
     pub fn assert_file_exists(&self, file_name: impl AsRef<str>) {
         let f = self.tmp_dir_path().join(file_name.as_ref());
         assert!(f.exists() && f.is_file());
     }
-
-    pub fn open_a_file_for_read(&self, file_name: impl AsRef<str>) -> Result<impl io::Read, failure::Error> {
+    #[allow(dead_code)]
+    pub fn open_a_file_for_read(
+        &self,
+        file_name: impl AsRef<str>,
+    ) -> Result<impl io::Read, failure::Error> {
         let f = self.tmp_dir_path().join(file_name.as_ref());
         Ok(fs::OpenOptions::new().read(true).open(f)?)
     }
-
-    pub fn open_an_empty_file_for_write(&self, file_name: impl AsRef<str>,) -> Result<impl io::Write, failure::Error> {
+    #[allow(dead_code)]
+    pub fn open_an_empty_file_for_write(
+        &self,
+        file_name: impl AsRef<str>,
+    ) -> Result<impl io::Write, failure::Error> {
         let f = self.tmp_dir_path().join(file_name.as_ref());
         Ok(fs::OpenOptions::new().create(true).write(true).open(f)?)
     }
@@ -108,7 +156,7 @@ impl TestDir {
         &self,
         file_name: impl AsRef<str>,
         file_len: usize,
-    ) -> Result<(), failure::Error> {
+    ) -> Result<PathBuf, failure::Error> {
         let tmp_file = self.tmp_dir.path().join(file_name.as_ref());
 
         let mut tmp_file_writer = BufWriter::new(
@@ -130,7 +178,7 @@ impl TestDir {
                     .map_err(|e| e.into());
                 x
             })?;
-        Ok(())
+        Ok(tmp_file)
     }
 }
 
@@ -138,13 +186,6 @@ impl std::default::Default for TestDir {
     fn default() -> Self {
         Self::new()
     }
-}
-
-#[allow(dead_code)]
-pub fn create_a_dir_and_a_filename(file_name: impl AsRef<str>) -> Result<TestDir, failure::Error> {
-    let td = TestDir::new();
-    td.make_a_file_with_content(file_name, "")?;
-    Ok(td)
 }
 
 #[allow(dead_code)]

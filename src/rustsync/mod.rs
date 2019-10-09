@@ -4,12 +4,13 @@ mod delta_file;
 mod delta_mem;
 mod record;
 
-use log::*;
+use indicatif::{ProgressStyle};
 use std::collections::HashMap;
 use std::path::Path;
 use std::{fs, io};
+use crate::data_shape::{Indicator, PbProperties};
 
-pub use delta_file::{DeltaFileWriter, DeltaFileReader};
+pub use delta_file::{DeltaFileReader, DeltaFileWriter};
 // use tokio_io::{AsyncRead, AsyncWrite};
 // use tokio_io::io::{write_all, WriteAll};
 // use futures::{Async, Future, Poll};
@@ -38,11 +39,11 @@ pub struct Signature {
 }
 
 impl Signature {
-    #[allow(dead_code)]
     pub fn write_to_file(&mut self, file_name: impl AsRef<Path>) -> Result<(), failure::Error> {
         let writer = fs::OpenOptions::new()
             .create(true)
             .write(true)
+            .truncate(true)
             .open(file_name.as_ref())?;
         self.write_to_stream(writer)
     }
@@ -69,7 +70,7 @@ impl Signature {
         let mut rr = record::RecordReader::<fs::File>::with_file_reader(file_name.as_ref())?;
         if let Some((_field_type, u8_vec)) = rr.read_field_slice()? {
             let mut chunks = HashMap::new();
-            let usize_size = std::mem::size_of::<usize>();
+            let _usize_size = std::mem::size_of::<usize>();
             let mut ary = [0_u8; 8];
             ary.copy_from_slice(&u8_vec[..8]);
             let window = usize::from_be_bytes(ary);
@@ -103,12 +104,12 @@ impl Signature {
     /// map of blocks. The first step of the protocol is to run this
     /// function on the "source" (the remote file when downloading, the
     /// local file while uploading).
-    pub fn signature<R: io::Read, B: AsRef<[u8]> + AsMut<[u8]>>(
+    pub fn signature<R: io::BufRead, B: AsRef<[u8]> + AsMut<[u8]>> (
         mut r: R,
         mut buff: B,
+        pb: &Indicator,
     ) -> Result<Signature, failure::Error> {
         let mut chunks = HashMap::new();
-
         let mut i = 0;
         let buff = buff.as_mut();
         let mut eof = false;
@@ -117,6 +118,11 @@ impl Signature {
             while j < buff.len() {
                 // full fill the block. for the last block, maybe not full.
                 let r = r.read(&mut buff[j..])?;
+                // if let Some(pb) = pb.as_ref() {
+                //     pb.inc(r as u64);
+                // }
+                // bp(r as u64);
+                pb.inc_pb(r as u64);
                 if r == 0 {
                     eof = true;
                     break;
@@ -147,11 +153,22 @@ impl Signature {
     pub fn signature_a_file(
         file_name: impl AsRef<Path>,
         buf_size: Option<usize>,
+        pb: &Indicator,
     ) -> Result<Signature, failure::Error> {
-        let f = fs::OpenOptions::new().read(true).open(file_name.as_ref())?;
+        let file_name = file_name.as_ref();
+        let f = fs::OpenOptions::new().read(true).open(file_name)?;
+        let total_bytes = f.metadata()?.len();
+
+        pb.alter_pb(PbProperties{
+            set_style: Some(ProgressStyle::default_bar().template("[{eta_precise}] {bytes_per_sec} {decimal_bytes}/{decimal_total_bytes} {bar:30.cyan/blue} {wide_msg}").progress_chars("#-")),
+            set_message: Some(format!("start signature file: {:?}", file_name)),
+            set_length: Some(total_bytes),
+            ..PbProperties::default()
+        });
+        
         let mut br = io::BufReader::new(f);
         let mut buf = vec![0_u8; buf_size.unwrap_or(2048)];
-        Signature::signature(&mut br, &mut buf[..])
+        Signature::signature(&mut br, &mut buf[..], pb)
     }
 }
 
@@ -175,7 +192,6 @@ impl State {
 
 pub trait DeltaReader {
     fn block_count(&mut self) -> Result<(usize, usize), failure::Error>;
-    
     fn restore_seekable(
         &mut self,
         out: impl io::Write,
@@ -212,15 +228,13 @@ pub trait DeltaReader {
 }
 
 pub trait DeltaWriter {
+    /// means the block is identical to origin, don't nedd to download.
     fn push_from_source(&mut self, position: u64) -> Result<(), failure::Error>;
     fn push_byte(&mut self, byte: u8) -> Result<(), failure::Error>;
     fn finishup(&mut self) -> Result<(), failure::Error>;
 
-    fn compare<R: io::Read>(
-        &mut self,
-        sig: &Signature,
-        mut r: R,
-    ) -> Result<(), failure::Error> {
+    /// compare the sig file make out of old file to the new file.
+    fn compare<R: io::Read>(&mut self, sig: &Signature, mut r: R) -> Result<(), failure::Error> {
         let mut st = State::new();
         let mut buff = vec![0_u8; sig.window];
         while st.block_content_len > 0 {
@@ -302,21 +316,17 @@ pub trait DeltaWriter {
     }
 }
 
-pub trait Delta {
-
-
-
-}
+pub trait Delta {}
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::develope::tutil;
     use crate::log_util;
-    use log::*;
     use rand;
     use rand::distributions::Alphanumeric;
     use rand::Rng;
+    use log::*;
     use std::io;
     use std::io::{Read, Seek, Write};
     use std::time::Instant;
@@ -342,7 +352,8 @@ mod tests {
                     ((source.as_bytes()[index] as usize + 1) & 255) as u8
             }
             let block = [0; WINDOW];
-            let source_sig = Signature::signature(source.as_bytes(), block)?;
+            let indicator = Indicator::new(None);
+            let source_sig = Signature::signature(source.as_bytes(), block, &indicator)?;
             // println!("source_sig: {:?}", source_sig);
             // let mut blocks = Vec::new();
             let mut delta = delta_mem::DeltaMem::new(WINDOW);
@@ -356,9 +367,9 @@ mod tests {
                 for i in 0..10 {
                     let a = &restored[i * WINDOW..(i + 1) * WINDOW];
                     let b = &modified.as_bytes()[i * WINDOW..(i + 1) * WINDOW];
-                    println!("{:?}\n{:?}\n", a, b);
+                    eprintln!("{:?}\n{:?}\n", a, b);
                     if a != b {
-                        println!(">>>>>>>>");
+                        eprintln!(">>>>>>>>");
                     }
                 }
                 panic!("different");
@@ -408,9 +419,10 @@ mod tests {
     fn t_signature_large_file() -> Result<(), failure::Error> {
         log_util::setup_logger_empty();
         let start = Instant::now();
-        let test_dir = tutil::create_a_dir_and_a_file_with_len("xx.bin", 1024*1024*4)?;
+        let test_dir = tutil::create_a_dir_and_a_file_with_len("xx.bin", 1024 * 1024 * 4)?;
         let demo_file = test_dir.tmp_file_str()?;
-        let mut sig = Signature::signature_a_file(&demo_file, Some(4096))?;
+        let indicator = Indicator::new(None);
+        let mut sig = Signature::signature_a_file(&demo_file, Some(4096), &indicator)?;
 
         let sig_out = "target/cc.sig";
         sig.write_to_file(sig_out)?;
@@ -431,33 +443,6 @@ mod tests {
             start.elapsed().as_secs()
         );
         assert_eq!(sig, new_sig);
-        Ok(())
-    }
-
-    #[test]
-    fn t_other() -> Result<(), failure::Error> {
-        assert_eq!(std::mem::size_of::<usize>(), 8);
-        let a = 5_u64;
-        let b = 10_u64;
-        // assert_eq!(0.5_f32, a as f32 / b as f32);
-
-        let mut tf = tempfile::tempfile()?;
-        tf.write_all(b"hello")?;
-
-        assert_eq!(tf.metadata()?.len(), 5);
-        enum Aenum {
-            A(u8),
-            B(u32),
-        }
-
-        impl Aenum {
-            pub fn set_value(&mut self, v: u8) {
-                match self {
-                    Self::A(_) => {}
-                    Self::B(_) => {}
-                }
-            }
-        }
         Ok(())
     }
 }

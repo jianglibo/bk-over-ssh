@@ -60,7 +60,7 @@ impl DeltaWriter for DeltaMem {
 impl DeltaReader for DeltaMem {
     fn block_count(&mut self) -> Result<(usize, usize), failure::Error> {
         Ok(self.blocks.iter().fold((0, 0), |acc, block| match block {
-            BlockVec::FromSource(i) => (acc.0 + 1, acc.1),
+            BlockVec::FromSource(_i) => (acc.0 + 1, acc.1),
             BlockVec::Literal(_, _) => (acc.0, acc.1 + 1),
         }))
     }

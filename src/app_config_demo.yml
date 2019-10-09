@@ -1,3 +1,10 @@
+role: controller
+# archive_cmd: "C:/Program Files/7-Zip/7z.exe a {} {}"
+archive_cmd: 
+  - C:/Program Files/7-Zip/7z.exe
+  - a
+  - archive_file_name
+  - files_and_dirs
 data_dir: data
 log_conf:
   log_file: output.log

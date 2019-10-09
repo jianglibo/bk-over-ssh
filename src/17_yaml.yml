@@ -34,6 +34,41 @@ args:
         help: enable console log output.
         long: console-log
         required: false
+    - skip-cron:
+        help: skip cron schedule, execute right now.
+        long: skip-cron
+        required: false
+    - enable-sha1:
+        help: detect file changing on file's sha1.
+        long: enable-sha1
+        required: false
+    - v:
+        help: verbose level debug.
+        long: v
+        required: false
+    - vv:
+        help: verbose level trace.
+        long: vv
+        required: false
+    - delay:
+        help: delay seconds before execute command. for test purpose.
+        long: delay
+        takes_value: true
+        required: false
+    - no-db:
+        help: don't use db.
+        long: no-db
+        required: false
+    - no-pb:
+        help: don't display progress bar.
+        long: no-pb
+        required: false
+    - buf-len:
+        help: the buf-len in case needed.
+        long: buf-len
+        takes_value: true
+        required: false
+
     # - flag:
     #     help: demo flag argument
     #     short: F
@@ -95,7 +130,45 @@ subcommands:
         about: print out the current configuration of application.
     - print-env:
         about: print out environment variables.
-
+    - polling-file:
+        about: polling the file properties.
+        args:
+            - file:
+                help: the file name to polling.
+                required: true
+                index: 1
+            - period:
+                help: the interval of seconds between polling.
+                required: false
+                index: 2
+    - create-db:
+        about: create database.
+        args:
+            - db-type:
+                help: what kind of database to create.
+                long: db-type
+                possible_values: [ sqlite ]
+                takes_value: true
+            - force:
+                help: remove and create remote database if exists.
+                long: force
+                required: false
+    - create-remote-db:
+        about: create remote database.
+        args:
+            - db-type:
+                help: what kind of database to create.
+                long: db-type
+                possible_values: [ sqlite ]
+                takes_value: true
+            - server-yml:
+                long: server-yml
+                required: true
+                index: 1
+            - force:
+                help: remove and create remote database if exists.
+                long: force
+                required: false
     - pbr:
         about: demonstrate bpr usage.
     - repl:
@@ -104,15 +177,22 @@ subcommands:
         about: copy a executable file to server, the directory to put is described in the server yml file.
         args:
             - server-yml:
+                help: the configuration file.
                 long: server-yml
                 required: true
-                takes_value: true
+                index: 1
             - executable:
                 help: the executable file to copy.
                 required: true
-                index: 1
+                takes_value: true
     - copy-server-yml:
         about: copy a server-yml file to server, the directory to put is described in the server yml file.
+        args:
+            - server-yml:
+                required: true
+                index: 1
+    - print-report:
+        about: print out last execution report.
         args:
             - server-yml:
                 required: true
@@ -136,7 +216,7 @@ subcommands:
         about: archive directories in the configuration file.
         args:
             - server-yml:
-                required: true
+                required: false
                 index: 1
             - prune:
                 help: archive directories and prune backups.
@@ -163,43 +243,55 @@ subcommands:
                 long: out
                 required: false
                 takes_value: true
+            - skip-sha1:
+                long: skip-sha1
+                required: false
     - list-local-files:
         args:
             - server-yml:
-                required: true
+                required: false
                 index: 1
             - out:
                 long: out
                 required: false
                 takes_value: true
+            - skip-sha1:
+                long: skip-sha1
+                required: false
     - sync-dirs:
         about: sync directories in the configuration file.
         args:
             - server-yml:
                 required: false
                 index: 1
-    - rsync:
-        about: sync relative functions.
-        args:
             - skip-sha1:
                 long: skip-sha1
                 required: false
-                global: true
-                conflicts_with:
-                    - verify-server-yml
-            - no-pb:
-                long: no-pb
+            - rsync-window:
+                long: rsync-window
+                takes_value: true
                 required: false
-                global: true
-        # args:
-        #     - server-yml:
-        #         help: the path to server configuration file.
-        #         long: server-yml
-        #         required: true
-        #         takes_value: true
-        #         global: true       
+    - run-round:
+        about: run all tasks.
+        args:
+            - server-yml:
+                required: false
+                index: 1
+    - confirm-remote-sync:
+        about: confirm the last sync-dirs action, execute confirm-local-sync on remote server.
+        args:
+            - server-yml:
+                required: false
+                index: 1
+    - confirm-local-sync:
+        about: confirm the last sync-dirs action.
+        args:
+            - server-yml:
+                required: false
+                index: 1
+    - rsync:
+        about: sync relative functions.
         subcommands:
-
             - signature:
                 args:
                     - file:
@@ -214,6 +306,10 @@ subcommands:
                         long: out
                         required: false
                         takes_value: true
+                    - rsync-window:
+                        long: rsync-window
+                        takes_value: true
+                        required: false
             - delta-a-file:
                 args:
                     - new-file:
@@ -228,6 +324,9 @@ subcommands:
                         long: out-file
                         required: false
                         takes_value: true
+                    - print-progress:
+                        long: print-progress
+                        required: false
             - restore-a-file:
                 args:
                     - old-file:

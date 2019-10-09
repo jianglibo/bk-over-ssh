@@ -1,11 +1,11 @@
 use super::string_path;
-use super::RemoteFileItemOwned;
+use super::RemoteFileItem;
 use crate::actions::hash_file_sha1;
 use filetime;
 use log::*;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
 
 #[derive(Debug)]
 pub enum SyncType {
@@ -17,7 +17,7 @@ pub enum SyncType {
 pub enum FileItemProcessResult {
     DeserializeFailed(String),
     Skipped(String),
-    NoCorresponedLocalDir(String),
+    NoCorrespondedLocalDir(String),
     Directory(String),
     LengthNotMatch(String),
     Sha1NotMatch(String),
@@ -26,13 +26,14 @@ pub enum FileItemProcessResult {
     Successed(u64, String, SyncType),
     GetLocalPathFailed,
     SftpOpenFailed,
+    ScpOpenFailed,
 }
 
-#[derive(Debug, Default, Serialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct FileItemProcessResultStats {
     pub deserialize_failed: u64,
     pub skipped: u64,
-    pub no_corresponed_local_dir: u64,
+    pub no_corresponded_local_dir: u64,
     pub directory: u64,
     pub length_not_match: u64,
     pub sha1_not_match: u64,
@@ -41,13 +42,14 @@ pub struct FileItemProcessResultStats {
     pub successed: u64,
     pub get_local_path_failed: u64,
     pub sftp_open_failed: u64,
+    pub scp_open_failed: u64,
     pub read_line_failed: u64,
     pub bytes_transfered: u64,
 }
 
 #[derive(Debug)]
 pub struct FileItem<'a> {
-    pub remote_item: RemoteFileItemOwned,
+    pub remote_item: RemoteFileItem,
     base_dir: &'a Path,
     remote_base_dir: Option<&'a str>,
     pub sync_type: SyncType,
@@ -57,7 +59,7 @@ impl<'a> FileItem<'a> {
     pub fn new(
         base_dir: &'a Path,
         remote_base_dir: &'a str,
-        remote_item: RemoteFileItemOwned,
+        remote_item: RemoteFileItem,
         sync_type: SyncType,
     ) -> Self {
         Self {
@@ -104,7 +106,7 @@ impl<'a> FileItem<'a> {
             != self.remote_item.get_sha1().map(str::to_ascii_uppercase)
     }
 
-    pub fn get_remote_item(&self) -> &RemoteFileItemOwned {
+    pub fn get_remote_item(&self) -> &RemoteFileItem {
         &self.remote_item
     }
     pub fn get_local_path(&self) -> PathBuf {
@@ -118,7 +120,7 @@ impl<'a> FileItem<'a> {
         self.base_dir.join(&rp).to_str().map(str::to_string)
     }
 
-    pub fn get_remote_path(&self) -> String {
+    pub fn get_remote_file_name(&self) -> String {
         if let Some(rbd) = self.remote_base_dir {
             string_path::join_path(rbd, self.remote_item.get_path())
         } else {

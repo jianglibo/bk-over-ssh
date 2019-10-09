@@ -182,16 +182,17 @@ impl<W> DeltaFileWriter<W>
 where
     W: io::Write,
 {
-    #[allow(dead_code)]
+    /// create a delta file writer, which contains a field name wr which is a record writer.
+    /// the compare method of delta file writer will write all bytes into delta file.
     pub fn create_delta_file(
-        file: impl AsRef<Path>,
+        out_delta_file: impl AsRef<Path>,
         window: usize,
         pending_valve: Option<usize>,
     ) -> Result<DeltaFileWriter<impl io::Write>, failure::Error> {
         let writer = fs::OpenOptions::new()
             .create(true)
             .write(true)
-            .open(file.as_ref())?;
+            .open(out_delta_file.as_ref())?;
 
         let mut wr = record::RecordWriter::new(writer);
         wr.write_field_usize(WINDOW_FIELD_TYPE, window)?;
@@ -268,6 +269,8 @@ mod tests {
     use rand;
     use rand::distributions::Alphanumeric;
     use rand::Rng;
+    use crate::data_shape::{Indicator};
+
     const WINDOW: usize = 32;
 
     #[test]
@@ -280,7 +283,8 @@ mod tests {
                                       // total size: 78
         let modified = source.clone();
         let buf = [0; WINDOW];
-        let source_sig = Signature::signature(&source[..], buf)?;
+        let indicator = Indicator::new(None);
+        let source_sig = Signature::signature(&source[..], buf, &indicator)?;
         let delta_file = "target/cc.delta";
         DeltaFileWriter::<fs::File>::create_delta_file(delta_file, WINDOW, Some(10))?
             .compare(&source_sig, &modified[..])?;
@@ -311,7 +315,8 @@ mod tests {
                     ((source.as_bytes()[index] as usize + 1) & 255) as u8
             }
             let buf = [0; WINDOW];
-            let source_sig = Signature::signature(source.as_bytes(), buf)?;
+            let indicator = Indicator::new(None);
+            let source_sig = Signature::signature(source.as_bytes(), buf, &indicator)?;
             let delta_file = "target/cc.delta";
             DeltaFileWriter::<fs::File>::create_delta_file(delta_file, WINDOW, Some(3))?
                 .compare(&source_sig, modified.as_bytes())?;
@@ -326,9 +331,9 @@ mod tests {
                 for i in 0..10 {
                     let a = &restored[i * WINDOW..(i + 1) * WINDOW];
                     let b = &modified.as_bytes()[i * WINDOW..(i + 1) * WINDOW];
-                    println!("{:?}\n{:?}\n", a, b);
+                    eprintln!("{:?}\n{:?}\n", a, b);
                     if a != b {
-                        println!(">>>>>>>>");
+                        eprintln!(">>>>>>>>");
                     }
                 }
                 panic!("different");
