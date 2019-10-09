@@ -30,8 +30,8 @@ pub enum AppRole {
     Leaf,
     PullHub,
     ReceiveHub,
-    BeenPulledLeaf,
-    PushLeaf,
+    PassiveLeaf,
+    ActiveLeaf,
 }
 
 #[derive(Debug, Deserialize, Serialize, Default)]
@@ -64,7 +64,7 @@ impl Default for AppConfYml {
     }
 }
 
-fn guesss_data_dir(data_dir: impl AsRef<str>) -> Result<PathBuf, failure::Error> {
+fn guess_data_dir(data_dir: impl AsRef<str>) -> Result<PathBuf, failure::Error> {
     let data_dir = data_dir.as_ref();
     let data_dir = if data_dir.is_empty() {
         "data"
@@ -184,7 +184,7 @@ where
             if f.read_to_string(&mut buf).is_ok() {
                 match serde_yaml::from_str::<AppConfYml>(&buf) {
                     Ok(app_conf_yml) => {
-                        let data_dir_full_path = guesss_data_dir(app_conf_yml.data_dir.trim())?;
+                        let data_dir_full_path = guess_data_dir(app_conf_yml.data_dir.trim())?;
 
                         let log_full_path = {
                             let log_file = &app_conf_yml.log_conf.log_file;
