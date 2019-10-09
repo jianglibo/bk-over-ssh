@@ -9,7 +9,7 @@ back-over-ssh is a simple utility for backup files over a ssh connection. It's p
 If rust can compile successfully on that platform it supports, tested under Windows10, Windows2008R2, Ubuntu18, Centos7, Centos6. For Windows platform has tested [win32 openssh](https://github.com/PowerShell/Win32-OpenSSH). 
 
 ## interconnect pattern
-current support mode:
-![passive interconnect](https://raw.githubusercontent.com/jianglibo/bk-over-ssh/master/readme_imgs/passive_interconnect.jpg)
-planed support mode:
-![passive interconnect](https://raw.githubusercontent.com/jianglibo/bk-over-ssh/master/readme_imgs/active_interconnect.jpg)
+current support mode:  
+![passive interconnect](https://raw.githubusercontent.com/jianglibo/bk-over-ssh/master/readme_imgs/passive_interconnect.jpg)<br/>
+planed support mode:  
+![passive interconnect](https://raw.githubusercontent.com/jianglibo/bk-over-ssh/master/readme_imgs/active_interconnect.jpg)<br/>
