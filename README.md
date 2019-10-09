@@ -11,5 +11,5 @@ If rust can compile successfully on that platform it supports, tested under Wind
 ## interconnect pattern
 current support mode:  
 ![passive interconnect](https://raw.githubusercontent.com/jianglibo/bk-over-ssh/master/readme_imgs/passive_interconnect.jpg)<br/>
-planed support mode:  
+planned support mode:  
 ![passive interconnect](https://raw.githubusercontent.com/jianglibo/bk-over-ssh/master/readme_imgs/active_interconnect.jpg)<br/>
