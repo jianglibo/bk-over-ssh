@@ -460,7 +460,7 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
         });
         ss.push_str("COMMIT;");
         if let Err(err) = conn.execute_batch(ss.as_str()) {
-            eprintln!("{:?}", err);
+            eprintln!("db_access execute batch failed: {:?}", err);
         }
     }
 

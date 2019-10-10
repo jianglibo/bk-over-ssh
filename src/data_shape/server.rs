@@ -187,9 +187,9 @@ where
     }
 
     pub fn set_db_access(&mut self, db_access: D) {
-        if let Err(err) = db_access.create_database() {
-            warn!("{:?}", err);
-        }
+        // if let Err(err) = db_access.create_database() {
+        //     warn!("create database failed: {:?}", err);
+        // }
         self.db_access.replace(db_access);
     }
 
@@ -940,6 +940,7 @@ where
         if self.db_access.is_some() && self.server_yml.use_db {
             let db_access = self.db_access.as_ref().unwrap();
             for one_dir in self.server_yml.directories.iter() {
+                trace!("start load directory: {:?}", one_dir);
                 load_remote_item_to_sqlite(
                     one_dir,
                     db_access,

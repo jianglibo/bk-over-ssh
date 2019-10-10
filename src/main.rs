@@ -313,6 +313,7 @@ fn main() -> Result<(), failure::Error> {
                     fs::remove_file(server.get_db_file())?;
                 }
                 let sqlite_db_access = SqliteDbAccess::new(server.get_db_file());
+                sqlite_db_access.create_database()?;
                 server.set_db_access(sqlite_db_access);
             } else {
                 let mut app_conf =
@@ -321,6 +322,7 @@ fn main() -> Result<(), failure::Error> {
                     fs::remove_file(app_conf.get_sqlite_db_file())?;
                 }
                 let sqlite_db_access = SqliteDbAccess::new(app_conf.get_sqlite_db_file());
+                sqlite_db_access.create_database()?;
                 app_conf.set_db_access(sqlite_db_access);
             }
         } else {

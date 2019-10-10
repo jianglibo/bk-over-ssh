@@ -128,7 +128,11 @@ where
     M: r2d2::ManageConnection,
     D: DbAccess<M>,
 {
-    trace!("load_remote_item_to_sqlite, skip_sha1: {}, sql_batch_size: {}", skip_sha1, sql_batch_size);
+    trace!(
+        "load_remote_item_to_sqlite, skip_sha1: {}, sql_batch_size: {}",
+        skip_sha1,
+        sql_batch_size
+    );
     if let Some(base_path) = directory.get_remote_canonicalized_dir_str() {
         let dir_id = db_access.insert_directory(base_path.as_str())?;
 
@@ -146,7 +150,11 @@ where
                 .map(|(rfi, da)| rfi.to_sql_string(&da))
                 .chunks(sql_batch_size)
                 .into_iter()
-                .for_each(|ck| db_access.execute_batch(ck));
+                .for_each(|ck| {
+                    trace!("start batch insert.");
+                    db_access.execute_batch(ck);
+                    trace!("end batch insert.");
+                });
         } else {
             let _c = WalkDir::new(&base_path)
                 .follow_links(false)

@@ -153,9 +153,9 @@ where
     D: DbAccess<M>,
 {
     pub fn set_db_access(&mut self, db_access: D) {
-        if let Err(err) = db_access.create_database() {
-            warn!("{:?}", err);
-        }
+        // if let Err(err) = db_access.create_database() {
+        //     warn!("create database failed: {:?}", err);
+        // }
         self.db_access.replace(db_access);
     }
 
