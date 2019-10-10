@@ -39,7 +39,7 @@ pub struct FileItemProcessResultStats {
     pub sha1_not_match: u64,
     pub copy_failed: u64,
     pub skip_because_no_base_dir: u64,
-    pub successed: u64,
+    pub succeeded: u64,
     pub get_local_path_failed: u64,
     pub sftp_open_failed: u64,
     pub scp_open_failed: u64,

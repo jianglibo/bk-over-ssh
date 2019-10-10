@@ -1,4 +1,4 @@
-use crate::data_shape::{string_path, Indicator, Server, ServerYml};
+use crate::data_shape::{Indicator, Server, ServerYml};
 use crate::db_accesses::DbAccess;
 use indicatif::MultiProgress;
 use log::{trace, warn};
@@ -151,6 +151,9 @@ where
     D: DbAccess<M>,
 {
     pub fn set_db_access(&mut self, db_access: D) {
+        if let Err(err) = db_access.create_database() {
+            eprintln!("{:?}", err);
+        }
         self.db_access.replace(db_access);
     }
 
@@ -246,14 +249,14 @@ where
     }
     #[allow(dead_code)]
     pub fn write_to_working_dir(&self) -> Result<(), failure::Error> {
-        let ymld = serde_yaml::to_string(&self.inner)?;
+        let yml_serialized = serde_yaml::to_string(&self.inner)?;
         let path = env::current_dir()?.join(CONF_FILE_NAME);
         let mut file = fs::OpenOptions::new().write(true).create(true).open(path)?;
-        write!(file, "{}", ymld)?;
+        write!(file, "{}", yml_serialized)?;
         Ok(())
     }
 
-    /// If no conf file provided, first look at the same directory as execuable, then current working directory.
+    /// If no conf file provided, first look at the same directory as executable, then current working directory.
     pub fn guess_conf_file(
         app_conf_file: Option<&str>,
     ) -> Result<Option<AppConf<M, D>>, failure::Error> {
@@ -313,15 +316,15 @@ where
 
     /// load all .yml file under servers directory.
     pub fn load_all_server_yml(&self) -> Vec<(Server<M, D>, Indicator)> {
-        if let Ok(rd) = self.servers_dir.read_dir() {
-            rd.filter_map(|ery| match ery {
+        if let Ok(read_dir) = self.servers_dir.read_dir() {
+            read_dir.filter_map(|ery| match ery {
                 Err(err) => {
                     warn!("read_dir entry return error: {:?}", err);
                     None
                 }
                 Ok(entry) => Some(entry.file_name().into_string()),
             })
-            .filter_map(|ossr| match ossr {
+            .filter_map(|from_os_string| match from_os_string {
                 Err(err) => {
                     warn!("osstring to_string failed: {:?}", err);
                     None
@@ -352,7 +355,6 @@ where
         name: impl AsRef<str>,
     ) -> Result<Server<M, D>, failure::Error> {
         let name = name.as_ref();
-        trace!("got server yml name: {:?}", name);
         let mut server_yml_path = Path::new(name).to_path_buf();
         if (server_yml_path.is_absolute() || name.starts_with('/')) && !server_yml_path.exists() {
             bail!(
@@ -367,6 +369,7 @@ where
                 bail!("server yml file doesn't exist: {:?}", server_yml_path);
             }
         }
+        trace!("got server yml at: {:?}", server_yml_path);
         let mut f = fs::OpenOptions::new().read(true).open(&server_yml_path)?;
         let mut buf = String::new();
         f.read_to_string(&mut buf)?;
@@ -378,30 +381,17 @@ where
         };
 
         let data_dir = self.data_dir_full_path.as_path();
-        let maybe_local_server_base_dir = data_dir.join(&server_yml.host);
-        let report_dir = data_dir.join("report").join(&server_yml.host);
-        let archives_dir = data_dir.join("archives").join(&server_yml.host);
-        let working_dir = data_dir.join("working").join(&server_yml.host);
-
-        if !report_dir.exists() {
-            fs::create_dir_all(&report_dir)?;
-        }
-        if !archives_dir.exists() {
-            fs::create_dir_all(&archives_dir)?;
-        }
-
-        if !working_dir.exists() {
-            fs::create_dir_all(&working_dir)?;
+        let servers_data_dir = data_dir.join("servers_data");
+        if !servers_data_dir.exists() {
+            fs::create_dir_all(&servers_data_dir)?;
         }
 
         let mut server = Server::new(
             self.mini_app_conf.clone(),
+            servers_data_dir.join(&server_yml.host),
             server_yml,
-            self.db_access.clone(),
-            report_dir,
-            archives_dir,
-            working_dir,
-        );
+            // self.db_access.clone(),
+        )?;
 
         if let Some(bl) = self.mini_app_conf.buf_len {
             server.server_yml.buf_len = bl;
@@ -410,40 +400,6 @@ where
         let ab = server_yml_path.canonicalize()?;
         server.yml_location.replace(ab);
 
-        server.server_yml.directories.iter_mut().try_for_each(|d| {
-            d.compile_patterns().unwrap();
-            trace!("origin directory: {:?}", d);
-            let ld = d.local_dir.trim();
-            if ld.is_empty() || ld == "~" || ld == "null" {
-                let mut split = d.remote_dir.trim().rsplitn(3, &['/', '\\'][..]);
-                let mut s = split.next().expect("remote_dir should has dir name.");
-                if s.is_empty() {
-                    s = split.next().expect("remote_dir should has dir name.");
-                }
-                d.local_dir = s.to_string();
-                trace!("local_dir is empty. change to {}", s);
-            } else {
-                d.local_dir = ld.to_string();
-            }
-
-            let dpath = Path::new(&d.local_dir);
-            if dpath.is_absolute() {
-                bail!("the local_dir of a server can't be absolute. {:?}", dpath);
-            } else {
-                let ld_path = maybe_local_server_base_dir.join(&d.local_dir);
-                d.local_dir = ld_path
-                    .to_str()
-                    .expect("local_dir to_str should success.")
-                    .to_string();
-
-                d.local_dir = string_path::strip_verbatim_prefixed(&d.local_dir);
-
-                if ld_path.exists() {
-                    fs::create_dir_all(ld_path)?;
-                }
-                Ok(())
-            }
-        })?;
         trace!(
             "loaded server: {:?}",
             server

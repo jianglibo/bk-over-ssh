@@ -79,9 +79,11 @@ where
 {
     pub server_yml: ServerYml,
     session: Option<ssh2::Session>,
-    report_dir: PathBuf,
+    my_dir: PathBuf,
+    reports_dir: PathBuf,
     archives_dir: PathBuf,
     working_dir: PathBuf,
+    // directories_dir: PathBuf,
     pub yml_location: Option<PathBuf>,
     pub db_access: Option<D>,
     _m: PhantomData<M>,
@@ -109,24 +111,92 @@ where
 {
     pub fn new(
         app_conf: MiniAppConf,
-        server_yml: ServerYml,
-        db_access: Option<D>,
-        report_dir: PathBuf,
-        archives_dir: PathBuf,
-        working_dir: PathBuf,
-    ) -> Self {
-        Self {
+        my_dir: PathBuf,
+        mut server_yml: ServerYml,
+        // db_access: Option<D>,
+    ) -> Result<Self, failure::Error> {
+        let reports_dir = my_dir.join("reports");
+        let archives_dir = my_dir.join("archives");
+        let working_dir = my_dir.join("working");
+        let directories_dir = my_dir.join("directories");
+
+        if !archives_dir.exists() {
+            fs::create_dir_all(&archives_dir).expect("archives_dir should create.");
+        }
+        if !reports_dir.exists() {
+            fs::create_dir_all(&reports_dir).expect("reports_dir should create.");
+        }
+        if !working_dir.exists() {
+            fs::create_dir_all(&working_dir).expect("working_dir should create.");
+        }
+        if !directories_dir.exists() {
+            fs::create_dir_all(&directories_dir).expect("directories_dir should create.");
+        }
+
+        server_yml.directories.iter_mut().try_for_each(|d| {
+            d.compile_patterns().unwrap();
+            trace!("origin directory: {:?}", d);
+            let ld = d.local_dir.trim();
+            if ld.is_empty() || ld == "~" || ld == "null" {
+                let mut split = d.remote_dir.trim().rsplitn(3, &['/', '\\'][..]);
+                let mut s = split.next().expect("remote_dir should has dir name.");
+                if s.is_empty() {
+                    s = split.next().expect("remote_dir should has dir name.");
+                }
+                d.local_dir = s.to_string();
+                trace!("local_dir is empty. change to {}", s);
+            } else {
+                d.local_dir = ld.to_string();
+            }
+
+            let a_local_dir = Path::new(&d.local_dir);
+            if a_local_dir.is_absolute() {
+                bail!("the local_dir of a server can't be absolute. {:?}", a_local_dir);
+            } else {
+                let ld_path = directories_dir.join(&d.local_dir);
+                d.local_dir = ld_path
+                    .to_str()
+                    .expect("local_dir to_str should success.")
+                    .to_string();
+
+                d.local_dir = string_path::strip_verbatim_prefixed(&d.local_dir);
+
+                if ld_path.exists() {
+                    fs::create_dir_all(ld_path)?;
+                }
+                Ok(())
+            }
+        })?;
+
+        
+
+        Ok(Self {
             server_yml,
-            db_access,
-            report_dir,
+            db_access: None,
             session: None,
+            // db_file,
+            my_dir,
+            reports_dir,
             archives_dir,
             working_dir,
+            // directories_dir,
             yml_location: None,
             app_conf,
             _m: PhantomData,
-        }
+        })
     }
+
+    pub fn set_db_access(&mut self, db_access: D) {
+        if let Err(err) = db_access.create_database() {
+            eprintln!("{:?}", err);
+        }
+        self.db_access.replace(db_access);
+    }
+
+    pub fn get_db_file(&self) -> PathBuf {
+        self.my_dir.join("db.db")
+    }
+
     pub fn get_host(&self) -> &str {
         self.server_yml.host.as_str()
     }
@@ -221,7 +291,7 @@ where
     }
 
     pub fn get_dir_sync_report_file(&self) -> PathBuf {
-        self.report_dir.join("sync_dir_report.json")
+        self.reports_dir.join("sync_dir_report.json")
     }
 
     pub fn get_working_file_list_file(&self) -> PathBuf {
@@ -419,7 +489,7 @@ where
                     for id in agent.identities() {
                         match id {
                             Ok(identity) => {
-                                trace!("start authenticate with pubkey.");
+                                trace!("start authenticate with public key.");
                                 if let Err(err) =
                                     agent.userauth(&self.server_yml.username, &identity)
                                 {
@@ -723,17 +793,17 @@ where
                                     ..PbProperties::default()
                                 });
 
-                                let mut skiped = false;
+                                let mut skipped = false;
                                 // if use_db all received item are changed.
                                 // let r = if self.server_yml.use_db || local_item.had_changed() { // even use_db still check change or not.
                                 let r = if local_item.had_changed() {
                                     trace!("file had changed. start copy_a_file_item.");
                                     copy_a_file_item(&self, &sftp, local_item, &mut buff, pb)
                                 } else {
-                                    skiped = true;
+                                    skipped = true;
                                     FileItemProcessResult::Skipped(
                                         local_item.get_local_path_str().expect(
-                                            "get_local_path_str should has some at thia point.",
+                                            "get_local_path_str should has some at this point.",
                                         ),
                                     )
                                 };
@@ -748,7 +818,7 @@ where
                                         inc: Some(remote_len),
                                         ..PbProperties::default()
                                     });
-                                    if skiped {
+                                    if skipped {
                                         pb.active_pb_item().inc_pb_item(remote_len);
                                     }
                                 }
@@ -803,7 +873,7 @@ where
                     }
                     FileItemProcessResult::Successed(fl, _, _) => {
                         accu.bytes_transfered += fl;
-                        accu.successed += 1;
+                        accu.succeeded += 1;
                     }
                     FileItemProcessResult::GetLocalPathFailed => accu.get_local_path_failed += 1,
                     FileItemProcessResult::SftpOpenFailed => accu.sftp_open_failed += 1,
@@ -928,7 +998,7 @@ mod tests {
         log_util::setup_logger_detail(
             true,
             "output.log",
-            vec!["data_shape::server"],
+            vec!["data_shape::server", "data_shape::app_conf"],
             Some(vec!["ssh2"]),
             "",
         )
@@ -1082,7 +1152,7 @@ mod tests {
         assert!(one_dir.includes_patterns.is_none());
         load_remote_item(&one_dir, &mut cur, true)?;
         let num = tutil::count_cursor_lines(&mut cur);
-        assert_eq!(num, 7, "if exlude 1 file there should 7 left.");
+        assert_eq!(num, 7, "if exclude 1 file there should 7 left.");
 
         let mut cur = tutil::get_a_cursor_writer();
         let mut one_dir = Directory {

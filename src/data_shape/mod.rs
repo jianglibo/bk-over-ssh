@@ -16,7 +16,7 @@ pub use remote_file_item::{load_remote_item, RemoteFileItem, load_remote_item_to
 pub use server::{Server, ServerYml};
 pub use disk_directory::{Directory};
 pub use writer_with_progress::{ProgressWriter};
-pub use count_reader::{CountReadr};
+pub use count_reader::{CountReader};
 pub use indicator::{Indicator, PbProperties};
 pub use sha1_reader::{Sha1Readr};
 

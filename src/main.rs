@@ -8,7 +8,6 @@ extern crate clap;
 
 extern crate askama;
 extern crate rand;
-// extern crate rustsync;
 extern crate time;
 
 #[macro_use]
@@ -47,7 +46,7 @@ use std::time::{Duration, Instant};
 use std::{fs, io, io::BufRead, io::Write};
 
 use actions::SyncDirReport;
-use data_shape::{AppConf, CountReadr, Indicator, Server, ServerYml, CONF_FILE_NAME};
+use data_shape::{AppConf, CountReader, Indicator, Server, ServerYml, CONF_FILE_NAME};
 use r2d2_sqlite::SqliteConnectionManager;
 
 fn demonstrate_pbr() -> Result<(), failure::Error> {
@@ -103,7 +102,7 @@ fn join_multi_bars(multi_bar: Option<Arc<MultiProgress>>) -> Option<thread::Join
     }
 }
 
-fn wait_progresss_bar_finish(jh: Option<thread::JoinHandle<()>>) {
+fn wait_progress_bar_finish(jh: Option<thread::JoinHandle<()>>) {
     if let Some(t) = jh {
         t.join().unwrap();
     }
@@ -127,7 +126,7 @@ where
                 let bytes = include_bytes!("app_config_demo.yml");
                 let path = env::current_exe()?
                     .parent()
-                    .expect("current_exe's parent folder should exists.")
+                    .expect("current_exec's parent folder should exists.")
                     .join(CONF_FILE_NAME);
                 let mut file = fs::OpenOptions::new()
                     .write(true)
@@ -175,18 +174,17 @@ fn delay_exec(delay: &str) {
     thread::sleep(Duration::from_secs(delay));
 }
 
-fn sync_dirs<M, D>(app_conf: &AppConf<M, D>, server_yml: Option<&str>) -> Result<(), failure::Error>
-where
-    M: r2d2::ManageConnection,
-    D: DbAccess<M>,
-{
-    let mut servers: Vec<(Server<M, D>, Indicator)> = Vec::new();
+fn sync_dirs(
+    app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
+    server_yml: Option<&str>,
+) -> Result<(), failure::Error> {
+    let mut servers: Vec<(Server<SqliteConnectionManager, SqliteDbAccess>, Indicator)> = Vec::new();
 
     if let Some(server_yml) = server_yml {
-        let server = app_conf.load_server_yml(server_yml)?;
+        let server = load_server_yml_by_name(app_conf, server_yml)?;
         servers.push(server);
     } else {
-        servers.append(&mut app_conf.load_all_server_yml());
+        servers.append(&mut load_all_server_yml(app_conf));
     }
 
     // all progress bars already create from here on.
@@ -244,7 +242,7 @@ where
             Err(err) => println!("sync-dirs failed: {:?}", err),
         }
     });
-    wait_progresss_bar_finish(t);
+    wait_progress_bar_finish(t);
     Ok(())
 }
 
@@ -297,8 +295,7 @@ fn main() -> Result<(), failure::Error> {
     )?;
 
     if let ("create-remote-db", Some(sub_matches)) = m.subcommand() {
-        let (mut server, _indicator) =
-            app_conf.load_server_yml(sub_matches.value_of("server-yml").unwrap())?;
+        let (mut server, _indicator) = load_server_yml(&app_conf, sub_matches)?;
         let db_type = sub_matches.value_of("db-type").unwrap_or("sqlite");
         let force = sub_matches.is_present("force");
         server.connect()?;
@@ -316,11 +313,6 @@ fn main() -> Result<(), failure::Error> {
             }
             let sqlite_db_access = SqliteDbAccess::new(app_conf.get_sqlite_db_file());
             app_conf.set_db_access(sqlite_db_access);
-            if let Some(da) = app_conf.get_db_access() {
-                if let Err(err) = da.create_database() {
-                    eprintln!("{}", err.find_root_cause());
-                }
-            }
         } else {
             println!("unsupported database: {}", db_type);
         }
@@ -328,6 +320,7 @@ fn main() -> Result<(), failure::Error> {
     }
 
     let no_db = m.is_present("no-db");
+
     if !no_db {
         let sqlite_db_access = SqliteDbAccess::new(app_conf.get_sqlite_db_file());
         app_conf.set_db_access(sqlite_db_access);
@@ -345,16 +338,37 @@ fn main() -> Result<(), failure::Error> {
     Ok(())
 }
 
-fn main_entry<'a, M, D>(
+fn load_server_yml<'a>(
+    app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
+    m: &'a clap::ArgMatches<'a>,
+) -> Result<(Server<SqliteConnectionManager, SqliteDbAccess>, Indicator), failure::Error> {
+    load_server_yml_by_name(app_conf, m.value_of("server-yml").unwrap())
+}
+
+fn load_all_server_yml(app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,) -> Vec<(Server<SqliteConnectionManager, SqliteDbAccess>, Indicator)> {
+    app_conf.load_all_server_yml().into_iter().map(|mut s|{
+        let sqlite_db_access = SqliteDbAccess::new(s.0.get_db_file());
+        s.0.set_db_access(sqlite_db_access);
+        s
+    }).collect()
+}
+
+fn load_server_yml_by_name(
+    app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
+    name: &str,
+) -> Result<(Server<SqliteConnectionManager, SqliteDbAccess>, Indicator), failure::Error> {
+    let mut s = app_conf.load_server_yml(name)?;
+    let sqlite_db_access = SqliteDbAccess::new(s.0.get_db_file());
+    s.0.set_db_access(sqlite_db_access);
+    Ok(s)
+}
+
+fn main_entry<'a>(
     mut app1: App,
-    app_conf: &AppConf<M, D>,
+    app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
     m: &'a clap::ArgMatches<'a>,
     _console_log: bool,
-) -> Result<(), failure::Error>
-where
-    M: r2d2::ManageConnection,
-    D: DbAccess<M>,
-{
+) -> Result<(), failure::Error> {
     let no_db = m.is_present("no-db");
     match m.subcommand() {
         ("run-round", Some(_sub_matches)) => {
@@ -397,28 +411,26 @@ where
             }
         }
         ("copy-executable", Some(sub_matches)) => {
-            let (mut server, _indicator) =
-                app_conf.load_server_yml(sub_matches.value_of("server-yml").unwrap())?;
+            let (mut server, _indicator) = load_server_yml(app_conf, sub_matches)?;
             let executable = sub_matches.value_of("executable").unwrap();
             let remote = server.server_yml.remote_exec.clone();
             server.copy_a_file(executable, &remote)?;
             println!(
-                "copy from {} to {} {} successed.",
+                "copy from {} to {} {} succeeded.",
                 executable,
                 server.get_host(),
                 remote
             );
         }
         ("print-report", Some(sub_matches)) => {
-            let (server, _indicator) =
-                app_conf.load_server_yml(sub_matches.value_of("server-yml").unwrap())?;
-            let fbuf = io::BufReader::new(
+            let (server, _indicator) =load_server_yml(app_conf, sub_matches)?;
+            let buf_reader = io::BufReader::new(
                 fs::OpenOptions::new()
                     .read(true)
                     .open(server.get_dir_sync_report_file())?,
             );
 
-            if let Some(line) = fbuf.lines().last() {
+            if let Some(line) = buf_reader.lines().last() {
                 let line = line?;
                 let sdr: SyncDirReport = serde_json::from_str(line.as_str())?;
                 println!("{}", serde_yaml::to_string(&sdr)?);
@@ -427,8 +439,7 @@ where
             }
         }
         ("copy-server-yml", Some(sub_matches)) => {
-            let (mut server, _indicator) =
-                app_conf.load_server_yml(sub_matches.value_of("server-yml").unwrap())?;
+            let (mut server, _indicator) = load_server_yml(app_conf, sub_matches)?;
             let remote = server.server_yml.remote_server_yml.clone();
             let local = server
                 .yml_location
@@ -438,7 +449,7 @@ where
                 .to_string();
             server.copy_a_file(&local, &remote)?;
             println!(
-                "copy from {} to {} {} successed.",
+                "copy from {} to {} {} succeeded.",
                 local,
                 server.get_host(),
                 remote
@@ -479,21 +490,18 @@ where
         }
         ("confirm-remote-sync", Some(sub_matches)) => {
             let start = Instant::now();
-            let (mut server, _indicator) =
-                app_conf.load_server_yml(sub_matches.value_of("server-yml").unwrap())?;
+            let (mut server, _indicator) = load_server_yml(app_conf, sub_matches)?;
             server.connect()?;
             server.confirm_remote_sync()?;
             eprintln!("time costs: {:?}", start.elapsed().as_secs());
         }
         ("confirm-local-sync", Some(sub_matches)) => {
-            let (server, _indicator) =
-                app_conf.load_server_yml(sub_matches.value_of("server-yml").unwrap())?;
+            let (server, _indicator) = load_server_yml(app_conf, sub_matches)?;
             server.confirm_local_sync()?;
         }
         ("list-remote-files", Some(sub_matches)) => {
             let start = Instant::now();
-            let (mut server, _indicator) =
-                app_conf.load_server_yml(sub_matches.value_of("server-yml").unwrap())?;
+            let (mut server, _indicator) = load_server_yml(app_conf, sub_matches)?;
             server.connect()?;
             server.list_remote_file_exec(no_db)?;
 
@@ -519,13 +527,13 @@ where
         ("list-local-files", Some(sub_matches)) => {
             let (mut server, _indicator) =
                 if let Some(server_yml) = sub_matches.value_of("server-yml") {
-                    app_conf.load_server_yml(server_yml)?
+                    load_server_yml_by_name(app_conf, server_yml)?
                 } else {
-                    let mut all_yml = app_conf.load_all_server_yml();
-                    if all_yml.is_empty() {
-                        bail!("no server-yml found");
-                    } else {
+                    let mut all_yml = load_all_server_yml(app_conf);
+                    if all_yml.len() == 1 {
                         all_yml.remove(0)
+                    } else {
+                        bail!("no server-yml or multiple server-yml found.");
                     }
                 };
             if no_db {
@@ -543,8 +551,7 @@ where
             }
         }
         ("verify-server-yml", Some(sub_matches)) => {
-            let (mut server, _indicator) =
-                app_conf.load_server_yml(sub_matches.value_of("server-yml").unwrap())?;
+            let (mut server, _indicator) = load_server_yml(app_conf, sub_matches)?;
             eprintln!(
                 "found server configuration yml at: {:?}",
                 server.yml_location.as_ref().unwrap()
@@ -633,23 +640,20 @@ where
     Ok(())
 }
 
-fn archive_local<M, D>(
-    app_conf: &AppConf<M, D>,
+fn archive_local(
+    app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
     server_yml: Option<&str>,
     prune_op: Option<&str>,
     prune_only_op: Option<&str>,
 ) -> Result<(), failure::Error>
-where
-    M: r2d2::ManageConnection,
-    D: DbAccess<M>,
 {
-    let mut servers: Vec<(Server<M, D>, Indicator)> = Vec::new();
+    let mut servers: Vec<(Server<SqliteConnectionManager, SqliteDbAccess>, Indicator)> = Vec::new();
 
     if let Some(server_yml) = server_yml {
-        let server = app_conf.load_server_yml(server_yml)?;
+        let server = load_server_yml_by_name(app_conf, server_yml)?;
         servers.push(server);
     } else {
-        servers.append(&mut app_conf.load_all_server_yml());
+        servers.append(&mut load_all_server_yml(app_conf));
     }
     // all progress bars already create from here on.
     let t = join_multi_bars(app_conf.progress_bar.clone());
@@ -687,7 +691,7 @@ where
         })
         .count();
 
-    wait_progresss_bar_finish(t);
+    wait_progress_bar_finish(t);
     Ok(())
 }
 
@@ -749,7 +753,7 @@ fn delta_a_file(
                 sum = 0;
             }
         };
-        let nr = CountReadr::new(new_file_input, f);
+        let nr = CountReader::new(new_file_input, f);
         rustsync::DeltaFileWriter::<fs::File>::create_delta_file(&out_file, sig.window, None)?
             .compare(&sig, nr)?;
     } else {
