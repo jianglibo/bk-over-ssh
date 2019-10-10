@@ -181,10 +181,10 @@ fn sync_dirs(
     let mut servers: Vec<(Server<SqliteConnectionManager, SqliteDbAccess>, Indicator)> = Vec::new();
 
     if let Some(server_yml) = server_yml {
-        let server = load_server_yml_by_name(app_conf, server_yml)?;
+        let server = load_server_yml_by_name(app_conf, server_yml, true)?;
         servers.push(server);
     } else {
-        servers.append(&mut load_all_server_yml(app_conf));
+        servers.append(&mut load_all_server_yml(app_conf, true));
     }
 
     // all progress bars already create from here on.
@@ -295,24 +295,34 @@ fn main() -> Result<(), failure::Error> {
     )?;
 
     if let ("create-remote-db", Some(sub_matches)) = m.subcommand() {
-        let (mut server, _indicator) = load_server_yml(&app_conf, sub_matches)?;
+        let (mut server, _indicator) = load_server_yml(&app_conf, sub_matches, false)?;
         let db_type = sub_matches.value_of("db-type").unwrap_or("sqlite");
         let force = sub_matches.is_present("force");
         server.connect()?;
-        return server.create_remote_db(db_type, force);
+        return server.create_remote_db(db_type, force, sub_matches.value_of("server-yml"));
     }
 
     if let ("create-db", Some(sub_matches)) = m.subcommand() {
         let db_type = sub_matches.value_of("db-type").unwrap_or("sqlite");
         let force = sub_matches.is_present("force");
         if "sqlite" == db_type {
-            let mut app_conf =
-                process_app_config::<SqliteConnectionManager, SqliteDbAccess>(conf, false)?;
-            if force {
-                fs::remove_file(app_conf.get_sqlite_db_file())?;
+            // create server's db.
+            if let Some(server_yml) = sub_matches.value_of("server-yml") {
+                let (mut server, _indicator) = load_server_yml_by_name(&app_conf, server_yml, false)?;
+                if force {
+                    fs::remove_file(server.get_db_file())?;
+                }
+                let sqlite_db_access = SqliteDbAccess::new(server.get_db_file());
+                server.set_db_access(sqlite_db_access);
+            } else {
+                let mut app_conf =
+                    process_app_config::<SqliteConnectionManager, SqliteDbAccess>(conf, false)?;
+                if force {
+                    fs::remove_file(app_conf.get_sqlite_db_file())?;
+                }
+                let sqlite_db_access = SqliteDbAccess::new(app_conf.get_sqlite_db_file());
+                app_conf.set_db_access(sqlite_db_access);
             }
-            let sqlite_db_access = SqliteDbAccess::new(app_conf.get_sqlite_db_file());
-            app_conf.set_db_access(sqlite_db_access);
         } else {
             println!("unsupported database: {}", db_type);
         }
@@ -341,14 +351,17 @@ fn main() -> Result<(), failure::Error> {
 fn load_server_yml<'a>(
     app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
     m: &'a clap::ArgMatches<'a>,
+    open_db: bool,
 ) -> Result<(Server<SqliteConnectionManager, SqliteDbAccess>, Indicator), failure::Error> {
-    load_server_yml_by_name(app_conf, m.value_of("server-yml").unwrap())
+    load_server_yml_by_name(app_conf, m.value_of("server-yml").unwrap(), open_db)
 }
 
-fn load_all_server_yml(app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,) -> Vec<(Server<SqliteConnectionManager, SqliteDbAccess>, Indicator)> {
+fn load_all_server_yml(app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>, open_db: bool) -> Vec<(Server<SqliteConnectionManager, SqliteDbAccess>, Indicator)> {
     app_conf.load_all_server_yml().into_iter().map(|mut s|{
-        let sqlite_db_access = SqliteDbAccess::new(s.0.get_db_file());
-        s.0.set_db_access(sqlite_db_access);
+        if open_db {
+            let sqlite_db_access = SqliteDbAccess::new(s.0.get_db_file());
+            s.0.set_db_access(sqlite_db_access);
+        }
         s
     }).collect()
 }
@@ -356,10 +369,13 @@ fn load_all_server_yml(app_conf: &AppConf<SqliteConnectionManager, SqliteDbAcces
 fn load_server_yml_by_name(
     app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
     name: &str,
+    open_db: bool,
 ) -> Result<(Server<SqliteConnectionManager, SqliteDbAccess>, Indicator), failure::Error> {
     let mut s = app_conf.load_server_yml(name)?;
-    let sqlite_db_access = SqliteDbAccess::new(s.0.get_db_file());
-    s.0.set_db_access(sqlite_db_access);
+    if open_db {
+        let sqlite_db_access = SqliteDbAccess::new(s.0.get_db_file());
+        s.0.set_db_access(sqlite_db_access);
+    }
     Ok(s)
 }
 
@@ -411,7 +427,7 @@ fn main_entry<'a>(
             }
         }
         ("copy-executable", Some(sub_matches)) => {
-            let (mut server, _indicator) = load_server_yml(app_conf, sub_matches)?;
+            let (mut server, _indicator) = load_server_yml(app_conf, sub_matches, false)?;
             let executable = sub_matches.value_of("executable").unwrap();
             let remote = server.server_yml.remote_exec.clone();
             server.copy_a_file(executable, &remote)?;
@@ -423,7 +439,7 @@ fn main_entry<'a>(
             );
         }
         ("print-report", Some(sub_matches)) => {
-            let (server, _indicator) =load_server_yml(app_conf, sub_matches)?;
+            let (server, _indicator) =load_server_yml(app_conf, sub_matches, false)?;
             let buf_reader = io::BufReader::new(
                 fs::OpenOptions::new()
                     .read(true)
@@ -439,7 +455,7 @@ fn main_entry<'a>(
             }
         }
         ("copy-server-yml", Some(sub_matches)) => {
-            let (mut server, _indicator) = load_server_yml(app_conf, sub_matches)?;
+            let (mut server, _indicator) = load_server_yml(app_conf, sub_matches, false)?;
             let remote = server.server_yml.remote_server_yml.clone();
             let local = server
                 .yml_location
@@ -490,18 +506,18 @@ fn main_entry<'a>(
         }
         ("confirm-remote-sync", Some(sub_matches)) => {
             let start = Instant::now();
-            let (mut server, _indicator) = load_server_yml(app_conf, sub_matches)?;
+            let (mut server, _indicator) = load_server_yml(app_conf, sub_matches, false)?;
             server.connect()?;
             server.confirm_remote_sync()?;
             eprintln!("time costs: {:?}", start.elapsed().as_secs());
         }
         ("confirm-local-sync", Some(sub_matches)) => {
-            let (server, _indicator) = load_server_yml(app_conf, sub_matches)?;
+            let (server, _indicator) = load_server_yml(app_conf, sub_matches, true)?;
             server.confirm_local_sync()?;
         }
         ("list-remote-files", Some(sub_matches)) => {
             let start = Instant::now();
-            let (mut server, _indicator) = load_server_yml(app_conf, sub_matches)?;
+            let (mut server, _indicator) = load_server_yml(app_conf, sub_matches, false)?;
             server.connect()?;
             server.list_remote_file_exec(no_db)?;
 
@@ -527,9 +543,9 @@ fn main_entry<'a>(
         ("list-local-files", Some(sub_matches)) => {
             let (mut server, _indicator) =
                 if let Some(server_yml) = sub_matches.value_of("server-yml") {
-                    load_server_yml_by_name(app_conf, server_yml)?
+                    load_server_yml_by_name(app_conf, server_yml, true)?
                 } else {
-                    let mut all_yml = load_all_server_yml(app_conf);
+                    let mut all_yml = load_all_server_yml(app_conf, true);
                     if all_yml.len() == 1 {
                         all_yml.remove(0)
                     } else {
@@ -551,7 +567,7 @@ fn main_entry<'a>(
             }
         }
         ("verify-server-yml", Some(sub_matches)) => {
-            let (mut server, _indicator) = load_server_yml(app_conf, sub_matches)?;
+            let (mut server, _indicator) = load_server_yml(app_conf, sub_matches, true)?;
             eprintln!(
                 "found server configuration yml at: {:?}",
                 server.yml_location.as_ref().unwrap()
@@ -650,10 +666,10 @@ fn archive_local(
     let mut servers: Vec<(Server<SqliteConnectionManager, SqliteDbAccess>, Indicator)> = Vec::new();
 
     if let Some(server_yml) = server_yml {
-        let server = load_server_yml_by_name(app_conf, server_yml)?;
+        let server = load_server_yml_by_name(app_conf, server_yml, true)?;
         servers.push(server);
     } else {
-        servers.append(&mut load_all_server_yml(app_conf));
+        servers.append(&mut load_all_server_yml(app_conf, true));
     }
     // all progress bars already create from here on.
     let t = join_multi_bars(app_conf.progress_bar.clone());

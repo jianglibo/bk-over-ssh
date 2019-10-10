@@ -144,6 +144,11 @@ subcommands:
     - create-db:
         about: create database.
         args:
+            - server-yml:
+                help: the configuration file.
+                long: server-yml
+                required: false
+                index: 1
             - db-type:
                 help: what kind of database to create.
                 long: db-type
@@ -156,15 +161,16 @@ subcommands:
     - create-remote-db:
         about: create remote database.
         args:
+            - server-yml:
+                help: the configuration file.
+                long: server-yml
+                required: false
+                index: 1
             - db-type:
                 help: what kind of database to create.
                 long: db-type
                 possible_values: [ sqlite ]
                 takes_value: true
-            - server-yml:
-                long: server-yml
-                required: true
-                index: 1
             - force:
                 help: remove and create remote database if exists.
                 long: force

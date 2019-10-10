@@ -587,13 +587,15 @@ where
         &self,
         db_type: impl AsRef<str>,
         force: bool,
+        server_yml: Option<&str>,
     ) -> Result<(), failure::Error> {
         let mut channel: ssh2::Channel = self.create_channel()?;
         let db_type = db_type.as_ref();
         let cmd = format!(
-            "{} create-db --db-type {}{}",
+            "{} create-db {}--db-type {}{}",
             self.server_yml.remote_exec,
             db_type,
+            if let Some(server_yml) = server_yml {server_yml} else {""},
             if force { " --force" } else { "" },
         );
         info!("invoking remote command: {:?}", cmd);
