@@ -948,10 +948,11 @@ where
                     self.server_yml.rsync.sig_ext.as_str(),
                     self.server_yml.rsync.delta_ext.as_str(),
                 )?;
-
+                trace!("load_remote_item_to_sqlite done.");
                 for sql in self.server_yml.exclude_by_sql.iter() {
                     db_access.exclude_by_sql(sql)?;
                 }
+                trace!("exclude_by_sql done.");
                 db_access.iterate_files_by_directory_changed_or_unconfirmed(|fidb_or_path| {
                     match fidb_or_path {
                         (Some(fidb), None) => {
