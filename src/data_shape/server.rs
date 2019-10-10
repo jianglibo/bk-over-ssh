@@ -1,7 +1,7 @@
 use super::{
     load_remote_item, load_remote_item_to_sqlite, rolling_files, string_path, AuthMethod,
     Directory, FileItem, FileItemProcessResult, FileItemProcessResultStats, Indicator, MiniAppConf,
-    PbProperties, ProgressWriter, PruneStrategy, RemoteFileItem, ScheduleItem, SyncType,
+    PbProperties, ProgressWriter, PruneStrategy, RemoteFileItem, ScheduleItem, SyncType, AppRole,
 };
 use crate::actions::{channel_util, copy_a_file_item, SyncDirReport};
 use crate::db_accesses::{scheduler_util, DbAccess};
@@ -188,7 +188,7 @@ where
 
     pub fn set_db_access(&mut self, db_access: D) {
         if let Err(err) = db_access.create_database() {
-            eprintln!("{:?}", err);
+            warn!("{:?}", err);
         }
         self.db_access.replace(db_access);
     }

@@ -23,7 +23,7 @@ impl LogConf {
     }
 }
 
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(rename_all(deserialize = "snake_case"))]
 pub enum AppRole {
     Controller,
@@ -97,6 +97,7 @@ pub struct MiniAppConf {
     pub skip_cron: bool,
     pub skip_sha1: bool,
     pub archive_cmd: Vec<String>,
+    pub app_role: AppRole,
 }
 
 #[derive(Debug, Serialize)]
@@ -141,6 +142,7 @@ where
             skip_cron: false,
             buf_len: None,
             archive_cmd: Vec::new(),
+            app_role: AppRole::PullHub,
         },
     }
 }
@@ -152,7 +154,7 @@ where
 {
     pub fn set_db_access(&mut self, db_access: D) {
         if let Err(err) = db_access.create_database() {
-            eprintln!("{:?}", err);
+            warn!("{:?}", err);
         }
         self.db_access.replace(db_access);
     }
@@ -230,6 +232,7 @@ where
                                 skip_cron: false,
                                 buf_len: None,
                                 archive_cmd,
+                                app_role: AppRole::PullHub,
                             },
                         };
                         Ok(Some(app_conf))
