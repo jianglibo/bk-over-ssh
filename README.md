@@ -88,7 +88,7 @@ prune_strategy:
   hourly: 1
   minutely: 1
 schedules: # this is a very special schedule implementation. you can execute this command line application at fixed intervals, when the scheduled time meets it execute or else it just skiped.
-  - name: "sync-dirs"
+  - name: "sync-pull-dirs"
     # at 0 seconds, 30 minutes, 9,12,15 hours, may to august, monday, Wednesday, Friday, 2018 start every 2 years.
     cron: "0 30 9,12,15 1,15 May-Aug Mon,Wed,Fri 2018/2"
   - name: "archive-local"

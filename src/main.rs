@@ -174,7 +174,7 @@ fn delay_exec(delay: &str) {
     thread::sleep(Duration::from_secs(delay));
 }
 
-fn sync_dirs(
+fn sync_pull_dirs(
     app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
     server_yml: Option<&str>,
 ) -> Result<(), failure::Error> {
@@ -213,7 +213,7 @@ fn sync_dirs(
 
     // let handlers = servers.into_iter().map(|(server, mut indicator)| {
     //     thread::spawn(move || {
-    //     match server.sync_dirs(&mut indicator) {
+    //     match server.sync_pull_dirs(&mut indicator) {
     //         Ok(result) => {
     //             indicator.pb_finish();
     //             actions::write_dir_sync_result(&server, result.as_ref());
@@ -223,7 +223,7 @@ fn sync_dirs(
     //                 println!("{}:\n{}", server.get_host(), result_yml);
     //             }
     //         }
-    //         Err(err) => println!("sync-dirs failed: {:?}", err),
+    //         Err(err) => println!("sync-pull-dirs failed: {:?}", err),
     //     }
     //     })
     // }).collect::<Vec<thread::JoinHandle<_>>>();
@@ -234,12 +234,12 @@ fn sync_dirs(
     // }
 
     servers.into_par_iter().for_each(|(server, mut indicator)| {
-        match server.sync_dirs(&mut indicator) {
+        match server.sync_pull_dirs(&mut indicator) {
             Ok(result) => {
                 indicator.pb_finish();
                 actions::write_dir_sync_result(&server, result.as_ref());
             }
-            Err(err) => println!("sync-dirs failed: {:?}", err),
+            Err(err) => println!("sync-pull-dirs failed: {:?}", err),
         }
     });
     wait_progress_bar_finish(t);
@@ -390,11 +390,11 @@ fn main_entry<'a>(
     let no_db = m.is_present("no-db");
     match m.subcommand() {
         ("run-round", Some(_sub_matches)) => {
-            sync_dirs(&app_conf, None)?;
+            sync_pull_dirs(&app_conf, None)?;
             archive_local(&app_conf, None, Some("prune"), None)?;
         }
-        ("sync-dirs", Some(sub_matches)) => {
-            sync_dirs(&app_conf, sub_matches.value_of("server-yml"))?;
+        ("sync-pull-dirs", Some(sub_matches)) => {
+            sync_pull_dirs(&app_conf, sub_matches.value_of("server-yml"))?;
         }
         ("pbr", Some(_sub_matches)) => {
             demonstrate_pbr()?;

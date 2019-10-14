@@ -13,7 +13,9 @@ where
     I: AsRef<str>,
     T: IntoIterator<Item = I>,
 {
-    if let Err(err) = setup_logger_detail(true, "output.log", verbose_modules, Some(other_modules), "") {
+    if let Err(err) =
+        setup_logger_detail(true, "output.log", verbose_modules, Some(other_modules), "")
+    {
         eprintln!("{:?}", err);
     }
 }
@@ -26,10 +28,9 @@ where
 {
     if let Err(err) = setup_logger_detail(true, "output.log", verbose_modules, None, "") {
         eprintln!("{:?}", err);
-    }    
+    }
 }
 
-#[allow(dead_code)]
 pub fn setup_logger_for_this_app<T, I>(
     console: bool,
     log_file_name: impl AsRef<Path>,
@@ -43,7 +44,6 @@ where
     setup_logger_detail(console, log_file_name, verbose_modules, None, verbose)
 }
 
-#[allow(dead_code)]
 pub fn setup_logger_detail<T, I>(
     console: bool,
     log_file_name: impl AsRef<Path>,
@@ -77,39 +77,38 @@ where
     }
 
     if console {
-    let colors = ColoredLevelConfig::new().info(Color::Green);
-    let std_out_config = fern::Dispatch::new()
-        .format(move |out, message, record| {
-            out.finish(format_args!(
-                "[{}][{}] {}",
-                record.target(),
-                colors.color(record.level()),
-                message
-            ))
-        })
-        .chain(std::io::stdout());
+        let colors = ColoredLevelConfig::new().info(Color::Green);
+        let std_out_config = fern::Dispatch::new()
+            .format(move |out, message, record| {
+                out.finish(format_args!(
+                    "[{}][{}] {}",
+                    record.target(),
+                    colors.color(record.level()),
+                    message
+                ))
+            })
+            .chain(std::io::stdout());
         base_config = base_config.chain(std_out_config);
     }
 
     // let path = Path::new(log_file_name);
-    if log_file_name.exists() && log_file_name.is_file() {
-        if let Err(err) = fs::remove_file(log_file_name) {
-            eprintln!("remove old log file failed: {:?}, {:?}", log_file_name, err);
-        }
-    }
+    // if log_file_name.exists() && log_file_name.is_file() {
+    //     if let Err(err) = fs::remove_file(log_file_name) {
+    //         eprintln!("remove old log file failed: {:?}, {:?}", log_file_name, err);
+    //     }
+    // }
 
     let file_config = fern::Dispatch::new()
         .format(move |out, message, record| {
             out.finish(format_args!(
-                "[{}][{}] {}",
-                // chrono::Local::now().format("[%Y-%m-%d][%H:%M:%S]"),
+                "{}[{}][{}] {}",
+                chrono::Local::now().format("[%Y-%m-%d][%H:%M:%S]"),
                 record.target(),
                 record.level(),
                 message
             ))
         })
         .chain(fern::log_file(log_file_name)?);
-    
     base_config = base_config.chain(file_config);
     base_config.apply()?;
     Ok(())

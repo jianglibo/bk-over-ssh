@@ -5,6 +5,7 @@ use r2d2;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use std::{fs, io::Write};
+use chrono::{DateTime, Local};
 // fn ser_instant<S>(inst: &Instant, serer: S) -> Result<S::Ok, S::Error> where S: Serializer {
 //     let s = format!("{}", date.format(FORMAT));
 //     serializer.serialize_str(&s)
@@ -41,13 +42,15 @@ use std::{fs, io::Write};
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SyncDirReport {
     duration: Duration,
+    started_at: DateTime<Local>,
     statistics: FileItemProcessResultStats,
 }
 
 impl SyncDirReport {
-    pub fn new(duration: Duration, statistics: FileItemProcessResultStats) -> Self {
+    pub fn new(duration: Duration, started_at: DateTime<Local>, statistics: FileItemProcessResultStats) -> Self {
         Self {
             duration,
+            started_at,
             statistics,
         }
     }

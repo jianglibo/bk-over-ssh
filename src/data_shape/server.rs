@@ -21,6 +21,7 @@ use std::process::Command;
 use std::time::Instant;
 use std::{fs, io, io::Seek};
 use tar::Builder;
+use chrono::{Local};
 
 #[derive(Deserialize, Serialize, Debug)]
 #[serde(rename_all(deserialize = "snake_case"))]
@@ -444,6 +445,7 @@ where
 
     pub fn archive_local(&self, pb: &mut Indicator) -> Result<(), failure::Error> {
         if self.check_skip_cron("archive-local") {
+            info!("start archive_local on server: {} at: {}", self.get_host(), Local::now());
             let cur = if self.app_conf.archive_cmd.is_empty() {
                 self.archive_internal(pb)?
             } else {
@@ -924,13 +926,15 @@ where
             }
     }
 
-    pub fn sync_dirs(&self, pb: &mut Indicator) -> Result<Option<SyncDirReport>, failure::Error> {
-        if self.check_skip_cron("sync-dirs") {
+    pub fn sync_pull_dirs(&self, pb: &mut Indicator) -> Result<Option<SyncDirReport>, failure::Error> {
+        if self.check_skip_cron("sync-pull-dirs") {
+            info!("start sync_pull_dirs on server: {} at: {}", self.get_host(), Local::now());
             let start = Instant::now();
+            let started_at = Local::now();
             let rs = self.start_sync_working_file_list(pb)?;
             self.remove_working_file_list_file();
             self.confirm_remote_sync()?;
-            Ok(Some(SyncDirReport::new(start.elapsed(), rs)))
+            Ok(Some(SyncDirReport::new(start.elapsed(), started_at, rs)))
         } else {
             Ok(None)
         }
@@ -1033,7 +1037,7 @@ mod tests {
     }
 
     #[test]
-    fn t_sync_dirs() -> Result<(), failure::Error> {
+    fn t_sync_pull_dirs() -> Result<(), failure::Error> {
         log();
         let app_conf = tutil::load_demo_app_conf_sqlite(None);
         let mut server = tutil::load_demo_server_sqlite(&app_conf, None);
@@ -1050,7 +1054,7 @@ mod tests {
         });
         let mut indicator = Indicator::new(Some(mb2));
         server.connect()?;
-        let stats = server.sync_dirs(&mut indicator)?;
+        let stats = server.sync_pull_dirs(&mut indicator)?;
         indicator.pb_finish();
         info!("result {:?}", stats);
         t.join().unwrap();

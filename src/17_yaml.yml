@@ -264,7 +264,7 @@ subcommands:
             - skip-sha1:
                 long: skip-sha1
                 required: false
-    - sync-dirs:
+    - sync-pull-dirs:
         about: sync directories in the configuration file.
         args:
             - server-yml:
@@ -284,13 +284,13 @@ subcommands:
                 required: false
                 index: 1
     - confirm-remote-sync:
-        about: confirm the last sync-dirs action, execute confirm-local-sync on remote server.
+        about: confirm the last sync-pull-dirs action, execute confirm-local-sync on remote server.
         args:
             - server-yml:
                 required: false
                 index: 1
     - confirm-local-sync:
-        about: confirm the last sync-dirs action.
+        about: confirm the last sync-pull-dirs action.
         args:
             - server-yml:
                 required: false
