@@ -1,7 +1,7 @@
 use super::{
     load_remote_item, load_remote_item_to_sqlite, rolling_files, string_path, AuthMethod,
     Directory, FileItem, FileItemProcessResult, FileItemProcessResultStats, Indicator, MiniAppConf,
-    PbProperties, ProgressWriter, PruneStrategy, RemoteFileItem, ScheduleItem, SyncType, AppRole,
+    PbProperties, ProgressWriter, PruneStrategy, RemoteFileItem, ScheduleItem, SyncType,
 };
 use crate::actions::{channel_util, copy_a_file_item, SyncDirReport};
 use crate::db_accesses::{scheduler_util, DbAccess};

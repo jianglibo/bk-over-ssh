@@ -249,9 +249,6 @@ subcommands:
                 long: out
                 required: false
                 takes_value: true
-            - skip-sha1:
-                long: skip-sha1
-                required: false
     - list-local-files:
         args:
             - server-yml:
@@ -261,18 +258,19 @@ subcommands:
                 long: out
                 required: false
                 takes_value: true
-            - skip-sha1:
-                long: skip-sha1
-                required: false
     - sync-pull-dirs:
         about: sync directories in the configuration file.
         args:
             - server-yml:
                 required: false
                 index: 1
-            - skip-sha1:
-                long: skip-sha1
+            - rsync-window:
+                long: rsync-window
+                takes_value: true
                 required: false
+    - sync-push-dirs:
+        about: sync directories in the configuration file. The configuration file is at fixed location.
+        args:
             - rsync-window:
                 long: rsync-window
                 takes_value: true

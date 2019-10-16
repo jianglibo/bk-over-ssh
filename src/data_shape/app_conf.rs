@@ -167,6 +167,7 @@ where
     pub fn get_inner(&self) -> &AppConfYml {
         &self.inner
     }
+    #[allow(dead_code)]
     pub fn get_db_access(&self) -> Option<&D> {
         self.db_access.as_ref()
     }

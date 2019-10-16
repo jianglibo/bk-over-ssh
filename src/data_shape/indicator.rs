@@ -64,6 +64,7 @@ impl Indicator {
         }
     }
 
+    #[allow(dead_code)]
     pub fn set_length(&self, len: u64) {
         if let Some(pb) = self.get_active_pb() {
             pb.set_length(len);

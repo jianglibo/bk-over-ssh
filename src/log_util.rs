@@ -1,5 +1,4 @@
 use fern::colors::{Color, ColoredLevelConfig};
-use std::fs;
 use std::path::Path;
 
 #[allow(dead_code)]
