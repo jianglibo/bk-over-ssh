@@ -1,8 +1,8 @@
+use super::string_path;
 use glob::Pattern;
-use super::{string_path};
-use std::fs;
 use log::*;
 use serde::{Deserialize, Serialize};
+use std::fs;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
@@ -153,38 +153,88 @@ impl Directory {
             })
     }
 
-    pub fn normalize(&mut self, directories_dir: impl AsRef<Path>) -> Result<(), failure::Error> {
+    /// When pushing remote, the local directory is absolute, the remote directory is relative.
+    /// The remote directory is always relative to the 'directories' dir in the user's home directory.
+    pub fn normalize_push_sync(
+        &mut self,
+        directories_dir: impl AsRef<Path>,
+    ) -> Result<(), failure::Error> {
         let directories_dir = directories_dir.as_ref();
-            trace!("origin directory: {:?}", self);
-            let ld = self.local_dir.trim();
-            if ld.is_empty() || ld == "~" || ld == "null" {
-                let mut split = self.remote_dir.trim().rsplitn(3, &['/', '\\'][..]);
-                let mut s = split.next().expect("remote_dir should has dir name.");
-                if s.is_empty() {
-                    s = split.next().expect("remote_dir should has dir name.");
-                }
-                self.local_dir = s.to_string();
-                trace!("local_dir is empty. change to {}", s);
-            } else {
-                self.local_dir = ld.to_string();
+        trace!("origin directory: {:?}", self);
+        let ld = self.local_dir.trim();
+        if ld.is_empty() || ld == "~" || ld == "null" {
+            let mut split = self.remote_dir.trim().rsplitn(3, &['/', '\\'][..]);
+            let mut s = split.next().expect("remote_dir should has dir name.");
+            if s.is_empty() {
+                s = split.next().expect("remote_dir should has dir name.");
             }
+            self.local_dir = s.to_string();
+            trace!("local_dir is empty. change to {}", s);
+        } else {
+            self.local_dir = ld.to_string();
+        }
 
-            let a_local_dir = Path::new(&self.local_dir);
-            if a_local_dir.is_absolute() {
-                bail!("the local_dir of a server can't be absolute. {:?}", a_local_dir);
-            } else {
-                let ld_path = directories_dir.join(&self.local_dir);
-                self.local_dir = ld_path
-                    .to_str()
-                    .expect("local_dir to_str should success.")
-                    .to_string();
+        let a_local_dir = Path::new(&self.local_dir);
+        if a_local_dir.is_absolute() {
+            bail!(
+                "the local_dir of a server can't be absolute. {:?}",
+                a_local_dir
+            );
+        } else {
+            let ld_path = directories_dir.join(&self.local_dir);
+            self.local_dir = ld_path
+                .to_str()
+                .expect("local_dir to_str should success.")
+                .to_string();
 
-                self.local_dir = string_path::strip_verbatim_prefixed(&self.local_dir);
+            self.local_dir = string_path::strip_verbatim_prefixed(&self.local_dir);
 
-                if ld_path.exists() {
-                    fs::create_dir_all(ld_path)?;
-                }
-            }        
+            if ld_path.exists() {
+                fs::create_dir_all(ld_path)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// When pulling remote the remote directory is absolute path, local path is relative.
+    pub fn normalize_pull_sync(
+        &mut self,
+        directories_dir: impl AsRef<Path>,
+    ) -> Result<(), failure::Error> {
+        let directories_dir = directories_dir.as_ref();
+        trace!("origin directory: {:?}", self);
+        let ld = self.local_dir.trim();
+        if ld.is_empty() || ld == "~" || ld == "null" {
+            let mut split = self.remote_dir.trim().rsplitn(3, &['/', '\\'][..]);
+            let mut s = split.next().expect("remote_dir should has dir name.");
+            if s.is_empty() {
+                s = split.next().expect("remote_dir should has dir name.");
+            }
+            self.local_dir = s.to_string();
+            trace!("local_dir is empty. change to {}", s);
+        } else {
+            self.local_dir = ld.to_string();
+        }
+
+        let a_local_dir = Path::new(&self.local_dir);
+        if a_local_dir.is_absolute() {
+            bail!(
+                "the local_dir of a server can't be absolute. {:?}",
+                a_local_dir
+            );
+        } else {
+            let ld_path = directories_dir.join(&self.local_dir);
+            self.local_dir = ld_path
+                .to_str()
+                .expect("local_dir to_str should success.")
+                .to_string();
+
+            self.local_dir = string_path::strip_verbatim_prefixed(&self.local_dir);
+
+            if ld_path.exists() {
+                fs::create_dir_all(ld_path)?;
+            }
+        }
         Ok(())
     }
 }

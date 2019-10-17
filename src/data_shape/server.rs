@@ -1,5 +1,5 @@
 use super::{
-    load_remote_item, load_remote_item_to_sqlite, rolling_files, string_path, AuthMethod,
+    load_remote_item, load_remote_item_to_sqlite, rolling_files, string_path, AppRole, AuthMethod,
     Directory, FileItem, FileItemProcessResult, FileItemProcessResultStats, Indicator, MiniAppConf,
     PbProperties, ProgressWriter, PruneStrategy, RemoteFileItem, ScheduleItem, SyncType,
 };
@@ -7,6 +7,7 @@ use crate::actions::{channel_util, copy_a_file_item, SyncDirReport};
 use crate::db_accesses::{scheduler_util, DbAccess};
 use bzip2::write::BzEncoder;
 use bzip2::Compression;
+use chrono::Local;
 use indicatif::ProgressStyle;
 use log::*;
 use r2d2;
@@ -21,7 +22,6 @@ use std::process::Command;
 use std::time::Instant;
 use std::{fs, io, io::Seek};
 use tar::Builder;
-use chrono::{Local};
 
 #[derive(Deserialize, Serialize, Debug)]
 #[serde(rename_all(deserialize = "snake_case"))]
@@ -133,10 +133,23 @@ where
             fs::create_dir_all(&directories_dir).expect("directories_dir should create.");
         }
 
-        server_yml.directories.iter_mut().try_for_each(|d| {
-            d.compile_patterns().unwrap();
-            d.normalize(directories_dir.as_path())
-        })?;
+        match app_conf.app_role {
+            AppRole::PullHub => {
+                server_yml.directories.iter_mut().try_for_each(|d| {
+                    d.compile_patterns().unwrap();
+                    d.normalize_pull_sync(directories_dir.as_path())
+                })?;
+            }
+            AppRole::ActiveLeaf => {
+                server_yml.directories.iter_mut().try_for_each(|d| {
+                    d.compile_patterns().unwrap();
+                    d.normalize_push_sync(directories_dir.as_path())
+                })?;
+            }
+            _ => {
+                bail!("unexpected app_role: {:?}", app_conf.app_role);
+            }
+        }
 
         Ok(Self {
             server_yml,
@@ -359,10 +372,7 @@ where
         let cur_archive_path = self.current_archive_file_path();
         let cur_archive_name = cur_archive_path.as_os_str();
 
-        let style = ProgressStyle::default_bar()
-            .template(
-                "{spinner} {wide_msg}",
-            );
+        let style = ProgressStyle::default_bar().template("{spinner} {wide_msg}");
 
         pb.active_pb_total().alter_pb(PbProperties {
             set_style: Some(style),
@@ -372,7 +382,11 @@ where
         });
 
         for dir in self.server_yml.directories.iter() {
-            pb.set_message(format!("archive directory: {:?}, using out util: {}", dir.local_dir, self.app_conf.archive_cmd.get(0).unwrap()));
+            pb.set_message(format!(
+                "archive directory: {:?}, using out util: {}",
+                dir.local_dir,
+                self.app_conf.archive_cmd.get(0).unwrap()
+            ));
             let archive_cmd = self
                 .app_conf
                 .archive_cmd
@@ -410,7 +424,11 @@ where
 
     pub fn archive_local(&self, pb: &mut Indicator) -> Result<(), failure::Error> {
         if self.check_skip_cron("archive-local") {
-            info!("start archive_local on server: {} at: {}", self.get_host(), Local::now());
+            info!(
+                "start archive_local on server: {} at: {}",
+                self.get_host(),
+                Local::now()
+            );
             let cur = if self.app_conf.archive_cmd.is_empty() {
                 self.archive_internal(pb)?
             } else {
@@ -561,7 +579,11 @@ where
         let cmd = format!(
             "{} create-db {} --db-type {}{}",
             self.server_yml.remote_exec,
-            if let Some(server_yml) = server_yml {server_yml} else {""},
+            if let Some(server_yml) = server_yml {
+                server_yml
+            } else {
+                ""
+            },
             db_type,
             if force { " --force" } else { "" },
         );
@@ -738,7 +760,9 @@ where
             .map(|line| {
                 if line.starts_with('{') {
                     trace!("got item line {}", line);
-                    if let (Some(rd), Some(local_dir)) = (current_remote_dir.as_ref(), current_local_dir) {
+                    if let (Some(rd), Some(local_dir)) =
+                        (current_remote_dir.as_ref(), current_local_dir)
+                    {
                         match serde_json::from_str::<RemoteFileItem>(&line) {
                             Ok(remote_item) => {
                                 let remote_len = remote_item.get_len();
@@ -891,9 +915,16 @@ where
             }
     }
 
-    pub fn sync_pull_dirs(&self, pb: &mut Indicator) -> Result<Option<SyncDirReport>, failure::Error> {
+    pub fn sync_pull_dirs(
+        &self,
+        pb: &mut Indicator,
+    ) -> Result<Option<SyncDirReport>, failure::Error> {
         if self.check_skip_cron("sync-pull-dirs") {
-            info!("start sync_pull_dirs on server: {} at: {}", self.get_host(), Local::now());
+            info!(
+                "start sync_pull_dirs on server: {} at: {}",
+                self.get_host(),
+                Local::now()
+            );
             let start = Instant::now();
             let started_at = Local::now();
             let rs = self.start_sync_working_file_list(pb)?;

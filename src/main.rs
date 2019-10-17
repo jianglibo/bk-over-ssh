@@ -43,7 +43,7 @@ use std::time::{Duration, Instant};
 use std::{fs, io, io::BufRead, io::Write};
 
 use actions::SyncDirReport;
-use data_shape::AppConf;
+use data_shape::{AppConf, AppRole};
 use r2d2_sqlite::SqliteConnectionManager;
 
 /// we change mini_app_conf value here.
@@ -147,7 +147,7 @@ fn main() -> Result<(), failure::Error> {
     if let Some(delay) = delay {
         command::delay_exec(delay);
     }
-    if let Err(err) = main_entry(app1, &app_conf, &m, console_log) {
+    if let Err(err) = main_entry(app1, &mut app_conf, &m, console_log) {
         error!("{:?}", err);
         eprintln!("{:?}", err);
     }
@@ -156,7 +156,7 @@ fn main() -> Result<(), failure::Error> {
 
 fn main_entry<'a>(
     mut app1: App,
-    app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
+    app_conf: &mut AppConf<SqliteConnectionManager, SqliteDbAccess>,
     m: &'a clap::ArgMatches<'a>,
     _console_log: bool,
 ) -> Result<(), failure::Error> {
@@ -167,9 +167,11 @@ fn main_entry<'a>(
             command::archive_local(&app_conf, None, Some("prune"), None)?;
         }
         ("sync-pull-dirs", Some(sub_matches)) => {
+            app_conf.mini_app_conf.app_role = AppRole::PullHub;
             command::sync_pull_dirs(&app_conf, sub_matches.value_of("server-yml"))?;
         }
         ("sync-push-dirs", Some(_sub_matches)) => {
+            app_conf.mini_app_conf.app_role = AppRole::PassiveLeaf;
             let (_server, _indicator) = command::load_this_server_yml(app_conf, true)?;
             command::sync_push_dirs(&app_conf)?;
         }

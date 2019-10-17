@@ -54,16 +54,15 @@ pub fn delay_exec(delay: &str) {
     thread::sleep(Duration::from_secs(delay));
 }
 
-pub fn load_server_yml<'a>(
+pub fn load_server_yml(
     app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
-    // m: &'a clap::ArgMatches<'a>,
     server_yml: Option<&str>,
     open_db: bool,
 ) -> Result<(Server<SqliteConnectionManager, SqliteDbAccess>, Indicator), failure::Error> {
     load_server_yml_by_name(app_conf, server_yml.expect("server-yml should exist."), open_db)
 }
 
-pub fn load_this_server_yml<'a>(
+pub fn load_this_server_yml(
     app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
     open_db: bool,
 ) -> Result<(Server<SqliteConnectionManager, SqliteDbAccess>, Indicator), failure::Error> {
