@@ -114,7 +114,6 @@ where
         app_conf: MiniAppConf,
         my_dir: PathBuf,
         mut server_yml: ServerYml,
-        // db_access: Option<D>,
     ) -> Result<Self, failure::Error> {
         let reports_dir = my_dir.join("reports");
         let archives_dir = my_dir.join("archives");
@@ -136,51 +135,17 @@ where
 
         server_yml.directories.iter_mut().try_for_each(|d| {
             d.compile_patterns().unwrap();
-            trace!("origin directory: {:?}", d);
-            let ld = d.local_dir.trim();
-            if ld.is_empty() || ld == "~" || ld == "null" {
-                let mut split = d.remote_dir.trim().rsplitn(3, &['/', '\\'][..]);
-                let mut s = split.next().expect("remote_dir should has dir name.");
-                if s.is_empty() {
-                    s = split.next().expect("remote_dir should has dir name.");
-                }
-                d.local_dir = s.to_string();
-                trace!("local_dir is empty. change to {}", s);
-            } else {
-                d.local_dir = ld.to_string();
-            }
-
-            let a_local_dir = Path::new(&d.local_dir);
-            if a_local_dir.is_absolute() {
-                bail!("the local_dir of a server can't be absolute. {:?}", a_local_dir);
-            } else {
-                let ld_path = directories_dir.join(&d.local_dir);
-                d.local_dir = ld_path
-                    .to_str()
-                    .expect("local_dir to_str should success.")
-                    .to_string();
-
-                d.local_dir = string_path::strip_verbatim_prefixed(&d.local_dir);
-
-                if ld_path.exists() {
-                    fs::create_dir_all(ld_path)?;
-                }
-                Ok(())
-            }
+            d.normalize(directories_dir.as_path())
         })?;
-
-        
 
         Ok(Self {
             server_yml,
             db_access: None,
             session: None,
-            // db_file,
             my_dir,
             reports_dir,
             archives_dir,
             working_dir,
-            // directories_dir,
             yml_location: None,
             app_conf,
             _m: PhantomData,

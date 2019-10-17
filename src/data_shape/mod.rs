@@ -18,7 +18,7 @@ pub use disk_directory::{Directory};
 pub use writer_with_progress::{ProgressWriter};
 pub use count_reader::{CountReader};
 pub use indicator::{Indicator, PbProperties};
-pub use sha1_reader::{Sha1Readr};
+pub use sha1_reader::{Sha1Reader};
 
 use serde::{Deserialize, Serialize};
 

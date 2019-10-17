@@ -3,7 +3,7 @@ use crate::data_shape::{Indicator};
 use sha1::{Digest, Sha1};
 
 #[allow(dead_code)]
-pub struct Sha1Readr<'a, T> where T: Read {
+pub struct Sha1Reader<'a, T> where T: Read {
     r: T,
     c: &'a Indicator,
     hasher: Option<sha1::Sha1>,
@@ -11,9 +11,9 @@ pub struct Sha1Readr<'a, T> where T: Read {
 }
 
 #[allow(dead_code)]
-impl<'a, T> Sha1Readr<'a, T> where T: Read {
+impl<'a, T> Sha1Reader<'a, T> where T: Read {
     pub fn new(r: T, c: &'a Indicator) -> Self {
-        Self { r, c, hasher: Some(Sha1::new()), length: 0}
+        Sha1Reader { r, c, hasher: Some(Sha1::new()), length: 0}
     }
 
     pub fn get_sha1(&mut self) -> String {
@@ -25,7 +25,7 @@ impl<'a, T> Sha1Readr<'a, T> where T: Read {
     }
 }
 
-impl<'a, T> Read for Sha1Readr<'a, T> where T: Read {
+impl<'a, T> Read for Sha1Reader<'a, T> where T: Read {
 
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let i = self.r.read(buf)?;

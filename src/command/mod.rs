@@ -114,7 +114,7 @@ where
             if let Some(cfg) = cfg {
                 cfg
             } else if !re_try {
-                let bytes = include_bytes!("app_config_demo.yml");
+                let bytes = include_bytes!("../app_config_demo.yml");
                 let path = env::current_exe()?
                     .parent()
                     .expect("current_exec's parent folder should exists.")

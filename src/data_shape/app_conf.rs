@@ -302,14 +302,20 @@ where
         Ok(())
     }
 
-    pub fn load_this_server_yml(
-        &self,
-    ) -> Result<(Server<M, D>, Indicator), failure::Error> {
+    pub fn load_this_server_yml(&self) -> Result<(Server<M, D>, Indicator), failure::Error> {
         let this_server_yml_path = self.data_dir_full_path.join("this_server.yml");
         if !this_server_yml_path.exists() {
-            bail!("this_server.yml doesn't exists. {:?}", this_server_yml_path);
+            let bytes = include_bytes!("../server_template.yaml");
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .open(&this_server_yml_path)?;
+            file.write_all(bytes)?;
+            bail!("this_server.yml doesn't exists, have created one for you, please edit content of it. {:?}", this_server_yml_path);
         }
-        let yml_file_name = this_server_yml_path.to_str().expect("this_server.yml should load succeeded.");
+        let yml_file_name = this_server_yml_path
+            .to_str()
+            .expect("this_server.yml should load succeeded.");
         self.load_server_yml(yml_file_name)
     }
 
@@ -320,10 +326,7 @@ where
         let server = self.load_server_from_yml(yml_file_name.as_ref())?;
         eprintln!(
             "load server yml from: {:?}",
-            server
-                .yml_location
-                .as_ref()
-                .map(|pb|pb.as_os_str())
+            server.yml_location.as_ref().map(|pb| pb.as_os_str())
         );
         let indicator = Indicator::new(self.progress_bar.clone());
         Ok((server, indicator))
@@ -332,29 +335,30 @@ where
     /// load all .yml file under servers directory.
     pub fn load_all_server_yml(&self) -> Vec<(Server<M, D>, Indicator)> {
         if let Ok(read_dir) = self.servers_dir.read_dir() {
-            read_dir.filter_map(|ery| match ery {
-                Err(err) => {
-                    warn!("read_dir entry return error: {:?}", err);
-                    None
-                }
-                Ok(entry) => Some(entry.file_name().into_string()),
-            })
-            .filter_map(|from_os_string| match from_os_string {
-                Err(err) => {
-                    warn!("osstring to_string failed: {:?}", err);
-                    None
-                }
-                Ok(astr) => Some(astr),
-            })
-            .map(|astr| self.load_server_yml(astr))
-            .filter_map(|rr| match rr {
-                Err(err) => {
-                    warn!("load_server_yml failed: {:?}", err);
-                    None
-                }
-                Ok(server) => Some(server),
-            })
-            .collect()
+            read_dir
+                .filter_map(|ery| match ery {
+                    Err(err) => {
+                        warn!("read_dir entry return error: {:?}", err);
+                        None
+                    }
+                    Ok(entry) => Some(entry.file_name().into_string()),
+                })
+                .filter_map(|from_os_string| match from_os_string {
+                    Err(err) => {
+                        warn!("osstring to_string failed: {:?}", err);
+                        None
+                    }
+                    Ok(astr) => Some(astr),
+                })
+                .map(|astr| self.load_server_yml(astr))
+                .filter_map(|rr| match rr {
+                    Err(err) => {
+                        warn!("load_server_yml failed: {:?}", err);
+                        None
+                    }
+                    Ok(server) => Some(server),
+                })
+                .collect()
         } else {
             warn!("read_dir failed: {:?}", self.servers_dir);
             Vec::new()
@@ -405,7 +409,6 @@ where
             self.mini_app_conf.clone(),
             servers_data_dir.join(&server_yml.host),
             server_yml,
-            // self.db_access.clone(),
         )?;
 
         if let Some(bl) = self.mini_app_conf.buf_len {

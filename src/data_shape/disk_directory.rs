@@ -1,4 +1,6 @@
 use glob::Pattern;
+use super::{string_path};
+use std::fs;
 use log::*;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -75,9 +77,9 @@ impl Directory {
             return None;
         }
 
-        let has_exlucdes = self.excludes_patterns.is_some();
+        let has_excludes = self.excludes_patterns.is_some();
 
-        let keep_file = if has_exlucdes {
+        let keep_file = if has_excludes {
             !self
                 .excludes_patterns
                 .as_ref()
@@ -94,7 +96,7 @@ impl Directory {
             None
         }
     }
-    /// When includes is empyt, includes_patterns will be None, excludes is the same.
+    /// When includes is empty, includes_patterns will be None, excludes is the same.
     pub fn compile_patterns(&mut self) -> Result<(), failure::Error> {
         if self.includes_patterns.is_none() && !self.includes.is_empty() {
             self.includes_patterns.replace(
@@ -149,5 +151,40 @@ impl Directory {
                     None
                 }
             })
+    }
+
+    pub fn normalize(&mut self, directories_dir: impl AsRef<Path>) -> Result<(), failure::Error> {
+        let directories_dir = directories_dir.as_ref();
+            trace!("origin directory: {:?}", self);
+            let ld = self.local_dir.trim();
+            if ld.is_empty() || ld == "~" || ld == "null" {
+                let mut split = self.remote_dir.trim().rsplitn(3, &['/', '\\'][..]);
+                let mut s = split.next().expect("remote_dir should has dir name.");
+                if s.is_empty() {
+                    s = split.next().expect("remote_dir should has dir name.");
+                }
+                self.local_dir = s.to_string();
+                trace!("local_dir is empty. change to {}", s);
+            } else {
+                self.local_dir = ld.to_string();
+            }
+
+            let a_local_dir = Path::new(&self.local_dir);
+            if a_local_dir.is_absolute() {
+                bail!("the local_dir of a server can't be absolute. {:?}", a_local_dir);
+            } else {
+                let ld_path = directories_dir.join(&self.local_dir);
+                self.local_dir = ld_path
+                    .to_str()
+                    .expect("local_dir to_str should success.")
+                    .to_string();
+
+                self.local_dir = string_path::strip_verbatim_prefixed(&self.local_dir);
+
+                if ld_path.exists() {
+                    fs::create_dir_all(ld_path)?;
+                }
+            }        
+        Ok(())
     }
 }

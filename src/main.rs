@@ -46,6 +46,7 @@ use actions::SyncDirReport;
 use data_shape::AppConf;
 use r2d2_sqlite::SqliteConnectionManager;
 
+/// we change mini_app_conf value here.
 fn main() -> Result<(), failure::Error> {
     let yml = load_yaml!("17_yaml.yml");
     let app = App::from_yaml(yml);
