@@ -12,7 +12,7 @@ use std::thread;
 use std::time::{Duration};
 use std::{fs, io::Write};
 
-use crate::data_shape::{AppConf, Indicator, Server, CONF_FILE_NAME};
+use crate::data_shape::{AppConf, Indicator, Server, CONF_FILE_NAME, AppRole};
 use r2d2_sqlite::SqliteConnectionManager;
 
 pub use sync_dirs::{sync_pull_dirs, sync_push_dirs};
@@ -100,6 +100,7 @@ pub fn load_server_yml_by_name(
 
 pub fn process_app_config<M, D>(
     conf: Option<&str>,
+    app_role_op: Option<AppRole>,
     re_try: bool,
 ) -> Result<AppConf<M, D>, failure::Error>
 where
@@ -108,7 +109,7 @@ where
 {
     let message_pb = ProgressBar::new_spinner();
     message_pb.enable_steady_tick(200);
-    let app_conf = match AppConf::guess_conf_file(conf) {
+    let app_conf = match AppConf::guess_conf_file(conf, app_role_op.as_ref().cloned().unwrap_or(AppRole::PullHub)) {
         Ok(cfg) => {
             if let Some(cfg) = cfg {
                 cfg
@@ -124,7 +125,7 @@ where
                     .open(&path)?;
                 file.write_all(bytes)?;
                 message_pb.finish_and_clear();
-                return process_app_config(conf, true);
+                return process_app_config(conf, app_role_op, true);
             } else {
                 bail!("re_try read app_conf failed!");
             }

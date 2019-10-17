@@ -25,6 +25,14 @@ args:
     #     possible_values:
     #         - generate-bash-completions
     #         - generate-zsh-completions
+    - app-role:
+        help: The app role if cann't infer from the command line parameters.
+        long: app-role
+        required: false
+        takes_value: true
+        possible_values:
+            - pull_hub
+            - active_leaf
     - conf:
         help: the path of app configuration file, if not present the app will try to guess one.
         long: conf

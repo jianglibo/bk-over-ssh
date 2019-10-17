@@ -10,6 +10,10 @@ use std::sync::Arc;
 use std::{fs, io::Read, io::Write};
 
 pub const CONF_FILE_NAME: &str = "bk_over_ssh.yml";
+pub const PULL_SERVERS_CONF: &str = "pull-servers-conf";
+pub const PUSH_SERVERS_CONF: &str = "push-servers-conf";
+pub const PULL_SERVERS_DATA: &str = "pull-servers-data";
+pub const PUSH_SERVERS_DATA: &str = "push-servers-data";
 
 #[derive(Debug, Deserialize, Serialize, Default)]
 pub struct LogConf {
@@ -64,6 +68,8 @@ impl Default for AppConfYml {
     }
 }
 
+/// The data dir is a fixed path no matter the role of the app.
+/// 
 fn guess_data_dir(data_dir: impl AsRef<str>) -> Result<PathBuf, failure::Error> {
     let data_dir = data_dir.as_ref();
     let data_dir = if data_dir.is_empty() {
@@ -110,7 +116,7 @@ where
     pub config_file_path: PathBuf,
     pub data_dir_full_path: PathBuf,
     pub log_full_path: PathBuf,
-    pub servers_dir: PathBuf,
+    pub servers_conf_dir: PathBuf,
     #[serde(skip)]
     pub db_access: Option<D>,
     #[serde(skip)]
@@ -132,7 +138,7 @@ where
         config_file_path: Path::new("abc").to_path_buf(),
         data_dir_full_path: PathBuf::from(data_dir),
         log_full_path: PathBuf::from(data_dir).join("out.log"),
-        servers_dir: PathBuf::from("data").join("servers"),
+        servers_conf_dir: PathBuf::from("data").join(PUSH_SERVERS_CONF),
         _m: PhantomData,
         db_access: None,
         lock_file: None,
@@ -180,7 +186,9 @@ where
         self.mini_app_conf.skip_sha1 = false;
     }
 
-    fn read_app_conf(file: impl AsRef<Path>) -> Result<Option<AppConf<M, D>>, failure::Error> {
+    fn read_app_conf(file: impl AsRef<Path>,
+        app_role: AppRole,
+    ) -> Result<Option<AppConf<M, D>>, failure::Error> {
         if !file.as_ref().exists() {
             return Ok(None);
         }
@@ -208,11 +216,16 @@ where
                         };
 
                         let log_full_path = Path::new(&log_full_path).to_path_buf();
-                        let servers_dir = data_dir_full_path.as_path().join("servers");
 
-                        if !servers_dir.exists() {
-                            if let Err(err) = fs::create_dir_all(&servers_dir) {
-                                bail!("create servers_dir {:?}, failed: {:?}", &servers_dir, err);
+                        let servers_conf_dir = match app_role {
+                            AppRole::PullHub => data_dir_full_path.as_path().join(PULL_SERVERS_CONF),
+                            AppRole::ActiveLeaf => data_dir_full_path.as_path().join(PUSH_SERVERS_CONF),
+                            _ => bail!("expected AppRole."),
+                        };
+
+                        if !servers_conf_dir.exists() {
+                            if let Err(err) = fs::create_dir_all(&servers_conf_dir) {
+                                bail!("create servers_conf_dir {:?}, failed: {:?}", &servers_conf_dir, err);
                             }
                         }
 
@@ -223,7 +236,7 @@ where
                             config_file_path: file.to_path_buf(),
                             data_dir_full_path,
                             log_full_path,
-                            servers_dir,
+                            servers_conf_dir,
                             db_access: None,
                             _m: PhantomData,
                             lock_file: None,
@@ -233,7 +246,7 @@ where
                                 skip_cron: false,
                                 buf_len: None,
                                 archive_cmd,
-                                app_role: AppRole::PullHub,
+                                app_role,
                             },
                         };
                         Ok(Some(app_conf))
@@ -261,17 +274,19 @@ where
     }
 
     /// If no conf file provided, first look at the same directory as executable, then current working directory.
+    /// the app role must be known at this point.
     pub fn guess_conf_file(
         app_conf_file: Option<&str>,
+        app_role: AppRole,
     ) -> Result<Option<AppConf<M, D>>, failure::Error> {
         if let Some(af) = app_conf_file {
-            return AppConf::read_app_conf(af);
+            return AppConf::read_app_conf(af, app_role);
         } else {
             if let Ok(current_exe) = env::current_exe() {
                 if let Some(pp) = current_exe.parent() {
                     let cf = pp.join(CONF_FILE_NAME);
                     trace!("found configuration file: {:?}", &cf);
-                    if let Some(af) = AppConf::read_app_conf(&cf)? {
+                    if let Some(af) = AppConf::read_app_conf(&cf, app_role.clone())? {
                         // if it returned None, continue searching.
                         return Ok(Some(af));
                     }
@@ -281,7 +296,7 @@ where
             if let Ok(current_dir) = env::current_dir() {
                 let cf = current_dir.join(CONF_FILE_NAME);
                 trace!("found configuration file: {:?}", &cf);
-                return AppConf::read_app_conf(&cf);
+                return AppConf::read_app_conf(&cf, app_role);
             }
         }
         bail!("read app_conf failed.")
@@ -334,7 +349,7 @@ where
 
     /// load all .yml file under servers directory.
     pub fn load_all_server_yml(&self) -> Vec<(Server<M, D>, Indicator)> {
-        if let Ok(read_dir) = self.servers_dir.read_dir() {
+        if let Ok(read_dir) = self.servers_conf_dir.read_dir() {
             read_dir
                 .filter_map(|ery| match ery {
                     Err(err) => {
@@ -360,7 +375,7 @@ where
                 })
                 .collect()
         } else {
-            warn!("read_dir failed: {:?}", self.servers_dir);
+            warn!("read_dir failed: {:?}", self.servers_conf_dir);
             Vec::new()
         }
     }
@@ -382,7 +397,7 @@ where
             );
         } else {
             if !(name.contains('/') || name.contains('\\')) {
-                server_yml_path = self.servers_dir.as_path().join(name);
+                server_yml_path = self.servers_conf_dir.as_path().join(name);
             }
             if !server_yml_path.exists() {
                 bail!("server yml file doesn't exist: {:?}", server_yml_path);
@@ -400,7 +415,13 @@ where
         };
 
         let data_dir = self.data_dir_full_path.as_path();
-        let servers_data_dir = data_dir.join("servers_data");
+
+        let servers_data_dir = match self.mini_app_conf.app_role {
+            AppRole::PullHub => data_dir.join(PULL_SERVERS_DATA),
+            AppRole::ActiveLeaf => data_dir.join(PUSH_SERVERS_DATA),
+            _ => bail!("unexpected app role"),
+        };
+
         if !servers_data_dir.exists() {
             fs::create_dir_all(&servers_data_dir)?;
         }

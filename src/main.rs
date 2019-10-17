@@ -54,16 +54,31 @@ fn main() -> Result<(), failure::Error> {
     let app1 = App::from_yaml(yml);
     let console_log = m.is_present("console-log");
 
+    let app_role = if let Some(app_role) = m.value_of("app-role") {
+        if app_role == "active_leaf" {
+            AppRole::ActiveLeaf
+        } else {
+            AppRole::PullHub
+        }
+    } else if let ("sync-push-dirs", Some(_sub_matches)) = m.subcommand() {
+        AppRole::ActiveLeaf
+    } else {
+        AppRole::PullHub
+    };
+
     let conf = m.value_of("conf");
     // we always open db connection unless no-db parameter provided.
-    let mut app_conf =
-        match command::process_app_config::<SqliteConnectionManager, SqliteDbAccess>(conf, false) {
-            Ok(app_conf) => app_conf,
-            Err(err) => {
-                eprintln!("parse app config failed: {}", err);
-                bail!("parse app config failed: {}", err);
-            }
-        };
+    let mut app_conf = match command::process_app_config::<SqliteConnectionManager, SqliteDbAccess>(
+        conf,
+        Some(app_role),
+        false,
+    ) {
+        Ok(app_conf) => app_conf,
+        Err(err) => {
+            eprintln!("parse app config failed: {}", err);
+            bail!("parse app config failed: {}", err);
+        }
+    };
 
     if m.is_present("skip-cron") {
         app_conf.skip_cron();
@@ -96,7 +111,8 @@ fn main() -> Result<(), failure::Error> {
     )?;
 
     if let ("create-remote-db", Some(sub_matches)) = m.subcommand() {
-        let (mut server, _indicator) = command::load_server_yml(&app_conf, sub_matches.value_of("server-yml"), false)?;
+        let (mut server, _indicator) =
+            command::load_server_yml(&app_conf, sub_matches.value_of("server-yml"), false)?;
         let db_type = sub_matches.value_of("db-type").unwrap_or("sqlite");
         let force = sub_matches.is_present("force");
         server.connect()?;
@@ -121,7 +137,7 @@ fn main() -> Result<(), failure::Error> {
                 let mut app_conf = command::process_app_config::<
                     SqliteConnectionManager,
                     SqliteDbAccess,
-                >(conf, false)?;
+                >(conf, None, false)?;
                 if force {
                     fs::remove_file(app_conf.get_sqlite_db_file())?;
                 }
@@ -147,7 +163,7 @@ fn main() -> Result<(), failure::Error> {
     if let Some(delay) = delay {
         command::delay_exec(delay);
     }
-    if let Err(err) = main_entry(app1, &mut app_conf, &m, console_log) {
+    if let Err(err) = main_entry(app1, &app_conf, &m, console_log) {
         error!("{:?}", err);
         eprintln!("{:?}", err);
     }
@@ -156,7 +172,7 @@ fn main() -> Result<(), failure::Error> {
 
 fn main_entry<'a>(
     mut app1: App,
-    app_conf: &mut AppConf<SqliteConnectionManager, SqliteDbAccess>,
+    app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
     m: &'a clap::ArgMatches<'a>,
     _console_log: bool,
 ) -> Result<(), failure::Error> {
@@ -167,11 +183,9 @@ fn main_entry<'a>(
             command::archive_local(&app_conf, None, Some("prune"), None)?;
         }
         ("sync-pull-dirs", Some(sub_matches)) => {
-            app_conf.mini_app_conf.app_role = AppRole::PullHub;
             command::sync_pull_dirs(&app_conf, sub_matches.value_of("server-yml"))?;
         }
         ("sync-push-dirs", Some(_sub_matches)) => {
-            app_conf.mini_app_conf.app_role = AppRole::PassiveLeaf;
             let (_server, _indicator) = command::load_this_server_yml(app_conf, true)?;
             command::sync_push_dirs(&app_conf)?;
         }
@@ -208,7 +222,8 @@ fn main_entry<'a>(
             }
         }
         ("copy-executable", Some(sub_matches)) => {
-            let (mut server, _indicator) = command::load_server_yml(app_conf, sub_matches.value_of("server-yml"), false)?;
+            let (mut server, _indicator) =
+                command::load_server_yml(app_conf, sub_matches.value_of("server-yml"), false)?;
             let executable = sub_matches.value_of("executable").unwrap();
             let remote = server.server_yml.remote_exec.clone();
             server.copy_a_file(executable, &remote)?;
@@ -220,7 +235,8 @@ fn main_entry<'a>(
             );
         }
         ("print-report", Some(sub_matches)) => {
-            let (server, _indicator) = command::load_server_yml(app_conf, sub_matches.value_of("server-yml"), false)?;
+            let (server, _indicator) =
+                command::load_server_yml(app_conf, sub_matches.value_of("server-yml"), false)?;
             let buf_reader = io::BufReader::new(
                 fs::OpenOptions::new()
                     .read(true)
@@ -236,7 +252,8 @@ fn main_entry<'a>(
             }
         }
         ("copy-server-yml", Some(sub_matches)) => {
-            let (mut server, _indicator) = command::load_server_yml(app_conf, sub_matches.value_of("server-yml"), false)?;
+            let (mut server, _indicator) =
+                command::load_server_yml(app_conf, sub_matches.value_of("server-yml"), false)?;
             let remote = server.server_yml.remote_server_yml.clone();
             let local = server
                 .yml_location
@@ -267,13 +284,13 @@ fn main_entry<'a>(
         ("list-server-yml", Some(_sub_matches)) => {
             println!(
                 "list files name under directory: {:?}",
-                app_conf.servers_dir
+                app_conf.servers_conf_dir
             );
-            for entry in app_conf.servers_dir.read_dir()? {
+            for entry in app_conf.servers_conf_dir.read_dir()? {
                 if let Ok(ery) = entry {
                     println!("{:?}", ery.file_name());
                 } else {
-                    warn!("read servers_dir entry failed.");
+                    warn!("read servers_conf_dir entry failed.");
                 }
             }
         }
@@ -287,18 +304,21 @@ fn main_entry<'a>(
         }
         ("confirm-remote-sync", Some(sub_matches)) => {
             let start = Instant::now();
-            let (mut server, _indicator) = command::load_server_yml(app_conf, sub_matches.value_of("server-yml"), false)?;
+            let (mut server, _indicator) =
+                command::load_server_yml(app_conf, sub_matches.value_of("server-yml"), false)?;
             server.connect()?;
             server.confirm_remote_sync()?;
             eprintln!("time costs: {:?}", start.elapsed().as_secs());
         }
         ("confirm-local-sync", Some(sub_matches)) => {
-            let (server, _indicator) = command::load_server_yml(app_conf, sub_matches.value_of("server-yml"), true)?;
+            let (server, _indicator) =
+                command::load_server_yml(app_conf, sub_matches.value_of("server-yml"), true)?;
             server.confirm_local_sync()?;
         }
         ("list-remote-files", Some(sub_matches)) => {
             let start = Instant::now();
-            let (mut server, _indicator) = command::load_server_yml(app_conf, sub_matches.value_of("server-yml"), false)?;
+            let (mut server, _indicator) =
+                command::load_server_yml(app_conf, sub_matches.value_of("server-yml"), false)?;
             server.connect()?;
             server.list_remote_file_exec(no_db)?;
 
@@ -348,7 +368,8 @@ fn main_entry<'a>(
             }
         }
         ("verify-server-yml", Some(sub_matches)) => {
-            let (server, _indicator) = command::load_server_yml(app_conf, sub_matches.value_of("server-yml"), true)?;
+            let (server, _indicator) =
+                command::load_server_yml(app_conf, sub_matches.value_of("server-yml"), true)?;
             command::misc::verify_server_yml(server)?;
         }
         ("completions", Some(sub_matches)) => {
