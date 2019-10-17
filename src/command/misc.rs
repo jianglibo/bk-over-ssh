@@ -10,7 +10,7 @@ use r2d2_sqlite::SqliteConnectionManager;
 pub fn verify_server_yml(mut server: Server<SqliteConnectionManager, SqliteDbAccess>) -> Result<(), failure::Error> {
                 eprintln!(
                 "found server configuration yml at: {:?}",
-                server.yml_location.as_ref().unwrap()
+                server.yml_location.as_ref().expect("server.yml_location.as_ref should succeeded.")
             );
             eprintln!(
                 "server content: {}",
@@ -55,7 +55,7 @@ pub fn demonstrate_pbr() -> Result<(), failure::Error> {
     let _ = thread::spawn(move || loop {
         i += 1;
         println!("{}", i);
-        multi_bar1.join_and_clear().unwrap();
+        multi_bar1.join_and_clear().expect("join_and_clear");
         thread::sleep(Duration::from_millis(5));
     });
 

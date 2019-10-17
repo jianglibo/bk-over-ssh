@@ -15,12 +15,12 @@ use std::{fs, io::Write};
 use crate::data_shape::{AppConf, Indicator, Server, CONF_FILE_NAME};
 use r2d2_sqlite::SqliteConnectionManager;
 
-pub use sync_dirs::{sync_pull_dirs};
+pub use sync_dirs::{sync_pull_dirs, sync_push_dirs};
 pub use archives::{archive_local};
 
 pub fn wait_progress_bar_finish(jh: Option<thread::JoinHandle<()>>) {
     if let Some(t) = jh {
-        t.join().unwrap();
+        t.join().expect("wait_progress_bar_finish should succeeded.");
     }
 }
 
@@ -28,7 +28,7 @@ pub fn wait_progress_bar_finish(jh: Option<thread::JoinHandle<()>>) {
 pub fn join_multi_bars(multi_bar: Option<Arc<MultiProgress>>) -> Option<thread::JoinHandle<()>> {
     if let Some(mb) = multi_bar {
         Some(thread::spawn(move || {
-            mb.join().unwrap();
+            mb.join().expect("join_multi_bars should succeeded.");
         }))
     } else {
         None
@@ -56,10 +56,23 @@ pub fn delay_exec(delay: &str) {
 
 pub fn load_server_yml<'a>(
     app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
-    m: &'a clap::ArgMatches<'a>,
+    // m: &'a clap::ArgMatches<'a>,
+    server_yml: Option<&str>,
     open_db: bool,
 ) -> Result<(Server<SqliteConnectionManager, SqliteDbAccess>, Indicator), failure::Error> {
-    load_server_yml_by_name(app_conf, m.value_of("server-yml").unwrap(), open_db)
+    load_server_yml_by_name(app_conf, server_yml.expect("server-yml should exist."), open_db)
+}
+
+pub fn load_this_server_yml<'a>(
+    app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
+    open_db: bool,
+) -> Result<(Server<SqliteConnectionManager, SqliteDbAccess>, Indicator), failure::Error> {
+        let mut s = app_conf.load_this_server_yml()?;
+        if open_db {
+            let sqlite_db_access = SqliteDbAccess::new(s.0.get_db_file());
+            s.0.set_db_access(sqlite_db_access);
+        }
+    Ok(s)
 }
 
 pub fn load_all_server_yml(app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>, open_db: bool) -> Vec<(Server<SqliteConnectionManager, SqliteDbAccess>, Indicator)> {
@@ -71,6 +84,7 @@ pub fn load_all_server_yml(app_conf: &AppConf<SqliteConnectionManager, SqliteDbA
         s
     }).collect()
 }
+
 
 pub fn load_server_yml_by_name(
     app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,

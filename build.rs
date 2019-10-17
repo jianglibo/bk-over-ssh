@@ -12,8 +12,8 @@ fn main() {
         env_lines.push_str(&format!("{}={}\n", k, v));
     });
     // panic!("{}", env_lines);
-    vcpkg::find_package("sqlite3").unwrap();
-    vcpkg::find_package("libssh2").unwrap();
+    vcpkg::find_package("sqlite3").expect("sqlite3 should be found.");
+    vcpkg::find_package("libssh2").expect("libssh2 should be found.");
 // output goes target/debug/build/<pkg>/output
                 for (key, value) in env::vars_os() {
                 eprintln!("{:?}: {:?}", key, value);

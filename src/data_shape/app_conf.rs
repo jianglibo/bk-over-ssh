@@ -302,17 +302,28 @@ where
         Ok(())
     }
 
+    pub fn load_this_server_yml(
+        &self,
+    ) -> Result<(Server<M, D>, Indicator), failure::Error> {
+        let this_server_yml_path = self.data_dir_full_path.join("this_server.yml");
+        if !this_server_yml_path.exists() {
+            bail!("this_server.yml doesn't exists. {:?}", this_server_yml_path);
+        }
+        let yml_file_name = this_server_yml_path.to_str().expect("this_server.yml should load succeeded.");
+        self.load_server_yml(yml_file_name)
+    }
+
     pub fn load_server_yml(
         &self,
         yml_file_name: impl AsRef<str>,
     ) -> Result<(Server<M, D>, Indicator), failure::Error> {
         let server = self.load_server_from_yml(yml_file_name.as_ref())?;
         eprintln!(
-            "load server yml from: {}",
+            "load server yml from: {:?}",
             server
                 .yml_location
                 .as_ref()
-                .map_or("O", |b| b.to_str().unwrap_or("O"))
+                .map(|pb|pb.as_os_str())
         );
         let indicator = Indicator::new(self.progress_bar.clone());
         Ok((server, indicator))
