@@ -6,12 +6,14 @@ use r2d2_sqlite::SqliteConnectionManager;
 use crate::actions;
 
 use super::*;
-pub fn sync_push_dirs(
-    app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
-) -> Result<(), failure::Error> {
-    let _server = app_conf.load_this_server_yml()?;
-    Ok(())
-}
+
+// pub fn sync_push_dirs(
+//     app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
+// ) -> Result<(), failure::Error> {
+//     // let _server = app_conf.load_this_server_yml()?;
+//     Ok(())
+// }
+
 pub fn sync_pull_dirs(
     app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
     server_yml: Option<&str>,

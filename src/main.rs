@@ -186,8 +186,8 @@ fn main_entry<'a>(
             command::sync_pull_dirs(&app_conf, sub_matches.value_of("server-yml"))?;
         }
         ("sync-push-dirs", Some(_sub_matches)) => {
-            let (_server, _indicator) = command::load_this_server_yml(app_conf, true)?;
-            command::sync_push_dirs(&app_conf)?;
+            // let (_server, _indicator) = command::load_this_server_yml(app_conf, true)?;
+            // command::sync_push_dirs(&app_conf)?;
         }
         ("pbr", Some(_sub_matches)) => {
             command::misc::demonstrate_pbr()?;

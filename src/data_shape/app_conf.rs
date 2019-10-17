@@ -317,22 +317,22 @@ where
         Ok(())
     }
 
-    pub fn load_this_server_yml(&self) -> Result<(Server<M, D>, Indicator), failure::Error> {
-        let this_server_yml_path = self.data_dir_full_path.join("this_server.yml");
-        if !this_server_yml_path.exists() {
-            let bytes = include_bytes!("../server_template.yaml");
-            let mut file = fs::OpenOptions::new()
-                .write(true)
-                .create(true)
-                .open(&this_server_yml_path)?;
-            file.write_all(bytes)?;
-            bail!("this_server.yml doesn't exists, have created one for you, please edit content of it. {:?}", this_server_yml_path);
-        }
-        let yml_file_name = this_server_yml_path
-            .to_str()
-            .expect("this_server.yml should load succeeded.");
-        self.load_server_yml(yml_file_name)
-    }
+    // pub fn load_this_server_yml(&self) -> Result<(Server<M, D>, Indicator), failure::Error> {
+    //     let this_server_yml_path = self.data_dir_full_path.join("this_server.yml");
+    //     if !this_server_yml_path.exists() {
+    //         let bytes = include_bytes!("../server_template.yaml");
+    //         let mut file = fs::OpenOptions::new()
+    //             .write(true)
+    //             .create(true)
+    //             .open(&this_server_yml_path)?;
+    //         file.write_all(bytes)?;
+    //         bail!("this_server.yml doesn't exists, have created one for you, please edit content of it. {:?}", this_server_yml_path);
+    //     }
+    //     let yml_file_name = this_server_yml_path
+    //         .to_str()
+    //         .expect("this_server.yml should load succeeded.");
+    //     self.load_server_yml(yml_file_name)
+    // }
 
     pub fn load_server_yml(
         &self,

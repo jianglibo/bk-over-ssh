@@ -15,7 +15,7 @@ use std::{fs, io::Write};
 use crate::data_shape::{AppConf, Indicator, Server, CONF_FILE_NAME, AppRole};
 use r2d2_sqlite::SqliteConnectionManager;
 
-pub use sync_dirs::{sync_pull_dirs, sync_push_dirs};
+pub use sync_dirs::{sync_pull_dirs};
 pub use archives::{archive_local};
 
 pub fn wait_progress_bar_finish(jh: Option<thread::JoinHandle<()>>) {
@@ -62,17 +62,17 @@ pub fn load_server_yml(
     load_server_yml_by_name(app_conf, server_yml.expect("server-yml should exist."), open_db)
 }
 
-pub fn load_this_server_yml(
-    app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
-    open_db: bool,
-) -> Result<(Server<SqliteConnectionManager, SqliteDbAccess>, Indicator), failure::Error> {
-        let mut s = app_conf.load_this_server_yml()?;
-        if open_db {
-            let sqlite_db_access = SqliteDbAccess::new(s.0.get_db_file());
-            s.0.set_db_access(sqlite_db_access);
-        }
-    Ok(s)
-}
+// pub fn load_this_server_yml(
+//     app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
+//     open_db: bool,
+// ) -> Result<(Server<SqliteConnectionManager, SqliteDbAccess>, Indicator), failure::Error> {
+//         let mut s = app_conf.load_this_server_yml()?;
+//         if open_db {
+//             let sqlite_db_access = SqliteDbAccess::new(s.0.get_db_file());
+//             s.0.set_db_access(sqlite_db_access);
+//         }
+//     Ok(s)
+// }
 
 pub fn load_all_server_yml(app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>, open_db: bool) -> Vec<(Server<SqliteConnectionManager, SqliteDbAccess>, Indicator)> {
     app_conf.load_all_server_yml().into_iter().map(|mut s|{
