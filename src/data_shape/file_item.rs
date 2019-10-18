@@ -1,5 +1,4 @@
-use super::string_path;
-use super::RemoteFileItem;
+use super::{string_path, RemoteFileItem, AppRole};
 use crate::actions::hash_file_sha1;
 use filetime;
 use log::*;
@@ -53,6 +52,7 @@ pub struct FileItem<'a> {
     base_dir: &'a Path,
     remote_base_dir: Option<&'a str>,
     pub sync_type: SyncType,
+    pub app_role: &'a AppRole,
 }
 
 impl<'a> FileItem<'a> {
@@ -61,12 +61,14 @@ impl<'a> FileItem<'a> {
         remote_base_dir: &'a str,
         remote_item: RemoteFileItem,
         sync_type: SyncType,
+        app_role: &'a AppRole,
     ) -> Self {
         Self {
             base_dir,
             remote_item,
             remote_base_dir: Some(remote_base_dir),
             sync_type,
+            app_role,
         }
     }
 

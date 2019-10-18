@@ -666,7 +666,7 @@ mod tests {
         D: DbAccess<M>,
     {
         let ri = RemoteFileItem::new(remote_relative_path, remote_file_len);
-        let fi = FileItem::new(local_base_dir, remote_base_dir, ri, sync_type);
+        let fi = FileItem::new(local_base_dir, remote_base_dir, ri, sync_type, &AppRole::PullHub);
         let sftp = server.get_ssh_session().sftp()?;
         let mut buf = vec![0; 8192];
         let app_conf = tutil::load_demo_app_conf_sqlite(None, AppRole::PullHub);

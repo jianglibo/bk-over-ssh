@@ -774,7 +774,7 @@ where
                                     SyncType::Sftp
                                 };
                                 let local_item =
-                                    FileItem::new(local_dir, rd.as_str(), remote_item, sync_type);
+                                    FileItem::new(local_dir, rd.as_str(), remote_item, sync_type, &self.app_conf.app_role);
                                 consume_count += 1;
 
                                 pb.active_pb_item().alter_pb(PbProperties {
