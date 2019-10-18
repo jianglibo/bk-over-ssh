@@ -1,4 +1,4 @@
-use crate::data_shape::{demo_app_conf, AppConf, Server};
+use crate::data_shape::{demo_app_conf, AppConf, Server, AppRole};
 use crate::db_accesses::{DbAccess, SqliteDbAccess};
 use r2d2_sqlite::SqliteConnectionManager;
 use rand::Rng;
@@ -7,9 +7,9 @@ use std::{fs, io, io::BufRead, io::BufWriter, io::Seek, io::Write};
 use tempfile::TempDir;
 
 #[allow(dead_code)]
-pub fn load_demo_app_conf_sqlite(data_dir: Option<&str>) -> AppConf<SqliteConnectionManager, SqliteDbAccess> {
+pub fn load_demo_app_conf_sqlite(data_dir: Option<&str>, app_role: AppRole) -> AppConf<SqliteConnectionManager, SqliteDbAccess> {
     let data_dir = data_dir.unwrap_or_else(||"data");
-    demo_app_conf::<SqliteConnectionManager, SqliteDbAccess>(data_dir)
+    demo_app_conf::<SqliteConnectionManager, SqliteDbAccess>(data_dir, app_role)
 }
 
 #[allow(dead_code)]

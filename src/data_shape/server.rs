@@ -864,8 +864,8 @@ where
                     FileItemProcessResult::SkipBecauseNoBaseDir => {
                         accu.skip_because_no_base_dir += 1
                     }
-                    FileItemProcessResult::Successed(fl, _, _) => {
-                        accu.bytes_transfered += fl;
+                    FileItemProcessResult::Succeeded(fl, _, _) => {
+                        accu.bytes_transferred += fl;
                         accu.succeeded += 1;
                     }
                     FileItemProcessResult::GetLocalPathFailed => accu.get_local_path_failed += 1,
@@ -902,7 +902,7 @@ where
                     (true, None) => true,
                     (false, Some(dt)) => {
                         eprintln!(
-                            "cron time did't meet yet. next execution scheduled at: {:?}",
+                            "cron time didn't meet yet. next execution scheduled at: {:?}",
                             dt
                         );
                         false
@@ -954,11 +954,11 @@ where
                     db_access.exclude_by_sql(sql)?;
                 }
                 trace!("exclude_by_sql done.");
-                db_access.iterate_files_by_directory_changed_or_unconfirmed(|fidb_or_path| {
-                    match fidb_or_path {
-                        (Some(fidb), None) => {
-                            if fidb.changed || !fidb.confirmed {
-                                match serde_json::to_string(&RemoteFileItem::from(fidb)) {
+                db_access.iterate_files_by_directory_changed_or_unconfirmed(|fi_db_or_path| {
+                    match fi_db_or_path {
+                        (Some(fi_db), None) => {
+                            if fi_db.changed || !fi_db.confirmed {
+                                match serde_json::to_string(&RemoteFileItem::from(fi_db)) {
                                     Ok(line) => {
                                         writeln!(out, "{}", line).ok();
                                     }
@@ -1012,7 +1012,7 @@ mod tests {
     #[test]
     fn t_load_server() -> Result<(), failure::Error> {
         log();
-        let app_conf = tutil::load_demo_app_conf_sqlite(None);
+        let app_conf = tutil::load_demo_app_conf_sqlite(None, AppRole::PullHub);
         let server = tutil::load_demo_server_sqlite(&app_conf, None);
         assert_eq!(
             server.server_yml.directories[0].excludes,
@@ -1024,7 +1024,7 @@ mod tests {
     #[test]
     fn t_connect_server() -> Result<(), failure::Error> {
         log();
-        let app_conf = tutil::load_demo_app_conf_sqlite(None);
+        let app_conf = tutil::load_demo_app_conf_sqlite(None, AppRole::PullHub);
         let mut server = tutil::load_demo_server_sqlite(&app_conf, None);
         info!("start connecting...");
         server.connect()?;
@@ -1035,7 +1035,9 @@ mod tests {
     #[test]
     fn t_sync_pull_dirs() -> Result<(), failure::Error> {
         log();
-        let app_conf = tutil::load_demo_app_conf_sqlite(None);
+        let app_conf = tutil::load_demo_app_conf_sqlite(None, AppRole::PullHub);
+
+        assert!(app_conf.mini_app_conf.app_role == AppRole::PullHub);
         let mut server = tutil::load_demo_server_sqlite(&app_conf, None);
         let mb = Arc::new(MultiProgress::new());
 
@@ -1122,7 +1124,7 @@ mod tests {
         log_util::setup_logger_empty();
         let mut cur = tutil::get_a_cursor_writer();
         let mut one_dir = Directory {
-            remote_dir: "fixtures/adir".to_string(),
+            remote_dir: "fixtures/a-dir".to_string(),
             ..Directory::default()
         };
 
@@ -1134,8 +1136,8 @@ mod tests {
 
         let mut cur = tutil::get_a_cursor_writer();
         let mut one_dir = Directory {
-            remote_dir: "fixtures/adir".to_string(),
-            includes: vec!["**/fixtures/adir/b/b.txt".to_string()],
+            remote_dir: "fixtures/a-dir".to_string(),
+            includes: vec!["**/fixtures/a-dir/b/b.txt".to_string()],
             ..Directory::default()
         };
 
@@ -1147,8 +1149,8 @@ mod tests {
 
         let mut cur = tutil::get_a_cursor_writer();
         let mut one_dir = Directory {
-            remote_dir: "fixtures/adir".to_string(),
-            excludes: vec!["**/fixtures/adir/b/b.txt".to_string()],
+            remote_dir: "fixtures/a-dir".to_string(),
+            excludes: vec!["**/fixtures/a-dir/b/b.txt".to_string()],
             ..Directory::default()
         };
 
@@ -1160,7 +1162,7 @@ mod tests {
 
         let mut cur = tutil::get_a_cursor_writer();
         let mut one_dir = Directory {
-            remote_dir: "fixtures/adir".to_string(),
+            remote_dir: "fixtures/a-dir".to_string(),
             excludes: vec!["**/Tomcat6/logs/**".to_string()],
             ..Directory::default()
         };
@@ -1169,7 +1171,7 @@ mod tests {
         assert!(one_dir.includes_patterns.is_none());
         load_remote_item(&one_dir, &mut cur, true)?;
         let num = tutil::count_cursor_lines(&mut cur);
-        assert_eq!(num, 7, "if exlude logs file there should 7 left.");
+        assert_eq!(num, 7, "if exclude logs file there should 7 left.");
 
         Ok(())
     }
@@ -1181,7 +1183,7 @@ mod tests {
         sess.set_tcp_stream(tcp);
         sess.handshake().unwrap();
 
-        sess.userauth_password("Administrator", "kass.").unwrap();
+        sess.userauth_password("Administrator", "pass.").unwrap();
         assert!(sess.authenticated());
     }
 }

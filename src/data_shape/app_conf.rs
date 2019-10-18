@@ -27,7 +27,7 @@ impl LogConf {
     }
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone, Eq, PartialEq)]
 #[serde(rename_all(deserialize = "snake_case"))]
 pub enum AppRole {
     Controller,
@@ -128,17 +128,23 @@ where
     pub mini_app_conf: MiniAppConf,
 }
 
-pub fn demo_app_conf<M, D>(data_dir: &str) -> AppConf<M, D>
+pub fn demo_app_conf<M, D>(data_dir: &str, app_role: AppRole) -> AppConf<M, D>
 where
     M: r2d2::ManageConnection,
     D: DbAccess<M>,
 {
+    let servers_conf_dir_name = match app_role {
+        AppRole::PullHub => PULL_SERVERS_CONF,
+        AppRole::ActiveLeaf => PUSH_SERVERS_CONF,
+        _ => panic!("unexpected app role."),
+    };
+
     AppConf {
         inner: AppConfYml::default(),
         config_file_path: Path::new("abc").to_path_buf(),
         data_dir_full_path: PathBuf::from(data_dir),
         log_full_path: PathBuf::from(data_dir).join("out.log"),
-        servers_conf_dir: PathBuf::from("data").join(PUSH_SERVERS_CONF),
+        servers_conf_dir: PathBuf::from("data").join(servers_conf_dir_name),
         _m: PhantomData,
         db_access: None,
         lock_file: None,
@@ -148,7 +154,7 @@ where
             skip_cron: false,
             buf_len: None,
             archive_cmd: Vec::new(),
-            app_role: AppRole::PullHub,
+            app_role,
         },
     }
 }

@@ -23,7 +23,7 @@ pub enum FileItemProcessResult {
     Sha1NotMatch(String),
     CopyFailed(String),
     SkipBecauseNoBaseDir,
-    Successed(u64, String, SyncType),
+    Succeeded(u64, String, SyncType),
     GetLocalPathFailed,
     SftpOpenFailed,
     ScpOpenFailed,
@@ -44,7 +44,7 @@ pub struct FileItemProcessResultStats {
     pub sftp_open_failed: u64,
     pub scp_open_failed: u64,
     pub read_line_failed: u64,
-    pub bytes_transfered: u64,
+    pub bytes_transferred: u64,
 }
 
 #[derive(Debug)]
@@ -96,7 +96,7 @@ impl<'a> FileItem<'a> {
                 }
             }
         } else {
-            return true; // If cannnot get the metadata think it as of changed.
+            return true; // If cannot get the metadata think it as of changed.
         }
         false
     }
@@ -160,7 +160,7 @@ impl<'a> FileItem<'a> {
             let ft = filetime::FileTime::from_unix_time(md as i64, 0);
             filetime::set_file_mtime(self.get_local_path(), ft)?;
         } else {
-            bail!("remote_item has no midified value.");
+            bail!("remote_item has no modified value.");
         }
         Ok(())
     }

@@ -49,7 +49,7 @@ pub fn copy_stream_to_file_with_cb<T: AsRef<Path>>(
                 pb.inc_pb(nn);
             }
             Ok(_) => {
-                trace!("end copy_stream_to_file_with_cb when readed zero byte.");
+                trace!("end copy_stream_to_file_with_cb when read zero byte.");
                 break;
             }
             Err(err) => {
@@ -121,7 +121,7 @@ pub fn copy_stream_to_file_return_sha1_with_cb<T: AsRef<Path>>(
                 pb.inc_pb(length);
             }
             Ok(_) => {
-                trace!("end copy_stream_to_file_return_sha1_with_cb when readed zero byte");
+                trace!("end copy_stream_to_file_return_sha1_with_cb when read zero byte");
                 break;
             }
             Err(err) => {
@@ -220,7 +220,7 @@ pub fn copy_a_file_item_scp<'a>(
                             error!("sha1 didn't match: {:?}, local sha1: {:?}", file_item, sha1);
                             FileItemProcessResult::Sha1NotMatch(local_file_path)
                         } else {
-                            FileItemProcessResult::Successed(
+                            FileItemProcessResult::Succeeded(
                                 length,
                                 local_file_path,
                                 SyncType::Sftp,
@@ -238,7 +238,7 @@ pub fn copy_a_file_item_scp<'a>(
                         if length != file_item.get_remote_item().get_len() {
                             FileItemProcessResult::LengthNotMatch(local_file_path)
                         } else {
-                            FileItemProcessResult::Successed(
+                            FileItemProcessResult::Succeeded(
                                 length,
                                 local_file_path,
                                 SyncType::Sftp,
@@ -280,7 +280,7 @@ pub fn copy_a_file_item_sftp<'a>(
                             error!("sha1 didn't match: {:?}, local sha1: {:?}", file_item, sha1);
                             FileItemProcessResult::Sha1NotMatch(local_file_path)
                         } else {
-                            FileItemProcessResult::Successed(
+                            FileItemProcessResult::Succeeded(
                                 length,
                                 local_file_path,
                                 SyncType::Sftp,
@@ -298,7 +298,7 @@ pub fn copy_a_file_item_sftp<'a>(
                         if length != file_item.get_remote_item().get_len() {
                             FileItemProcessResult::LengthNotMatch(local_file_path)
                         } else {
-                            FileItemProcessResult::Successed(
+                            FileItemProcessResult::Succeeded(
                                 length,
                                 local_file_path,
                                 SyncType::Sftp,
@@ -472,8 +472,8 @@ pub fn invoke_remote_ssh_command_receive_progress(
     trace!("about to invoke command: {:?}", cmd);
     channel.exec(cmd)?;
 
-    let bufr = io::BufReader::new(channel);
-    bufr.lines().for_each(|line| {
+    let buf_reader = io::BufReader::new(channel);
+    buf_reader.lines().for_each(|line| {
         let line = line.ok().unwrap_or_else(|| "".to_string());
         if line.starts_with("size:") {
             let (_, d) = line.split_at(5);
@@ -559,7 +559,7 @@ where
     let old_file = fs::OpenOptions::new().read(true).open(&local_file_path)?;
     delta_file.restore_seekable(restore_path, old_file)?;
     update_local_file_from_restored(&local_file_path)?;
-    Ok(FileItemProcessResult::Successed(
+    Ok(FileItemProcessResult::Succeeded(
         0,
         local_file_path,
         SyncType::Rsync,
@@ -616,7 +616,7 @@ where
             }
         };
 
-        if let FileItemProcessResult::Successed(_, _, _) = &copy_result {
+        if let FileItemProcessResult::Succeeded(_, _, _) = &copy_result {
             if let Err(err) = file_item.set_modified_as_remote() {
                 warn!("set modified as remote failed: {}", err);
             } else {
@@ -634,7 +634,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data_shape::{FileItem, FileItemProcessResult, RemoteFileItem, Server, SyncType};
+    use crate::data_shape::{FileItem, FileItemProcessResult, RemoteFileItem, Server, SyncType, AppRole};
     use crate::develope::tutil;
     use crate::log_util;
     use std::panic;
@@ -669,7 +669,7 @@ mod tests {
         let fi = FileItem::new(local_base_dir, remote_base_dir, ri, sync_type);
         let sftp = server.get_ssh_session().sftp()?;
         let mut buf = vec![0; 8192];
-        let app_conf = tutil::load_demo_app_conf_sqlite(None);
+        let app_conf = tutil::load_demo_app_conf_sqlite(None, AppRole::PullHub);
         let mut another_server = tutil::load_demo_server_sqlite(&app_conf, None);
         another_server.connect()?;
         let r = copy_a_file_item(&another_server, &sftp, fi, &mut buf, pb);
@@ -688,7 +688,7 @@ mod tests {
     #[test]
     fn t_copy_a_file() -> Result<(), failure::Error> {
         log();
-        let app_conf = tutil::load_demo_app_conf_sqlite(None);
+        let app_conf = tutil::load_demo_app_conf_sqlite(None, AppRole::PullHub);
         let mut server = tutil::load_demo_server_sqlite(&app_conf, None);
         server.connect()?;
         server.server_yml.rsync.valve = 4;
@@ -709,7 +709,7 @@ mod tests {
             &mut indicator,
         )?;
         assert!(
-            if let FileItemProcessResult::Successed(_, _, SyncType::Sftp) = r {
+            if let FileItemProcessResult::Succeeded(_, _, SyncType::Sftp) = r {
                 true
             } else {
                 false
@@ -731,7 +731,7 @@ mod tests {
 
         tutil::change_file_content(&local_file_name)?;
         assert!(
-            if let FileItemProcessResult::Successed(_, _, SyncType::Rsync) = r {
+            if let FileItemProcessResult::Succeeded(_, _, SyncType::Rsync) = r {
                 true
             } else {
                 false
