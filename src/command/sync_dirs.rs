@@ -7,6 +7,8 @@ use crate::actions;
 
 use super::*;
 
+pub type ServerAndIndicatorSqlite = (Server<SqliteConnectionManager, SqliteDbAccess>, Indicator);
+
 pub fn sync_push_dirs(
     app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
     server_yml: Option<&str>,
@@ -53,8 +55,8 @@ fn load_server_indicator_pairs(
 ) -> Result<
     (
         Option<thread::JoinHandle<()>>, 
-        Vec<(Server<SqliteConnectionManager, SqliteDbAccess>, Indicator)>), failure::Error> {
-    let mut server_indicator_pairs: Vec<(Server<SqliteConnectionManager, SqliteDbAccess>, Indicator)> = Vec::new();
+        Vec<ServerAndIndicatorSqlite>), failure::Error> {
+    let mut server_indicator_pairs: Vec<ServerAndIndicatorSqlite> = Vec::new();
     if let Some(server_yml) = server_yml {
         let server = load_server_yml_by_name(app_conf, server_yml, true)?;
         server_indicator_pairs.push(server);

@@ -65,22 +65,22 @@ mod tests {
 
     #[test]
     fn t_join() {
-        let pp = r#"\\?\D:\Documents\GitHub\ssh-client-demo\fixtures\adir"#;
+        let pp = r#"\\?\D:\Documents\GitHub\bk-over-ssh\fixtures\adir"#;
         let ch = "a.txt";
         let j = join_path(pp, ch);
-        assert_eq!(j, r#"D:\Documents\GitHub\ssh-client-demo\fixtures\adir\a.txt"#);
+        assert_eq!(j, r#"D:\Documents\GitHub\bk-over-ssh\fixtures\adir\a.txt"#);
 
 
-        let pp = r#"D:\Documents\GitHub\ssh-client-demo\fixtures\adir"#;
+        let pp = r#"D:\Documents\GitHub\bk-over-ssh\fixtures\adir"#;
         let ch = "a.txt";
         let j = join_path(pp, ch);
-        assert_eq!(j, r#"D:\Documents\GitHub\ssh-client-demo\fixtures\adir\a.txt"#);
+        assert_eq!(j, r#"D:\Documents\GitHub\bk-over-ssh\fixtures\adir\a.txt"#);
 
 
-        let pp = r#":\Documents\GitHub\ssh-client-demo\fixtures\adir"#;
+        let pp = r#":\Documents\GitHub\bk-over-ssh\fixtures\adir"#;
         let ch = "a.txt";
         let j = join_path(pp, ch);
-        assert_eq!(j, r#":\Documents\GitHub\ssh-client-demo\fixtures\adir/a.txt"#);
+        assert_eq!(j, r#":\Documents\GitHub\bk-over-ssh\fixtures\adir/a.txt"#);
     }
 
 }

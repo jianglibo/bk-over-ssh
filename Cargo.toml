@@ -87,9 +87,9 @@ path = "src/main.rs"
 #name = "bk-over-ssh-centos6"
 #path = "src/main.rs"
 
-[lib]
-name = "bk_over_ssh"
-path = "src/lib.rs"
+# [lib]
+# name = "bk_over_ssh"
+# path = "src/lib.rs"
 
 # http://ticki.github.io/blog/making-terminal-applications-in-rust-with-termion/
 

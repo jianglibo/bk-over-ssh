@@ -54,8 +54,8 @@ port: 22
 username: jianglibo
 password: ~
 auth_method: IdentityFile # Password, Agent, IdentityFile.
-remote_exec: /home/osboxes/ws/ssh-client-demo/target/debug/bk-over-ssh
-remote_server_yml: /home/osboxes/ws/ssh-client-demo/data/servers/localhost.yml
+remote_exec: /home/osboxes/ws/bk-over-ssh/target/debug/bk-over-ssh
+remote_server_yml: /home/osboxes/ws/bk-over-ssh/data/servers/localhost.yml
 file_list_file: /home/jianglibo/file_list_file.txt
 buf_len: 8192
 use_db: true
@@ -69,7 +69,7 @@ rsync:
   sig_ext: .sig
   delta_ext: .delta
 directories:
-  - remote_dir: /home/jianglibo/ws/ssh-client-demo/fixtures/adir
+  - remote_dir: /home/jianglibo/ws/bk-over-ssh/fixtures/adir
     local_dir: ~
     includes:
       - "*.txt"

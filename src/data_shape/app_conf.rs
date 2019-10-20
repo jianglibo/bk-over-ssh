@@ -446,7 +446,7 @@ where
         server.yml_location.replace(ab);
 
         trace!(
-            "loaded server: {:?}",
+            "loaded server, directory pairs, [local_dir, remote_dir]: {:?}",
             server
                 .server_yml
                 .directories

@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::{fs, io, io::BufRead, io::BufWriter, io::Seek, io::Write};
 use tempfile::TempDir;
 
+/// data dir in the current directory.
 #[allow(dead_code)]
 pub fn load_demo_app_conf_sqlite(data_dir: Option<&str>, app_role: AppRole) -> AppConf<SqliteConnectionManager, SqliteDbAccess> {
     let data_dir = data_dir.unwrap_or_else(||"data");

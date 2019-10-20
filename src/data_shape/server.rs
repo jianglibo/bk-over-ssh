@@ -536,6 +536,7 @@ where
         }
     }
 
+    /// We temporarily save file list file at 'file_list_file' property of server.yml.
     pub fn list_remote_file_sftp(&self) -> Result<PathBuf, failure::Error> {
         let mut channel: ssh2::Channel = self.create_channel()?;
         let cmd = format!(
@@ -549,7 +550,7 @@ where
             self.server_yml.remote_server_yml,
             self.server_yml.file_list_file,
         );
-        trace!("invoking remote command: {:?}", cmd);
+        trace!("invoking list remote files by sftp command: {:?}", cmd);
         channel.exec(cmd.as_str())?;
         let out_op = channel_util::get_stdout_eprintln_stderr(&mut channel, true);
 
@@ -626,7 +627,7 @@ where
         println!("{}", confirm_num);
         Ok(())
     }
-
+    /// This method only used for command line list remote files. We use list_remote_file_sftp in actual sync task.
     pub fn list_remote_file_exec(&self, no_db: bool) -> Result<PathBuf, failure::Error> {
         let mut channel: ssh2::Channel = self.create_channel()?;
         let cmd = format!(
@@ -640,7 +641,7 @@ where
             if no_db { " --no-db" } else { "" },
             self.server_yml.remote_server_yml,
         );
-        info!("invoking remote command: {:?}", cmd);
+        info!("invoking list remote files command: {:?}", cmd);
         channel.exec(cmd.as_str())?;
         let working_file = self.get_working_file_list_file();
         let mut wf = fs::OpenOptions::new()
@@ -910,7 +911,7 @@ where
                     (_, _) => false,
                 }
             } else {
-                eprintln!("Can't find cron item with name: {}", cron_name);
+                error!("Can't find cron item with name: {}", cron_name);
                 false
             }
     }
@@ -990,6 +991,7 @@ mod tests {
     use crate::develope::tutil;
     use crate::log_util;
     use bzip2::write::{BzDecoder, BzEncoder};
+    use crate::db_accesses::{DbAccess, SqliteDbAccess};
     use bzip2::Compression;
     use glob::Pattern;
     use indicatif::MultiProgress;
@@ -1032,13 +1034,27 @@ mod tests {
         Ok(())
     }
 
+    /// pull downed files were saved in the ./data/pull-servers-data directory.
+    /// remote genereated file_list_file was saved in the 'file_list_file' property of server.yml.
+    /// This test also involved compiled executable so remember to compile the app if result is not expected.
     #[test]
     fn t_sync_pull_dirs() -> Result<(), failure::Error> {
         log();
-        let app_conf = tutil::load_demo_app_conf_sqlite(None, AppRole::PullHub);
+        let mut app_conf = tutil::load_demo_app_conf_sqlite(None, AppRole::PullHub);
+        app_conf.mini_app_conf.skip_cron = true;
 
         assert!(app_conf.mini_app_conf.app_role == AppRole::PullHub);
         let mut server = tutil::load_demo_server_sqlite(&app_conf, None);
+
+        let db_file = server.get_db_file();
+        if db_file.exists() {
+            fs::remove_file(db_file.as_path())?;
+        }
+
+        let sqlite_db_access = SqliteDbAccess::new(db_file);
+        sqlite_db_access.create_database()?;
+        server.set_db_access(sqlite_db_access);
+        
         let mb = Arc::new(MultiProgress::new());
 
         let mb1 = Arc::clone(&mb);
@@ -1183,7 +1199,7 @@ mod tests {
         sess.set_tcp_stream(tcp);
         sess.handshake().unwrap();
 
-        sess.userauth_password("Administrator", "pass.").unwrap();
-        assert!(sess.authenticated());
+        sess.userauth_password("Administrator", "pass.").expect("should authenticate succeeded.");
+        assert!(sess.authenticated(), "should authenticate succeeded.");
     }
 }

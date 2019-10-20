@@ -354,6 +354,8 @@ fn main_entry<'a>(
                 };
             if no_db {
                 server.server_yml.use_db = false;
+            } else if !server.get_db_file().exists() || server.get_db_file().metadata()?.len() < 100 {
+                bail!("sqlite db doesn't initialized yet.");
             }
             if let Some(out) = sub_matches.value_of("out") {
                 let mut out = fs::OpenOptions::new()
