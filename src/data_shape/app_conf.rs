@@ -10,10 +10,20 @@ use std::sync::Arc;
 use std::{fs, io::Read, io::Write};
 
 pub const CONF_FILE_NAME: &str = "bk_over_ssh.yml";
+
 pub const PULL_SERVERS_CONF: &str = "pull-servers-conf";
-pub const PUSH_SERVERS_CONF: &str = "push-servers-conf";
 pub const PULL_SERVERS_DATA: &str = "pull-servers-data";
-pub const PUSH_SERVERS_DATA: &str = "push-servers-data";
+
+pub const RECEIVE_SERVERS_CONF: &str = "receive-servers-conf";
+pub const RECEIVE_SERVERS_DATA: &str = "receive-servers-data";
+
+// even passive leaf may have mulitple configuration file. For example when mulitple PullHubs pull this server.
+pub const PASSIVE_LEAF_CONF: &str = "passive-leaf-conf";
+pub const PASSIVE_LEAF_DATA: &str = "passive-leaf-data";
+
+// even active leaf may have multiple configuration file. For example push to mulitple ReceiveHubs.
+pub const ACTIVE_LEAF_CONF: &str = "active-leaf-conf";
+pub const ACTIVE_LEAF_DATA: &str = "active-leaf-data";
 
 #[derive(Debug, Deserialize, Serialize, Default)]
 pub struct LogConf {
@@ -30,8 +40,6 @@ impl LogConf {
 #[derive(Deserialize, Serialize, Debug, Clone, Eq, PartialEq)]
 #[serde(rename_all(deserialize = "snake_case"))]
 pub enum AppRole {
-    Controller,
-    Leaf,
     PullHub,
     ReceiveHub,
     PassiveLeaf,
@@ -60,7 +68,7 @@ impl Default for AppConfYml {
     fn default() -> Self {
         Self {
             data_dir: "data".to_string(),
-            role: AppRole::Controller,
+            role: AppRole::PullHub,
             mail_conf: MailConf::default(),
             log_conf: LogConf::default(),
             archive_cmd: Vec::new(),
@@ -135,8 +143,9 @@ where
 {
     let servers_conf_dir_name = match app_role {
         AppRole::PullHub => PULL_SERVERS_CONF,
-        AppRole::ActiveLeaf => PUSH_SERVERS_CONF,
-        _ => panic!("unexpected app role."),
+        AppRole::ActiveLeaf => ACTIVE_LEAF_CONF,
+        AppRole::PassiveLeaf => PASSIVE_LEAF_CONF,
+        AppRole::ReceiveHub => RECEIVE_SERVERS_CONF,
     };
 
     AppConf {
@@ -225,8 +234,9 @@ where
 
                         let servers_conf_dir = match app_role {
                             AppRole::PullHub => data_dir_full_path.as_path().join(PULL_SERVERS_CONF),
-                            AppRole::ActiveLeaf => data_dir_full_path.as_path().join(PUSH_SERVERS_CONF),
-                            _ => bail!("expected AppRole."),
+                            AppRole::ActiveLeaf => data_dir_full_path.as_path().join(ACTIVE_LEAF_CONF),
+                            AppRole::PassiveLeaf => data_dir_full_path.as_path().join(PASSIVE_LEAF_CONF),
+                            AppRole::ReceiveHub => data_dir_full_path.as_path().join(RECEIVE_SERVERS_CONF),
                         };
 
                         if !servers_conf_dir.exists() {
@@ -424,8 +434,9 @@ where
 
         let servers_data_dir = match self.mini_app_conf.app_role {
             AppRole::PullHub => data_dir.join(PULL_SERVERS_DATA),
-            AppRole::ActiveLeaf => data_dir.join(PUSH_SERVERS_DATA),
-            _ => bail!("unexpected app role"),
+            AppRole::ActiveLeaf => data_dir.join(ACTIVE_LEAF_DATA),
+            AppRole::PassiveLeaf => data_dir.join(PASSIVE_LEAF_DATA),
+            AppRole::ReceiveHub => data_dir.join(RECEIVE_SERVERS_DATA),
         };
 
         if !servers_data_dir.exists() {

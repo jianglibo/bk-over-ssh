@@ -133,40 +133,39 @@ where
         skip_sha1,
         sql_batch_size
     );
-    if let Some(base_path) = directory.get_remote_canonicalized_dir_str() {
-        let dir_id = db_access.insert_directory(base_path.as_str())?;
+    let base_path = directory.get_remote_canonicalized_dir_str()?;
+    let dir_id = db_access.insert_directory(base_path.as_str())?;
 
-        if sql_batch_size > 1 {
-            WalkDir::new(&base_path)
-                .follow_links(false)
-                .into_iter()
-                .filter_map(|e| e.ok())
-                .filter(|d| d.file_type().is_file())
-                .filter_map(|d| d.path().canonicalize().ok())
-                .filter_map(|d| directory.match_path(d))
-                .filter_map(|d| RemoteFileItemInDb::from_path(&base_path, d, skip_sha1, dir_id))
-                .filter(|rfi| !(rfi.path.ends_with(sig_ext) || rfi.path.ends_with(delta_ext)))
-                .filter_map(|rfi| db_access.insert_or_update_remote_file_item(rfi, true))
-                .map(|(rfi, da)| rfi.to_sql_string(&da))
-                .chunks(sql_batch_size)
-                .into_iter()
-                .for_each(|ck| {
-                    trace!("start batch insert.");
-                    db_access.execute_batch(ck);
-                    trace!("end batch insert.");
-                });
-        } else {
-            let _c = WalkDir::new(&base_path)
-                .follow_links(false)
-                .into_iter()
-                .filter_map(|e| e.ok())
-                .filter(|d| d.file_type().is_file())
-                .filter_map(|d| d.path().canonicalize().ok())
-                .filter_map(|d| directory.match_path(d))
-                .filter_map(|d| RemoteFileItemInDb::from_path(&base_path, d, skip_sha1, dir_id))
-                .filter_map(|rfi| db_access.insert_or_update_remote_file_item(rfi, false))
-                .count();
-        }
+    if sql_batch_size > 1 {
+        WalkDir::new(&base_path)
+            .follow_links(false)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|d| d.file_type().is_file())
+            .filter_map(|d| d.path().canonicalize().ok())
+            .filter_map(|d| directory.match_path(d))
+            .filter_map(|d| RemoteFileItemInDb::from_path(&base_path, d, skip_sha1, dir_id))
+            .filter(|rfi| !(rfi.path.ends_with(sig_ext) || rfi.path.ends_with(delta_ext)))
+            .filter_map(|rfi| db_access.insert_or_update_remote_file_item(rfi, true))
+            .map(|(rfi, da)| rfi.to_sql_string(&da))
+            .chunks(sql_batch_size)
+            .into_iter()
+            .for_each(|ck| {
+                trace!("start batch insert.");
+                db_access.execute_batch(ck);
+                trace!("end batch insert.");
+            });
+    } else {
+        let _c = WalkDir::new(&base_path)
+            .follow_links(false)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|d| d.file_type().is_file())
+            .filter_map(|d| d.path().canonicalize().ok())
+            .filter_map(|d| directory.match_path(d))
+            .filter_map(|d| RemoteFileItemInDb::from_path(&base_path, d, skip_sha1, dir_id))
+            .filter_map(|rfi| db_access.insert_or_update_remote_file_item(rfi, false))
+            .count();
     }
     Ok(())
 }
@@ -180,27 +179,26 @@ where
     O: io::Write,
 {
     trace!("load_remote_item, skip_sha1: {}", skip_sha1);
-    if let Some(base_path) = directory.get_remote_canonicalized_dir_str() {
-        writeln!(out, "{}", base_path)?;
-        WalkDir::new(&base_path)
-            .follow_links(false)
-            .into_iter()
-            .filter_map(|e| e.ok())
-            .filter(|d| d.file_type().is_file())
-            .filter_map(|d| d.path().canonicalize().ok())
-            .filter_map(|d| directory.match_path(d))
-            .filter_map(|d| RemoteFileItem::from_path(&base_path, d, skip_sha1))
-            .for_each(|rfi| match serde_json::to_string(&rfi) {
-                Ok(line) => {
-                    if let Err(err) = writeln!(out, "{}", line) {
-                        error!("write item line failed: {:?}, {:?}", err, line);
-                    }
+    let base_path = directory.get_remote_canonicalized_dir_str()?;
+    writeln!(out, "{}", base_path)?;
+    WalkDir::new(&base_path)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|d| d.file_type().is_file())
+        .filter_map(|d| d.path().canonicalize().ok())
+        .filter_map(|d| directory.match_path(d))
+        .filter_map(|d| RemoteFileItem::from_path(&base_path, d, skip_sha1))
+        .for_each(|rfi| match serde_json::to_string(&rfi) {
+            Ok(line) => {
+                if let Err(err) = writeln!(out, "{}", line) {
+                    error!("write item line failed: {:?}, {:?}", err, line);
                 }
-                Err(err) => {
-                    error!("serialize item line failed: {:?}", err);
-                }
-            });
-    }
+            }
+            Err(err) => {
+                error!("serialize item line failed: {:?}", err);
+            }
+        });
     Ok(())
 }
 

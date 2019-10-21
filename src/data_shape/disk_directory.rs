@@ -23,21 +23,23 @@ impl Directory {
         self.remote_dir.as_str()
     }
 
-    pub fn get_remote_canonicalized_dir_str(&self) -> Option<String> {
+    pub fn get_remote_canonicalized_dir_str(&self) -> Result<String, failure::Error> {
         let bp = Path::new(self.get_remote_dir()).canonicalize();
         match bp {
             Ok(base_path) => {
                 if let Some(path_str) = base_path.to_str() {
-                    return Some(path_str.to_owned());
+                    Ok(path_str.to_owned())
                 } else {
-                    error!("base_path to_str failed: {:?}", base_path);
+                    bail!("base_path to_str failed: {:?}", base_path);
                 }
             }
-            Err(err) => {
-                error!("load_dir resolve path failed: {:?}", err);
+            Err(_err) => {
+                bail!(
+                    "canonicalize remote path failed: {:?}",
+                    self.get_remote_dir()
+                );
             }
         }
-        None
     }
     /// for test purpose.
     /// local_dir will change to absolute when load from yml file.

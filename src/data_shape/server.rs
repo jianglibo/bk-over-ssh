@@ -1018,7 +1018,7 @@ mod tests {
         log_util::setup_logger_detail(
             true,
             "output.log",
-            vec!["data_shape::server", "data_shape::app_conf"],
+            vec!["data_shape::server", "data_shape::app_conf", "action::copy_file"],
             Some(vec!["ssh2"]),
             "",
         )

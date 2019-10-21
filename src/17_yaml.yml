@@ -28,11 +28,13 @@ args:
     - app-role:
         help: The app role if cann't infer from the command line parameters.
         long: app-role
-        required: false
+        required: true
         takes_value: true
         possible_values:
             - pull_hub
             - active_leaf
+            - receive_hub
+            - passive_leaf
     - conf:
         help: the path of app configuration file, if not present the app will try to guess one.
         long: conf

@@ -54,17 +54,20 @@ fn main() -> Result<(), failure::Error> {
     let app1 = App::from_yaml(yml);
     let console_log = m.is_present("console-log");
 
-    let app_role = if let Some(app_role) = m.value_of("app-role") {
-        if app_role == "active_leaf" {
-            AppRole::ActiveLeaf
-        } else {
-            AppRole::PullHub
-        }
-    } else if let ("sync-push-dirs", Some(_sub_matches)) = m.subcommand() {
-        AppRole::ActiveLeaf
-    } else {
-        AppRole::PullHub
+    let app_role =  match m.value_of("app-role").unwrap() {
+        "active_leaf" => AppRole::ActiveLeaf,
+        "pull_hub" => AppRole::PullHub,
+        "receive_hub" => AppRole::ReceiveHub,
+        "passive_leaf" => AppRole::PassiveLeaf,
+        impossible_role => bail!("unexpected app role {}", impossible_role),
     };
+    
+    
+    //  else if let ("sync-push-dirs", Some(_sub_matches)) = m.subcommand() {
+    //     AppRole::ActiveLeaf
+    // } else {
+    //     AppRole::PullHub
+    // };
 
     let conf = m.value_of("conf");
     // we always open db connection unless no-db parameter provided.
@@ -355,7 +358,9 @@ fn main_entry<'a>(
             if no_db {
                 server.server_yml.use_db = false;
             } else if !server.get_db_file().exists() || server.get_db_file().metadata()?.len() < 100 {
-                bail!("sqlite db doesn't initialized yet.");
+                warn!("sqlite db doesn't initialized yet. try to initialize it.");
+                let sqlite_db_access = SqliteDbAccess::new(server.get_db_file());
+                sqlite_db_access.create_database()?;
             }
             if let Some(out) = sub_matches.value_of("out") {
                 let mut out = fs::OpenOptions::new()
