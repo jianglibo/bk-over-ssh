@@ -850,8 +850,15 @@ where
                         current_local_dir = Some(Path::new(found_directory.local_dir.as_str()));
                         FileItemProcessResult::Directory(line)
                     } else {
-                        // cannot find corresponding local_dir, skipping following lines.
-                        error!("can't find corresponding local_dir: {:?}", line);
+                        // we compare the remote dir line with this server_yml.directories's remote dir
+                        error!(
+                            "this is line from remote: {:?}, this is all remote_dir in configuration file: {:?}, no one matches.",
+                            line, self.server_yml
+                                .directories
+                                .iter()
+                                .map(|d| d.local_dir.as_str())
+                                .collect::<Vec<&str>>()
+                        );
                         current_remote_dir = None;
                         current_local_dir = None;
                         FileItemProcessResult::NoCorrespondedLocalDir(line)
