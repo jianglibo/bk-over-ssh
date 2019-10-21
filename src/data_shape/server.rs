@@ -23,12 +23,6 @@ use std::time::Instant;
 use std::{fs, io, io::Seek};
 use tar::Builder;
 
-#[derive(Deserialize, Serialize, Debug)]
-#[serde(rename_all(deserialize = "snake_case"))]
-pub enum ServerRole {
-    PureClient,
-    PureServer,
-}
 
 #[derive(Deserialize, Debug, Serialize)]
 #[serde(rename_all(deserialize = "snake_case"))]
@@ -58,7 +52,6 @@ pub struct ServerYml {
     pub username: String,
     pub password: String,
     pub directories: Vec<Directory>,
-    pub role: ServerRole,
     pub prune_strategy: PruneStrategy,
     pub archive_prefix: String,
     pub archive_postfix: String,
@@ -542,13 +535,14 @@ where
     pub fn list_remote_file_sftp(&self) -> Result<PathBuf, failure::Error> {
         let mut channel: ssh2::Channel = self.create_channel()?;
         let cmd = format!(
-            "{} {} list-local-files {} --out {}",
+            "{} {} --app-role {} list-local-files {} --out {}",
             self.server_yml.remote_exec,
             if self.is_skip_sha1() {
                 ""
             } else {
                 "--enable-sha1"
             },
+            self.app_conf.app_role.to_str(),
             self.server_yml.remote_server_yml,
             self.server_yml.file_list_file,
         );
@@ -633,13 +627,14 @@ where
     pub fn list_remote_file_exec(&self, no_db: bool) -> Result<PathBuf, failure::Error> {
         let mut channel: ssh2::Channel = self.create_channel()?;
         let cmd = format!(
-            "{} {} {} list-local-files {}",
+            "{} {} --app-role {} {} list-local-files {}",
             self.server_yml.remote_exec,
             if self.is_skip_sha1() {
                 ""
             } else {
                 "--enable-sha1"
             },
+            self.app_conf.app_role.to_str(),
             if no_db { " --no-db" } else { "" },
             self.server_yml.remote_server_yml,
         );

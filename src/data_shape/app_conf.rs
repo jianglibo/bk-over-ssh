@@ -3,11 +3,14 @@ use crate::db_accesses::DbAccess;
 use indicatif::MultiProgress;
 use log::{trace, warn};
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 use std::env;
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::{fs, io::Read, io::Write};
+
+
 
 pub const CONF_FILE_NAME: &str = "bk_over_ssh.yml";
 
@@ -46,6 +49,31 @@ pub enum AppRole {
     ActiveLeaf,
 }
 
+impl AppRole {
+    pub fn to_str(&self) -> &str {
+        match &self {
+            AppRole::PullHub => "pull_hub",
+            AppRole::ReceiveHub => "receive_hub",
+            AppRole::PassiveLeaf => "passive_leaf",
+            AppRole::ActiveLeaf => "active_leaf",
+        }
+    }
+}
+
+impl FromStr for AppRole {
+    type Err = &'static str;
+
+    fn from_str(role_name: &str) -> Result<Self, Self::Err> {
+        match role_name {
+            "pull_hub" => Ok(AppRole::PullHub),
+            "receive_hub" => Ok(AppRole::ReceiveHub),
+            "passive_leaf" => Ok(AppRole::PassiveLeaf),
+            "active_leaf" => Ok(AppRole::ActiveLeaf),
+            _rn => Err("unexpected role name"),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize, Default)]
 pub struct MailConf {
     pub from: String,
@@ -77,7 +105,7 @@ impl Default for AppConfYml {
 }
 
 /// The data dir is a fixed path no matter the role of the app.
-/// 
+///
 fn guess_data_dir(data_dir: impl AsRef<str>) -> Result<PathBuf, failure::Error> {
     let data_dir = data_dir.as_ref();
     let data_dir = if data_dir.is_empty() {
@@ -201,7 +229,8 @@ where
         self.mini_app_conf.skip_sha1 = false;
     }
 
-    fn read_app_conf(file: impl AsRef<Path>,
+    fn read_app_conf(
+        file: impl AsRef<Path>,
         app_role: AppRole,
     ) -> Result<Option<AppConf<M, D>>, failure::Error> {
         if !file.as_ref().exists() {
@@ -233,15 +262,27 @@ where
                         let log_full_path = Path::new(&log_full_path).to_path_buf();
 
                         let servers_conf_dir = match app_role {
-                            AppRole::PullHub => data_dir_full_path.as_path().join(PULL_SERVERS_CONF),
-                            AppRole::ActiveLeaf => data_dir_full_path.as_path().join(ACTIVE_LEAF_CONF),
-                            AppRole::PassiveLeaf => data_dir_full_path.as_path().join(PASSIVE_LEAF_CONF),
-                            AppRole::ReceiveHub => data_dir_full_path.as_path().join(RECEIVE_SERVERS_CONF),
+                            AppRole::PullHub => {
+                                data_dir_full_path.as_path().join(PULL_SERVERS_CONF)
+                            }
+                            AppRole::ActiveLeaf => {
+                                data_dir_full_path.as_path().join(ACTIVE_LEAF_CONF)
+                            }
+                            AppRole::PassiveLeaf => {
+                                data_dir_full_path.as_path().join(PASSIVE_LEAF_CONF)
+                            }
+                            AppRole::ReceiveHub => {
+                                data_dir_full_path.as_path().join(RECEIVE_SERVERS_CONF)
+                            }
                         };
 
                         if !servers_conf_dir.exists() {
                             if let Err(err) = fs::create_dir_all(&servers_conf_dir) {
-                                bail!("create servers_conf_dir {:?}, failed: {:?}", &servers_conf_dir, err);
+                                bail!(
+                                    "create servers_conf_dir {:?}, failed: {:?}",
+                                    &servers_conf_dir,
+                                    err
+                                );
                             }
                         }
 

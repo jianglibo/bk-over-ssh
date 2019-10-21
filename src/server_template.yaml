@@ -1,4 +1,3 @@
-role: pure_client
 id_rsa: /home/jianglibo/.ssh/id_rsa
 id_rsa_pub: /home/jianglibo/.ssh/id_rsa.pub
 host: 127.0.0.1

@@ -54,20 +54,7 @@ fn main() -> Result<(), failure::Error> {
     let app1 = App::from_yaml(yml);
     let console_log = m.is_present("console-log");
 
-    let app_role =  match m.value_of("app-role").unwrap() {
-        "active_leaf" => AppRole::ActiveLeaf,
-        "pull_hub" => AppRole::PullHub,
-        "receive_hub" => AppRole::ReceiveHub,
-        "passive_leaf" => AppRole::PassiveLeaf,
-        impossible_role => bail!("unexpected app role {}", impossible_role),
-    };
-    
-    
-    //  else if let ("sync-push-dirs", Some(_sub_matches)) = m.subcommand() {
-    //     AppRole::ActiveLeaf
-    // } else {
-    //     AppRole::PullHub
-    // };
+    let app_role =   m.value_of("app-role").unwrap().parse::<AppRole>().map_err(failure::err_msg)?;
 
     let conf = m.value_of("conf");
     // we always open db connection unless no-db parameter provided.
