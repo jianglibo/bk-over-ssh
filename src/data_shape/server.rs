@@ -498,10 +498,12 @@ where
                         self.server_yml.id_rsa_pub.as_ref().map(Path::new),
                         Path::new(&self.server_yml.id_rsa),
                         None,
-                    )?;
+                    )
+                    .expect("userauth_pubkey_file should succeeded.");
                 }
                 AuthMethod::Password => {
-                    sess.userauth_password(&self.server_yml.username, &self.server_yml.password)?;
+                    sess.userauth_password(&self.server_yml.username, &self.server_yml.password)
+                        .expect("userauth_password should succeeded.");
                 }
             }
             Ok(sess)
@@ -774,8 +776,13 @@ where
                                 } else {
                                     SyncType::Sftp
                                 };
-                                let local_item =
-                                    FileItem::new(local_dir, rd.as_str(), remote_item, sync_type, &self.app_conf.app_role);
+                                let local_item = FileItem::new(
+                                    local_dir,
+                                    rd.as_str(),
+                                    remote_item,
+                                    sync_type,
+                                    &self.app_conf.app_role,
+                                );
                                 consume_count += 1;
 
                                 pb.active_pb_item().alter_pb(PbProperties {
@@ -988,10 +995,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db_accesses::{DbAccess, SqliteDbAccess};
     use crate::develope::tutil;
     use crate::log_util;
     use bzip2::write::{BzDecoder, BzEncoder};
-    use crate::db_accesses::{DbAccess, SqliteDbAccess};
     use bzip2::Compression;
     use glob::Pattern;
     use indicatif::MultiProgress;
@@ -1035,7 +1042,7 @@ mod tests {
     }
 
     /// pull downed files were saved in the ./data/pull-servers-data directory.
-    /// remote genereated file_list_file was saved in the 'file_list_file' property of server.yml.
+    /// remote generated file_list_file was saved in the 'file_list_file' property of server.yml point to.
     /// This test also involved compiled executable so remember to compile the app if result is not expected.
     #[test]
     fn t_sync_pull_dirs() -> Result<(), failure::Error> {
@@ -1054,7 +1061,6 @@ mod tests {
         let sqlite_db_access = SqliteDbAccess::new(db_file);
         sqlite_db_access.create_database()?;
         server.set_db_access(sqlite_db_access);
-        
         let mb = Arc::new(MultiProgress::new());
 
         let mb1 = Arc::clone(&mb);
@@ -1199,7 +1205,8 @@ mod tests {
         sess.set_tcp_stream(tcp);
         sess.handshake().unwrap();
 
-        sess.userauth_password("Administrator", "pass.").expect("should authenticate succeeded.");
+        sess.userauth_password("Administrator", "pass.")
+            .expect("should authenticate succeeded.");
         assert!(sess.authenticated(), "should authenticate succeeded.");
     }
 }
