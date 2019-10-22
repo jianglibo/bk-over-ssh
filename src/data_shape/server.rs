@@ -76,7 +76,6 @@ where
     reports_dir: PathBuf,
     archives_dir: PathBuf,
     working_dir: PathBuf,
-    // directories_dir: PathBuf,
     pub yml_location: Option<PathBuf>,
     pub db_access: Option<D>,
     _m: PhantomData<M>,
