@@ -23,7 +23,6 @@ use std::time::Instant;
 use std::{fs, io, io::Seek};
 use tar::Builder;
 
-
 #[derive(Deserialize, Debug, Serialize)]
 #[serde(rename_all(deserialize = "snake_case"))]
 pub enum CompressionImpl {
@@ -129,14 +128,19 @@ where
         match app_conf.app_role {
             AppRole::PullHub => {
                 server_yml.directories.iter_mut().try_for_each(|d| {
-                    d.compile_patterns().unwrap();
-                    d.normalize_pull_sync(directories_dir.as_path())
+                    d.compile_patterns().expect("compile_patterns should succeeded.");
+                    d.normalize_pull_hub_sync(directories_dir.as_path())
                 })?;
             }
             AppRole::ActiveLeaf => {
                 server_yml.directories.iter_mut().try_for_each(|d| {
-                    d.compile_patterns().unwrap();
-                    d.normalize_push_sync(directories_dir.as_path())
+                    d.compile_patterns().expect("compile_patterns should succeeded.");
+                    d.normalize_active_leaf_sync(directories_dir.as_path())
+                })?;
+            }
+            AppRole::PassiveLeaf => { // compiling patterns is enough.
+                server_yml.directories.iter_mut().try_for_each(|d| {
+                    d.compile_patterns()
                 })?;
             }
             _ => {
@@ -177,7 +181,7 @@ where
         self.server_yml.port
     }
 
-    #[allow(dead_code)]
+    /// From the view of the server, it's an out direction.
     pub fn copy_a_file(
         &mut self,
         local: impl AsRef<str>,
@@ -534,6 +538,10 @@ where
     /// We temporarily save file list file at 'file_list_file' property of server.yml.
     pub fn list_remote_file_sftp(&self) -> Result<PathBuf, failure::Error> {
         let mut channel: ssh2::Channel = self.create_channel()?;
+        let app_role = match self.app_conf.app_role {
+            AppRole::PullHub => AppRole::PassiveLeaf,
+            _ => bail!("list_remote_file_sftp: unsupported app role. {:?}", self.app_conf.app_role),
+        };
         let cmd = format!(
             "{} {} --app-role {} list-local-files {} --out {}",
             self.server_yml.remote_exec,
@@ -542,7 +550,7 @@ where
             } else {
                 "--enable-sha1"
             },
-            self.app_conf.app_role.to_str(),
+            app_role.to_str(),
             self.server_yml.remote_server_yml,
             self.server_yml.file_list_file,
         );
@@ -604,9 +612,15 @@ where
 
     pub fn confirm_remote_sync(&self) -> Result<(), failure::Error> {
         let mut channel: ssh2::Channel = self.create_channel()?;
+        let app_role = match self.app_conf.app_role {
+            AppRole::PullHub => AppRole::PassiveLeaf,
+            _ => bail!("there is no need to confirm remote sync."),
+        };
         let cmd = format!(
-            "{} confirm-local-sync {}",
-            self.server_yml.remote_exec, self.server_yml.remote_server_yml,
+            "{} --app-role {} confirm-local-sync {}",
+            self.server_yml.remote_exec,
+            app_role.to_str(),
+            self.server_yml.remote_server_yml,
         );
         info!("invoking remote command: {:?}", cmd);
         channel.exec(cmd.as_str())?;
@@ -1003,17 +1017,22 @@ mod tests {
     use bzip2::write::{BzDecoder, BzEncoder};
     use bzip2::Compression;
     use glob::Pattern;
-    use indicatif::MultiProgress;
+    // use indicatif::MultiProgress;
+    use std::fs;
     use std::io::{self};
-    use std::sync::Arc;
-    use std::thread;
-    use std::time::Duration;
+    // use std::sync::Arc;
+    // use std::thread;
+    // use std::time::Duration;
 
     fn log() {
         log_util::setup_logger_detail(
             true,
             "output.log",
-            vec!["data_shape::server", "data_shape::app_conf", "action::copy_file"],
+            vec![
+                "data_shape::server",
+                "data_shape::app_conf",
+                "action::copy_file",
+            ],
             Some(vec!["ssh2"]),
             "",
         )
@@ -1055,31 +1074,62 @@ mod tests {
         assert!(app_conf.mini_app_conf.app_role == AppRole::PullHub);
         let mut server = tutil::load_demo_server_sqlite(&app_conf, None);
 
+        // it's useless. because the db file is from remote server's perspective.
         let db_file = server.get_db_file();
         if db_file.exists() {
             fs::remove_file(db_file.as_path())?;
         }
 
+        let remote_db_path = Path::new("./target/debug/data/passive-leaf-data/127.0.0.1/db.db");
+
+        if remote_db_path.exists() {
+            fs::remove_file(remote_db_path)?;
+        }
+
         let sqlite_db_access = SqliteDbAccess::new(db_file);
         sqlite_db_access.create_database()?;
         server.set_db_access(sqlite_db_access);
-        let mb = Arc::new(MultiProgress::new());
 
-        let mb1 = Arc::clone(&mb);
-        let mb2 = Arc::clone(&mb);
+        let a_dir_string = server
+            .server_yml
+            .directories
+            .iter()
+            .find(|d| d.remote_dir.ends_with("a-dir"))
+            .expect("should have a directory who's remote_dir end with 'a-dir'")
+            .local_dir
+            .clone();
+        let a_dir = Path::new(a_dir_string.as_str());
+        if a_dir.exists() {
+            info!("remove directory: {:?}", a_dir);
+            fs::remove_dir_all(a_dir)?;
+        }
 
-        let t = thread::spawn(move || {
-            thread::sleep(Duration::from_millis(200));
-            if let Err(err) = mb1.join() {
-                warn!("join account failure. {:?}", err);
-            }
-        });
-        let mut indicator = Indicator::new(Some(mb2));
+        // let mb = Arc::new(MultiProgress::new());
+
+        // let mb1 = Arc::clone(&mb);
+        // let mb2 = Arc::clone(&mb);
+
+        // let t = thread::spawn(move || {
+        //     thread::sleep(Duration::from_millis(200));
+        //     if let Err(err) = mb1.join() {
+        //         warn!("join account failure. {:?}", err);
+        //     }
+        // });
+        // let mut indicator = Indicator::new(Some(mb2));
+        let mut indicator = Indicator::new(None);
         server.connect()?;
         let stats = server.sync_pull_dirs(&mut indicator)?;
         indicator.pb_finish();
         info!("result {:?}", stats);
-        t.join().unwrap();
+        info!("a_dir is {:?}", a_dir);
+        let cc_txt = a_dir.join("b").join("c c").join("c c .txt");
+        info!("cc_txt is {:?}", cc_txt);
+        assert!(cc_txt.exists());
+        assert!(a_dir.join("b").join("b.txt").exists());
+        assert!(a_dir.join("b b").join("b b.txt").exists());
+        assert!(a_dir.join("a.txt").exists());
+        assert!(a_dir.join("qrcode.png").exists());
+        // t.join().unwrap();
         Ok(())
     }
 

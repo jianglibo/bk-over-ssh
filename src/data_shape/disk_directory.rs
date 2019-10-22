@@ -155,9 +155,9 @@ impl Directory {
             })
     }
 
-    /// When pushing remote, the local directory is absolute, the remote directory is relative.
+    /// When in active leaf mode, the local directory is absolute, the remote directory is relative.
     /// The remote directory is always relative to the 'directories' dir in the user's home directory.
-    pub fn normalize_push_sync(
+    pub fn normalize_active_leaf_sync(
         &mut self,
         _directories_dir: impl AsRef<Path>,
     ) -> Result<(), failure::Error> {
@@ -208,7 +208,8 @@ impl Directory {
     }
 
     /// When pulling remote the remote directory is absolute path, local path is relative.
-    pub fn normalize_pull_sync(
+    /// This method is for normalize local directory ready for coping.
+    pub fn normalize_pull_hub_sync(
         &mut self,
         directories_dir: impl AsRef<Path>,
     ) -> Result<(), failure::Error> {

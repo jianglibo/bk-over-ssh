@@ -3,6 +3,36 @@ use log::*;
 
 pub const VERBATIM_PREFIX: &str = r#"\\?\"#;
 
+/// A slash ended string with trailing slash removed.
+pub struct SlashPath {
+    pub slash: String,
+}
+
+impl SlashPath {
+    pub fn new(any_path: impl AsRef<str>) -> Self {
+        let mut slash = strip_verbatim_prefixed(any_path).replace('\\', "/");
+        if slash.ends_with('/') {
+            slash = slash.trim_end_matches('/').to_string();
+        }
+        Self {
+            slash,
+        }
+    }
+
+    pub fn parent(&self) -> Result<SlashPath, failure::Error> {
+        let vs: Vec<&str> = self.slash.rsplitn(2, '/').collect();
+        if vs.len() != 2 {
+            bail!("no parent for slash_path: {}", self.slash);
+        } else {
+            Ok(
+            SlashPath {
+                slash: vs[1].to_string(),
+            })
+        }
+    }
+}
+
+
 pub fn is_windows_path_start(s: &str) -> bool {
     let mut chars = s.chars();
     if let (Some(c0), Some(c1)) = (chars.next(), chars.next()) {
