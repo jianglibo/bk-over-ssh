@@ -116,17 +116,23 @@ where
         let working_dir = my_dir.join("working");
         let directories_dir = my_dir.join("directories");
 
-        if !archives_dir.exists() {
-            fs::create_dir_all(&archives_dir).expect("archives_dir should create.");
+        if !my_dir.exists() {
+            fs::create_dir_all(&my_dir).expect("my_dir should create.");
         }
-        if !reports_dir.exists() {
-            fs::create_dir_all(&reports_dir).expect("reports_dir should create.");
-        }
-        if !working_dir.exists() {
-            fs::create_dir_all(&working_dir).expect("working_dir should create.");
-        }
-        if !directories_dir.exists() {
-            fs::create_dir_all(&directories_dir).expect("directories_dir should create.");
+
+        if app_conf.app_role != AppRole::PassiveLeaf {
+            if !archives_dir.exists() {
+                fs::create_dir_all(&archives_dir).expect("archives_dir should create.");
+            }
+            if !reports_dir.exists() {
+                fs::create_dir_all(&reports_dir).expect("reports_dir should create.");
+            }
+            if !working_dir.exists() {
+                fs::create_dir_all(&working_dir).expect("working_dir should create.");
+            }
+            if !directories_dir.exists() {
+                fs::create_dir_all(&directories_dir).expect("directories_dir should create.");
+            }
         }
 
         match app_conf.app_role {
@@ -214,16 +220,14 @@ where
         self.server_yml.port
     }
 
-    /// From the view of the server, it's an out direction.
-    pub fn copy_a_file(
+    fn copy_a_file_sftp(
         &self,
         local: impl AsRef<str>,
         remote: impl AsRef<str>,
+        sftp: &ssh2::Sftp,
     ) -> Result<(), failure::Error> {
         let local = local.as_ref();
         let remote = remote.as_ref();
-        let sftp: ssh2::Sftp = self.session.as_ref().unwrap().sftp()?;
-
         if let Ok(mut r_file) = sftp.create(Path::new(remote)) {
             let mut l_file = fs::File::open(local)?;
             io::copy(&mut l_file, &mut r_file)?;
@@ -235,6 +239,16 @@ where
             );
         }
         Ok(())
+    }
+
+    /// From the view of the server, it's an out direction.
+    pub fn copy_a_file(
+        &self,
+        local: impl AsRef<str>,
+        remote: impl AsRef<str>,
+    ) -> Result<(), failure::Error> {
+        let sftp = self.session.as_ref().unwrap().sftp()?;
+        self.copy_a_file_sftp(local, remote, &sftp)
     }
 
     pub fn dir_equals(&self, directories: &[Directory]) -> bool {
@@ -609,9 +623,10 @@ where
                 .expect("yml_location should exist")
                 .to_str()
                 .expect("yml_location to_str should succeeded.");
-            self.copy_a_file(yml_location, self.get_remote_server_yml())?;
+            self.copy_a_file_sftp(yml_location, self.get_remote_server_yml(), &sftp)?;
 
             // execute cmd again.
+            let mut channel: ssh2::Channel = self.create_channel()?;
             channel.exec(cmd.as_str())?;
             channel_util::get_stdout_eprintln_stderr(&mut channel, true);
         }
@@ -672,8 +687,9 @@ where
             _ => bail!("there is no need to confirm remote sync."),
         };
         let cmd = format!(
-            "{} --app-role {} confirm-local-sync {}",
+            "{} --app-instance-id {} --app-role {} confirm-local-sync {}",
             self.server_yml.remote_exec,
+            self.app_conf.app_instance_id,
             app_role.to_str(),
             self.get_remote_server_yml(),
         );
@@ -684,6 +700,7 @@ where
     }
 
     pub fn confirm_local_sync(&self) -> Result<(), failure::Error> {
+        trace!("confirm sync, db file is: {:?}", self.get_db_file());
         let confirm_num = if let Some(db_access) = self.db_access.as_ref() {
             db_access.confirm_all()?
         } else {
@@ -1136,7 +1153,8 @@ mod tests {
             fs::remove_file(db_file.as_path())?;
         }
 
-        let remote_db_path = Path::new("./target/debug/data/passive-leaf-data/127.0.0.1/db.db");
+        let remote_db_path =
+            Path::new("./target/debug/data/passive-leaf-data/demo-app-instance-id/db.db");
 
         if remote_db_path.exists() {
             fs::remove_file(remote_db_path)?;
