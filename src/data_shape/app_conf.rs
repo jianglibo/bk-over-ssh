@@ -1,16 +1,14 @@
-use crate::data_shape::{Indicator, Server, ServerYml};
+use crate::data_shape::{Indicator, Server, ServerYml, string_path};
 use crate::db_accesses::DbAccess;
 use indicatif::MultiProgress;
 use log::{trace, warn};
 use serde::{Deserialize, Serialize};
-use std::str::FromStr;
 use std::env;
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use std::sync::Arc;
 use std::{fs, io::Read, io::Write};
-
-
 
 pub const CONF_FILE_NAME: &str = "bk_over_ssh.yml";
 
@@ -85,6 +83,7 @@ pub struct MailConf {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct AppConfYml {
+    app_instance_id: String,
     data_dir: String,
     log_conf: LogConf,
     pub mail_conf: MailConf,
@@ -95,6 +94,7 @@ pub struct AppConfYml {
 impl Default for AppConfYml {
     fn default() -> Self {
         Self {
+            app_instance_id: "an-pull-hub-instance".to_string(),
             data_dir: "data".to_string(),
             role: AppRole::PullHub,
             mail_conf: MailConf::default(),
@@ -139,6 +139,7 @@ pub struct MiniAppConf {
     pub skip_cron: bool,
     pub skip_sha1: bool,
     pub archive_cmd: Vec<String>,
+    pub app_instance_id: String,
     pub app_role: AppRole,
 }
 
@@ -187,6 +188,7 @@ where
         lock_file: None,
         progress_bar: None,
         mini_app_conf: MiniAppConf {
+            app_instance_id: "demo-app-instance-id".to_string(),
             skip_sha1: true,
             skip_cron: false,
             buf_len: None,
@@ -223,6 +225,12 @@ where
 
     pub fn skip_cron(&mut self) {
         self.mini_app_conf.skip_cron = true;
+    }
+
+    pub fn set_app_instance_id(&mut self, app_instance_id: impl AsRef<str>) {
+        let s = app_instance_id.as_ref().to_string();
+        self.inner.app_instance_id = s.clone();
+        self.mini_app_conf.app_instance_id = s;
     }
 
     pub fn not_skip_sha1(&mut self) {
@@ -287,6 +295,7 @@ where
                         }
 
                         let archive_cmd = app_conf_yml.archive_cmd.clone();
+                        let app_instance_id = app_conf_yml.app_instance_id.clone();
 
                         let app_conf = AppConf {
                             inner: app_conf_yml,
@@ -299,6 +308,7 @@ where
                             lock_file: None,
                             progress_bar: None,
                             mini_app_conf: MiniAppConf {
+                                app_instance_id,
                                 skip_sha1: true,
                                 skip_cron: false,
                                 buf_len: None,
@@ -448,6 +458,11 @@ where
         let name = name.as_ref();
         let mut server_yml_path = Path::new(name).to_path_buf();
         if (server_yml_path.is_absolute() || name.starts_with('/')) && !server_yml_path.exists() {
+            // create the directories above this server yml file.
+            if server_yml_path.is_absolute() {
+                let sp = string_path::SlashPath::new(name).parent().expect("server yml's parent directory should exist");
+                fs::create_dir_all(Path::new(sp.slash.as_str()))?;
+            }
             bail!(
                 "server yml file doesn't exist, please create one: {:?}",
                 server_yml_path
@@ -484,11 +499,16 @@ where
             fs::create_dir_all(&servers_data_dir)?;
         }
 
-        let mut server = Server::new(
-            self.mini_app_conf.clone(),
-            servers_data_dir.join(&server_yml.host),
-            server_yml,
-        )?;
+        // Server's my_dir is composed of the 'data' dir and the host name of the server.
+        // But for passive_leaf which host name it is?
+        // We must use command line app_instance_id to override the value in the app_conf_yml,
+        // Then use app_instance_id as my_dir.
+        let my_dir = match self.mini_app_conf.app_role {
+            AppRole::PassiveLeaf => servers_data_dir.join(self.inner.app_instance_id.as_str()),
+            _ => servers_data_dir.join(&server_yml.host),
+        };
+
+        let mut server = Server::new(self.mini_app_conf.clone(), my_dir, server_yml)?;
 
         if let Some(bl) = self.mini_app_conf.buf_len {
             server.server_yml.buf_len = bl;

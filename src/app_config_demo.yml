@@ -1,3 +1,7 @@
+app_instance_id: running-on-244
+# what is app_instance_id for? When run as a pull hub, this id determines the passive_leaf service's server-yml name.
+# For example, we are pulling files from a.b.c.d host, in a.b.c.d server's data/passive-leaf-conf/ folder there is a configuration file named running-on-244.yml.
+# This means we cannot pull the host from this machine more than one, but defferent machines can pull the same host, because they have different app_instance_id.
 role: pull_hub
 archive_cmd: 
   - C:/Program Files/7-Zip/7z.exe

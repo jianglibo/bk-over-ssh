@@ -1,7 +1,8 @@
 use super::{
-    load_remote_item, load_remote_item_to_sqlite, rolling_files, string_path, AppRole, AuthMethod,
-    Directory, FileItem, FileItemProcessResult, FileItemProcessResultStats, Indicator, MiniAppConf,
-    PbProperties, ProgressWriter, PruneStrategy, RemoteFileItem, ScheduleItem, SyncType,
+    app_conf, load_remote_item, load_remote_item_to_sqlite, rolling_files, string_path, AppRole,
+    AuthMethod, Directory, FileItem, FileItemProcessResult, FileItemProcessResultStats, Indicator,
+    MiniAppConf, PbProperties, ProgressWriter, PruneStrategy, RemoteFileItem, ScheduleItem,
+    SyncType,
 };
 use crate::actions::{channel_util, copy_a_file_item, SyncDirReport};
 use crate::db_accesses::{scheduler_util, DbAccess};
@@ -46,8 +47,8 @@ pub struct ServerYml {
     pub port: u16,
     pub rsync: RsyncConfig,
     pub remote_exec: String,
-    pub file_list_file: String,
-    pub remote_server_yml: String,
+    // pub file_list_file: String,
+    // pub remote_server_yml: String,
     pub username: String,
     pub password: String,
     pub directories: Vec<Directory>,
@@ -101,6 +102,10 @@ where
     M: r2d2::ManageConnection,
     D: DbAccess<M>,
 {
+    /// Server's my_dir is composed of the 'data' dir and the host name of the server.
+    /// But for passive_leaf which host name it is?
+    /// We must use command line app_instance_id to override the value in the app_conf_yml,
+    /// Then use app_instance_id as my_dir.
     pub fn new(
         app_conf: MiniAppConf,
         my_dir: PathBuf,
@@ -127,20 +132,24 @@ where
         match app_conf.app_role {
             AppRole::PullHub => {
                 server_yml.directories.iter_mut().try_for_each(|d| {
-                    d.compile_patterns().expect("compile_patterns should succeeded.");
+                    d.compile_patterns()
+                        .expect("compile_patterns should succeeded.");
                     d.normalize_pull_hub_sync(directories_dir.as_path())
                 })?;
             }
             AppRole::ActiveLeaf => {
                 server_yml.directories.iter_mut().try_for_each(|d| {
-                    d.compile_patterns().expect("compile_patterns should succeeded.");
+                    d.compile_patterns()
+                        .expect("compile_patterns should succeeded.");
                     d.normalize_active_leaf_sync(directories_dir.as_path())
                 })?;
             }
-            AppRole::PassiveLeaf => { // compiling patterns is enough.
-                server_yml.directories.iter_mut().try_for_each(|d| {
-                    d.compile_patterns()
-                })?;
+            AppRole::PassiveLeaf => {
+                // compiling patterns is enough.
+                server_yml
+                    .directories
+                    .iter_mut()
+                    .try_for_each(|d| d.compile_patterns())?;
             }
             _ => {
                 bail!("unexpected app_role: {:?}", app_conf.app_role);
@@ -160,11 +169,36 @@ where
             _m: PhantomData,
         })
     }
+    /// The passive leaf side of the application will try to find the configuration in the passive-leaf-conf folder which located in the same folder as the executable.
+    /// The server yml file should located in the data/passive-leaf-conf/{self.app_conf.app_instance_id}.yml
+    pub fn get_remote_server_yml(&self) -> String {
+        let sp = string_path::SlashPath::new(self.server_yml.remote_exec.as_str());
+        let yml = format!(
+            "/data/{}/{}.yml",
+            app_conf::PASSIVE_LEAF_CONF,
+            self.app_conf.app_instance_id
+        );
+        sp.parent()
+            .expect("the remote executable's parent directory should exist")
+            .join(yml)
+            .slash
+    }
+
+    /// located in the data/passive_leaf_data/{self.app_conf.app_instance_id}/file_list_file.txt
+    pub fn get_remote_file_list_file(&self) -> String {
+        let sp = string_path::SlashPath::new(self.server_yml.remote_exec.as_str());
+        let yml = format!(
+            "/data/{}/{}/file_list_file.txt",
+            app_conf::PASSIVE_LEAF_DATA,
+            self.app_conf.app_instance_id
+        );
+        sp.parent()
+            .expect("the remote executable's parent directory should exist")
+            .join(yml)
+            .slash
+    }
 
     pub fn set_db_access(&mut self, db_access: D) {
-        // if let Err(err) = db_access.create_database() {
-        //     warn!("create database failed: {:?}", err);
-        // }
         self.db_access.replace(db_access);
     }
 
@@ -182,11 +216,10 @@ where
 
     /// From the view of the server, it's an out direction.
     pub fn copy_a_file(
-        &mut self,
+        &self,
         local: impl AsRef<str>,
         remote: impl AsRef<str>,
     ) -> Result<(), failure::Error> {
-        self.connect()?;
         let local = local.as_ref();
         let remote = remote.as_ref();
         let sftp: ssh2::Sftp = self.session.as_ref().unwrap().sftp()?;
@@ -203,10 +236,6 @@ where
         }
         Ok(())
     }
-
-    // pub fn pb_finish(&self) {
-    //     self.pb.pb_finish();
-    // }
 
     pub fn dir_equals(&self, directories: &[Directory]) -> bool {
         let ss: Vec<&String> = self
@@ -539,28 +568,55 @@ where
         let mut channel: ssh2::Channel = self.create_channel()?;
         let app_role = match self.app_conf.app_role {
             AppRole::PullHub => AppRole::PassiveLeaf,
-            _ => bail!("list_remote_file_sftp: unsupported app role. {:?}", self.app_conf.app_role),
+            _ => bail!(
+                "list_remote_file_sftp: unsupported app role. {:?}",
+                self.app_conf.app_role
+            ),
         };
         let cmd = format!(
-            "{} {} --app-role {} list-local-files {} --out {}",
+            "{} {} --app-instance-id {} --app-role {} list-local-files {} --out {}",
             self.server_yml.remote_exec,
             if self.is_skip_sha1() {
                 ""
             } else {
                 "--enable-sha1"
             },
+            self.app_conf.app_instance_id,
             app_role.to_str(),
-            self.server_yml.remote_server_yml,
-            self.server_yml.file_list_file,
+            self.get_remote_server_yml(),
+            self.get_remote_file_list_file(),
         );
         trace!("invoking list remote files by sftp command: {:?}", cmd);
         channel.exec(cmd.as_str())?;
-        let out_op = channel_util::get_stdout_eprintln_stderr(&mut channel, true);
-
-        trace!("exec output: {:?}", out_op);
+        let (std_out, std_err) = channel_util::get_stdout_eprintln_stderr(&mut channel, true);
 
         let sftp = self.session.as_ref().unwrap().sftp()?;
-        let mut f = sftp.open(Path::new(&self.server_yml.file_list_file))?;
+
+        if std_err.find("server yml file doesn").is_some()
+            || std_out.find("server yml file doesn").is_some()
+        {
+            // warn!("remote directory doesn't exist, mkdir this directory.");
+            // let sp = string_path::SlashPath::new(self.get_remote_server_yml())
+            //     .parent()
+            //     .expect("remote_server_yml parent should exist");
+            // let p = Path::new(sp.slash.as_str());
+            // sftp.mkdir(p, 0o_0022)?;
+
+            // now copy server yml to remote.
+            let yml_location = self
+                .yml_location
+                .as_ref()
+                .expect("yml_location should exist")
+                .to_str()
+                .expect("yml_location to_str should succeeded.");
+            self.copy_a_file(yml_location, self.get_remote_server_yml())?;
+
+            // execute cmd again.
+            channel.exec(cmd.as_str())?;
+            channel_util::get_stdout_eprintln_stderr(&mut channel, true);
+        }
+
+        let mut f = sftp.open(Path::new(&self.get_remote_file_list_file().as_str()))?;
 
         let working_file = self.get_working_file_list_file();
         let mut wf = fs::OpenOptions::new()
@@ -619,7 +675,7 @@ where
             "{} --app-role {} confirm-local-sync {}",
             self.server_yml.remote_exec,
             app_role.to_str(),
-            self.server_yml.remote_server_yml,
+            self.get_remote_server_yml(),
         );
         info!("invoking remote command: {:?}", cmd);
         channel.exec(cmd.as_str())?;
@@ -640,16 +696,17 @@ where
     pub fn list_remote_file_exec(&self, no_db: bool) -> Result<PathBuf, failure::Error> {
         let mut channel: ssh2::Channel = self.create_channel()?;
         let cmd = format!(
-            "{} {} --app-role {} {} list-local-files {}",
+            "{} {} --app-instance-id {} --app-role {} {} list-local-files {}",
             self.server_yml.remote_exec,
             if self.is_skip_sha1() {
                 ""
             } else {
                 "--enable-sha1"
             },
+            self.app_conf.app_instance_id,
             self.app_conf.app_role.to_str(),
             if no_db { " --no-db" } else { "" },
-            self.server_yml.remote_server_yml,
+            self.get_remote_server_yml(),
         );
         info!("invoking list remote files command: {:?}", cmd);
         channel.exec(cmd.as_str())?;

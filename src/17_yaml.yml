@@ -35,6 +35,11 @@ args:
             - active_leaf
             - receive_hub
             - passive_leaf
+    - app-instance-id:
+        help: The app role if cann't infer from the command line parameters.
+        long: app-instance-id
+        required: false
+        takes_value: true
     - conf:
         help: the path of app configuration file, if not present the app will try to guess one.
         long: conf

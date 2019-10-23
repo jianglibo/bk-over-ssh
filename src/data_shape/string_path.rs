@@ -46,7 +46,6 @@ impl SlashPath {
             bail!("no parent for slash_path: {}", self.slash);
         }
         let vs: Vec<&str> = self.slash.rsplitn(2, '/').collect();
-        eprintln!("split {:?}", vs);
         if vs.len() != 2 {
             bail!("no parent for slash_path: {}", self.slash);
         } else {

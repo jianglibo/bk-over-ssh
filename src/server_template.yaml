@@ -6,8 +6,19 @@ username: jianglibo
 password: ~
 auth_method: IdentityFile # Password, Agent, IdentityFile.
 remote_exec: /home/osboxes/ws/bk-over-ssh/target/debug/bk-over-ssh
-remote_server_yml: /home/osboxes/ws/bk-over-ssh/data/servers/localhost.yml
-file_list_file: /home/jianglibo/file_list_file.txt
+# remote_server_yml: /home/osboxes/ws/bk-over-ssh/data/servers/localhost.yml
+# depends on app_role, the remote_server_yml means vary. for passive_leaf it's better to determined by pulling side.
+# For example, the pulling side invoke a relative server-yml name, passive_leaf side will find it in the folder "passive-leaf-conf" in the same dirctory as the executable.
+# ├─ executable.exe
+# ├─ data
+#     ├─ passive-leaf-conf
+#          aaa.yml
+#     ├
+#     ├─ passive-leaf-data
+#          aaa/
+#             db.db
+#              file_list_file.txt
+# file_list_file: /home/jianglibo/file_list_file.txt
 buf_len: 8192
 use_db: true
 skip_sha1: true

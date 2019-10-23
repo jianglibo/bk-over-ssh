@@ -70,6 +70,10 @@ fn main() -> Result<(), failure::Error> {
         }
     };
 
+    if let Some(aii) =  m.value_of("app-instance-id") {
+        app_conf.set_app_instance_id(aii);
+    }
+
     if m.is_present("skip-cron") {
         app_conf.skip_cron();
     }
@@ -211,7 +215,7 @@ fn main_entry<'a>(
             }
         }
         ("copy-executable", Some(sub_matches)) => {
-            let (mut server, _indicator) =
+            let (server, _indicator) =
                 command::load_server_yml(app_conf, sub_matches.value_of("server-yml"), false)?;
             let executable = sub_matches.value_of("executable").unwrap();
             let remote = server.server_yml.remote_exec.clone();
@@ -241,9 +245,9 @@ fn main_entry<'a>(
             }
         }
         ("copy-server-yml", Some(sub_matches)) => {
-            let (mut server, _indicator) =
+            let (server, _indicator) =
                 command::load_server_yml(app_conf, sub_matches.value_of("server-yml"), false)?;
-            let remote = server.server_yml.remote_server_yml.clone();
+            let remote = server.get_remote_server_yml();
             let local = server
                 .yml_location
                 .as_ref()

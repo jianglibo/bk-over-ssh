@@ -23,7 +23,7 @@ pub fn verify_server_yml(mut server: Server<SqliteConnectionManager, SqliteDbAcc
                     server.server_yml.remote_exec, err
                 );
             } else {
-                let rp = server.server_yml.remote_server_yml.clone();
+                let rp = server.get_remote_server_yml();
                 match server.get_remote_file_content(&rp) {
                     Ok(content) => {
                         let ss: ServerYml = serde_yaml::from_str(content.as_str())?;
