@@ -87,7 +87,6 @@ pub struct AppConfYml {
     data_dir: String,
     log_conf: LogConf,
     pub mail_conf: MailConf,
-    role: AppRole,
     archive_cmd: Vec<String>,
 }
 
@@ -96,7 +95,7 @@ impl Default for AppConfYml {
         Self {
             app_instance_id: "an-pull-hub-instance".to_string(),
             data_dir: "data".to_string(),
-            role: AppRole::PullHub,
+            // role: AppRole::PullHub,
             mail_conf: MailConf::default(),
             log_conf: LogConf::default(),
             archive_cmd: Vec::new(),
