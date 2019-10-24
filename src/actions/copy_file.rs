@@ -581,6 +581,26 @@ fn update_local_file_from_restored(local_file_path: impl AsRef<str>) -> Result<(
     Ok(())
 }
 
+pub fn copy_a_file_sftp(
+        local: impl AsRef<str>,
+        remote: impl AsRef<str>,
+        sftp: &ssh2::Sftp,
+    ) -> Result<(), failure::Error> {
+        let local = local.as_ref();
+        let remote = remote.as_ref();
+        if let Ok(mut r_file) = sftp.create(Path::new(remote)) {
+            let mut l_file = fs::File::open(local)?;
+            io::copy(&mut l_file, &mut r_file)?;
+        } else {
+            bail!(
+                "copy from {:?} to {:?} failed. maybe remote file's parent dir didn't exists.",
+                local,
+                remote
+            );
+        }
+        Ok(())
+    }
+
 pub fn copy_a_file_item<'a, M, D>(
     server: &Server<M, D>,
     sftp: &ssh2::Sftp,
@@ -634,12 +654,14 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data_shape::{FileItem, FileItemProcessResult, RemoteFileItem, Server, SyncType, AppRole};
+    use crate::data_shape::{FileItem, FileItemProcessResult, RemoteFileItem, Server, SyncType, AppRole, string_path};
     use crate::develope::tutil;
+    use crate::actions::{ssh_util};
     use crate::log_util;
     use std::panic;
     use std::{fs, io};
     use std::io::{Read};
+    
 
     fn log() {
         log_util::setup_logger_detail(
@@ -683,6 +705,17 @@ mod tests {
             println!("{:?}", entry);
         })
         .expect("success");
+    }
+
+    #[test]
+    fn t_copy_executable() -> Result<(), failure::Error> {
+        let tu = tutil::TestDir::new();
+        let dir_str = tu.tmp_dir_str();
+        let f_path_buf = tu.make_a_file_with_content("a.txt", "abc")?;
+        let remote_dir_str = string_path::SlashPath::new(dir_str).join("a/b/c/d/e.txt").slash;
+        
+        
+        Ok(())
     }
 
     #[test]
@@ -790,4 +823,5 @@ mod tests {
 
         eprintln!("{:?}", p);
     }
+
 }

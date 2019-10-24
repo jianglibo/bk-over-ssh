@@ -1,29 +1,29 @@
-pub mod misc;
-pub mod sync_dirs;
 pub mod archives;
+pub mod misc;
 pub mod rsync;
-
+pub mod sync_dirs;
 
 use crate::db_accesses::{DbAccess, SqliteDbAccess};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use std::env;
 use std::sync::Arc;
 use std::thread;
-use std::time::{Duration};
+use std::time::Duration;
 use std::{fs, io::Write};
 
-use crate::data_shape::{AppConf, Indicator, Server, CONF_FILE_NAME, AppRole};
+use crate::data_shape::{
+    AppConf, AppRole, Indicator, ReadAppConfException, Server,
+};
 use r2d2_sqlite::SqliteConnectionManager;
 
+pub use archives::archive_local;
 pub use sync_dirs::{sync_pull_dirs, sync_push_dirs};
-pub use archives::{archive_local};
 
 pub fn wait_progress_bar_finish(jh: Option<thread::JoinHandle<()>>) {
     if let Some(t) = jh {
-        t.join().expect("wait_progress_bar_finish should succeeded.");
+        t.join()
+            .expect("wait_progress_bar_finish should succeeded.");
     }
 }
-
 
 pub fn join_multi_bars(multi_bar: Option<Arc<MultiProgress>>) -> Option<thread::JoinHandle<()>> {
     if let Some(mb) = multi_bar {
@@ -59,7 +59,11 @@ pub fn load_server_yml(
     server_yml: Option<&str>,
     open_db: bool,
 ) -> Result<(Server<SqliteConnectionManager, SqliteDbAccess>, Indicator), failure::Error> {
-    load_server_yml_by_name(app_conf, server_yml.expect("server-yml should exist."), open_db)
+    load_server_yml_by_name(
+        app_conf,
+        server_yml.expect("server-yml should exist."),
+        open_db,
+    )
 }
 
 // pub fn load_this_server_yml(
@@ -74,16 +78,22 @@ pub fn load_server_yml(
 //     Ok(s)
 // }
 
-pub fn load_all_server_yml(app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>, open_db: bool) -> Vec<(Server<SqliteConnectionManager, SqliteDbAccess>, Indicator)> {
-    app_conf.load_all_server_yml().into_iter().map(|mut s|{
-        if open_db {
-            let sqlite_db_access = SqliteDbAccess::new(s.0.get_db_file());
-            s.0.set_db_access(sqlite_db_access);
-        }
-        s
-    }).collect()
+pub fn load_all_server_yml(
+    app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
+    open_db: bool,
+) -> Vec<(Server<SqliteConnectionManager, SqliteDbAccess>, Indicator)> {
+    app_conf
+        .load_all_server_yml()
+        .into_iter()
+        .map(|mut s| {
+            if open_db {
+                let sqlite_db_access = SqliteDbAccess::new(s.0.get_db_file());
+                s.0.set_db_access(sqlite_db_access);
+            }
+            s
+        })
+        .collect()
 }
-
 
 pub fn load_server_yml_by_name(
     app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
@@ -109,30 +119,25 @@ where
 {
     let message_pb = ProgressBar::new_spinner();
     message_pb.enable_steady_tick(200);
-    let app_conf = match AppConf::guess_conf_file(conf, app_role_op.as_ref().cloned().unwrap_or(AppRole::PullHub)) {
-        Ok(cfg) => {
-            if let Some(cfg) = cfg {
-                cfg
-            } else if !re_try {
+    let app_conf = match AppConf::guess_conf_file(
+        conf,
+        app_role_op.as_ref().cloned().unwrap_or(AppRole::PullHub),
+    ) {
+        Ok(cfg) => cfg,
+        Err(ReadAppConfException::SerdeDeserializeFailed(conf_file_path)) => {
+            if !re_try {
                 let bytes = include_bytes!("../app_config_demo.yml");
-                let path = env::current_exe()?
-                    .parent()
-                    .expect("current_exec's parent folder should exists.")
-                    .join(CONF_FILE_NAME);
                 let mut file = fs::OpenOptions::new()
                     .write(true)
                     .create(true)
-                    .open(&path)?;
+                    .open(conf_file_path.as_path())?;
                 file.write_all(bytes)?;
-                message_pb.finish_and_clear();
                 return process_app_config(conf, app_role_op, true);
             } else {
-                bail!("re_try read app_conf failed!");
+                bail!("deserialize app_conf failed again.");
             }
         }
-        Err(err) => {
-            bail!("Read app configuration file failed:{:?}, {:?}", conf, err);
-        }
+        Err(err) => bail!("Read app configuration file failed:{:?}, {:?}", conf, err),
     };
 
     let message = format!(

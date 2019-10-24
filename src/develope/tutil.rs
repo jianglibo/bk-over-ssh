@@ -78,6 +78,7 @@ impl TestDir {
         self.tmp_dir.path()
     }
 
+    /// Returns the str representation of TestDir.
     #[allow(dead_code)]
     pub fn tmp_dir_str(&self) -> &str {
         self.tmp_dir_path().to_str().unwrap()
@@ -140,7 +141,7 @@ impl TestDir {
         &self,
         file_name: impl AsRef<str>,
         content: impl AsRef<str>,
-    ) -> Result<(), failure::Error> {
+    ) -> Result<PathBuf, failure::Error> {
         let tmp_file = self.tmp_dir.path().join(file_name.as_ref());
         let mut tmp_file_writer = BufWriter::new(
             fs::OpenOptions::new()
@@ -150,7 +151,7 @@ impl TestDir {
                 .open(&tmp_file)?,
         );
         write!(tmp_file_writer, "{}", content.as_ref())?;
-        Ok(())
+        Ok(tmp_file)
     }
 
     pub fn make_a_file_with_len(

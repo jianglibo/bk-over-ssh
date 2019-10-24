@@ -215,12 +215,13 @@ fn main_entry<'a>(
             }
         }
         ("copy-executable", Some(sub_matches)) => {
-            let (server, _indicator) =
+            let (mut server, _indicator) =
                 command::load_server_yml(app_conf, sub_matches.value_of("server-yml"), false)?;
-            let executable = sub_matches.value_of("executable").unwrap();
+            let executable = sub_matches.value_of("executable").expect("executable paramter missing");
+            server.connect()?;
             let remote = server.server_yml.remote_exec.clone();
             server.copy_a_file(executable, &remote)?;
-            println!(
+            eprintln!(
                 "copy from {} to {} {} succeeded.",
                 executable,
                 server.get_host(),

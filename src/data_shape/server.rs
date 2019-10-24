@@ -4,7 +4,7 @@ use super::{
     MiniAppConf, PbProperties, ProgressWriter, PruneStrategy, RemoteFileItem, ScheduleItem,
     SyncType,
 };
-use crate::actions::{channel_util, copy_a_file_item, SyncDirReport};
+use crate::actions::{copy_a_file_item, copy_a_file_sftp, ssh_util, SyncDirReport};
 use crate::db_accesses::{scheduler_util, DbAccess};
 use bzip2::write::BzEncoder;
 use bzip2::Compression;
@@ -17,7 +17,6 @@ use ssh2;
 use std::ffi::OsString;
 use std::io::prelude::{BufRead, Read};
 use std::marker::PhantomData;
-use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
@@ -220,35 +219,14 @@ where
         self.server_yml.port
     }
 
-    fn copy_a_file_sftp(
-        &self,
-        local: impl AsRef<str>,
-        remote: impl AsRef<str>,
-        sftp: &ssh2::Sftp,
-    ) -> Result<(), failure::Error> {
-        let local = local.as_ref();
-        let remote = remote.as_ref();
-        if let Ok(mut r_file) = sftp.create(Path::new(remote)) {
-            let mut l_file = fs::File::open(local)?;
-            io::copy(&mut l_file, &mut r_file)?;
-        } else {
-            bail!(
-                "copy from {:?} to {:?} failed. maybe remote file's parent dir didn't exists.",
-                local,
-                remote
-            );
-        }
-        Ok(())
-    }
-
     /// From the view of the server, it's an out direction.
     pub fn copy_a_file(
         &self,
         local: impl AsRef<str>,
         remote: impl AsRef<str>,
     ) -> Result<(), failure::Error> {
-        let sftp = self.session.as_ref().unwrap().sftp()?;
-        self.copy_a_file_sftp(local, remote, &sftp)
+        let sftp = self.session.as_ref().expect("is ssh connected?").sftp()?;
+        copy_a_file_sftp(local, remote, &sftp)
     }
 
     pub fn dir_equals(&self, directories: &[Directory]) -> bool {
@@ -499,55 +477,20 @@ where
 
     fn create_ssh_session(&self) -> Result<ssh2::Session, failure::Error> {
         let url = format!("{}:{}", self.get_host(), self.get_port());
-        trace!("connecting to: {}", url);
-        let tcp = TcpStream::connect(&url)?;
-        if let Ok(mut sess) = ssh2::Session::new() {
-            sess.set_tcp_stream(tcp);
-            sess.handshake()?;
-            match self.server_yml.auth_method {
-                AuthMethod::Agent => {
-                    let mut agent = sess.agent()?;
-                    agent.connect()?;
-                    agent.list_identities()?;
-
-                    for id in agent.identities() {
-                        match id {
-                            Ok(identity) => {
-                                trace!("start authenticate with public key.");
-                                if let Err(err) =
-                                    agent.userauth(&self.server_yml.username, &identity)
-                                {
-                                    warn!("ssh agent authentication failed. {:?}", err);
-                                } else {
-                                    break;
-                                }
-                            }
-                            Err(err) => warn!("can't get key from ssh agent {:?}.", err),
-                        }
-                    }
-                }
-                AuthMethod::IdentityFile => {
-                    trace!(
-                        "about authenticate to {:?} with IdentityFile: {:?}",
-                        url,
-                        self.server_yml.id_rsa_pub,
-                    );
-                    sess.userauth_pubkey_file(
-                        &self.server_yml.username,
-                        self.server_yml.id_rsa_pub.as_ref().map(Path::new),
-                        Path::new(&self.server_yml.id_rsa),
-                        None,
-                    )
-                    .expect("userauth_pubkey_file should succeeded.");
-                }
-                AuthMethod::Password => {
-                    sess.userauth_password(&self.server_yml.username, &self.server_yml.password)
-                        .expect("userauth_password should succeeded.");
-                }
-            }
-            Ok(sess)
-        } else {
-            bail!("Session::new failed.");
+        let username = self.server_yml.username.as_str();
+        match self.server_yml.auth_method {
+            AuthMethod::Agent => ssh_util::create_ssh_session_agent(url.as_str(), username),
+            AuthMethod::IdentityFile => ssh_util::create_ssh_session_identity_file(
+                url.as_str(),
+                username,
+                self.server_yml.id_rsa.as_str(),
+                self.server_yml.id_rsa_pub.as_ref().map(|ds| ds.as_str()),
+            ),
+            AuthMethod::Password => ssh_util::create_ssh_session_password(
+                url.as_str(),
+                username,
+                self.server_yml.password.as_str(),
+            ),
         }
     }
 
@@ -602,7 +545,7 @@ where
         );
         trace!("invoking list remote files by sftp command: {:?}", cmd);
         channel.exec(cmd.as_str())?;
-        let (std_out, std_err) = channel_util::get_stdout_eprintln_stderr(&mut channel, true);
+        let (std_out, std_err) = ssh_util::get_stdout_eprintln_stderr(&mut channel, true);
 
         let sftp = self.session.as_ref().unwrap().sftp()?;
 
@@ -623,12 +566,12 @@ where
                 .expect("yml_location should exist")
                 .to_str()
                 .expect("yml_location to_str should succeeded.");
-            self.copy_a_file_sftp(yml_location, self.get_remote_server_yml(), &sftp)?;
+            copy_a_file_sftp(yml_location, self.get_remote_server_yml(), &sftp)?;
 
             // execute cmd again.
             let mut channel: ssh2::Channel = self.create_channel()?;
             channel.exec(cmd.as_str())?;
-            channel_util::get_stdout_eprintln_stderr(&mut channel, true);
+            ssh_util::get_stdout_eprintln_stderr(&mut channel, true);
         }
 
         let mut f = sftp.open(Path::new(&self.get_remote_file_list_file().as_str()))?;
@@ -695,7 +638,7 @@ where
         );
         info!("invoking remote command: {:?}", cmd);
         channel.exec(cmd.as_str())?;
-        channel_util::get_stdout_eprintln_stderr(&mut channel, true);
+        ssh_util::get_stdout_eprintln_stderr(&mut channel, true);
         Ok(())
     }
 
@@ -1090,6 +1033,7 @@ mod tests {
     use bzip2::write::{BzDecoder, BzEncoder};
     use bzip2::Compression;
     use glob::Pattern;
+    use std::net::TcpStream;
     // use indicatif::MultiProgress;
     use std::fs;
     use std::io::{self};

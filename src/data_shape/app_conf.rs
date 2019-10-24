@@ -1,6 +1,7 @@
-use crate::data_shape::{Indicator, Server, ServerYml, string_path};
+use crate::data_shape::{string_path, Indicator, Server, ServerYml};
 use crate::db_accesses::DbAccess;
 use indicatif::MultiProgress;
+use log::*;
 use log::{trace, warn};
 use serde::{Deserialize, Serialize};
 use std::env;
@@ -164,6 +165,16 @@ where
     pub mini_app_conf: MiniAppConf,
 }
 
+#[derive(Debug)]
+pub enum ReadAppConfException {
+    AppConfFileNotExist(PathBuf),
+    ReadAppConfFileFailed(PathBuf),
+    SerdeDeserializeFailed(PathBuf),
+    GuessDataDirFailed,
+    CreateServersConfDirFailed,
+    GuessAppConfNameFailed,
+}
+
 pub fn demo_app_conf<M, D>(data_dir: &str, app_role: AppRole) -> AppConf<M, D>
 where
     M: r2d2::ManageConnection,
@@ -236,20 +247,25 @@ where
         self.mini_app_conf.skip_sha1 = false;
     }
 
+    /// If parse app configuration file failed, move the failed configuration file to bak. recreate a fresh new one.
     fn read_app_conf(
         file: impl AsRef<Path>,
         app_role: AppRole,
-    ) -> Result<Option<AppConf<M, D>>, failure::Error> {
-        if !file.as_ref().exists() {
-            return Ok(None);
-        }
+    ) -> Result<AppConf<M, D>, ReadAppConfException> {
         let file = file.as_ref();
+        if !file.exists() {
+            return Err(ReadAppConfException::AppConfFileNotExist(file.to_path_buf()));
+        }
         if let Ok(mut f) = fs::OpenOptions::new().read(true).open(file) {
             let mut buf = String::new();
             if f.read_to_string(&mut buf).is_ok() {
                 match serde_yaml::from_str::<AppConfYml>(&buf) {
                     Ok(app_conf_yml) => {
-                        let data_dir_full_path = guess_data_dir(app_conf_yml.data_dir.trim())?;
+                        let data_dir_full_path = if let Ok(gdd) = guess_data_dir(app_conf_yml.data_dir.trim()) {
+                            gdd
+                        } else {
+                            return Err(ReadAppConfException::GuessDataDirFailed);
+                        };
 
                         let log_full_path = {
                             let log_file = &app_conf_yml.log_conf.log_file;
@@ -285,11 +301,12 @@ where
 
                         if !servers_conf_dir.exists() {
                             if let Err(err) = fs::create_dir_all(&servers_conf_dir) {
-                                bail!(
+                                error!(
                                     "create servers_conf_dir {:?}, failed: {:?}",
                                     &servers_conf_dir,
                                     err
                                 );
+                                return Err(ReadAppConfException::CreateServersConfDirFailed);
                             }
                         }
 
@@ -315,15 +332,20 @@ where
                                 app_role,
                             },
                         };
-                        Ok(Some(app_conf))
+                        Ok(app_conf)
                     }
-                    Err(err) => bail!("deserialize failed: {:?}, {:?}", file, err),
+                    Err(err) => {
+                        error!("deserialize failed: {:?}, {:?}", file, err);
+                        return Err(ReadAppConfException::SerdeDeserializeFailed(file.to_path_buf()));
+                    }
                 }
             } else {
-                bail!("read_to_string failure: {:?}", file);
+                error!("read_to_string failure: {:?}", file);
+                return Err(ReadAppConfException::ReadAppConfFileFailed(file.to_path_buf()));
             }
         } else {
-            bail!("open conf file failed: {:?}", file);
+            error!("open conf file failed: {:?}", file);
+            return Err(ReadAppConfException::ReadAppConfFileFailed(file.to_path_buf()));
         }
     }
 
@@ -344,28 +366,43 @@ where
     pub fn guess_conf_file(
         app_conf_file: Option<&str>,
         app_role: AppRole,
-    ) -> Result<Option<AppConf<M, D>>, failure::Error> {
-        if let Some(af) = app_conf_file {
-            return AppConf::read_app_conf(af, app_role);
-        } else {
-            if let Ok(current_exe) = env::current_exe() {
-                if let Some(pp) = current_exe.parent() {
-                    let cf = pp.join(CONF_FILE_NAME);
-                    trace!("found configuration file: {:?}", &cf);
-                    if let Some(af) = AppConf::read_app_conf(&cf, app_role.clone())? {
-                        // if it returned None, continue searching.
-                        return Ok(Some(af));
-                    }
-                }
-            }
+    ) -> Result<AppConf<M, D>, ReadAppConfException> {
 
-            if let Ok(current_dir) = env::current_dir() {
-                let cf = current_dir.join(CONF_FILE_NAME);
-                trace!("found configuration file: {:?}", &cf);
-                return AppConf::read_app_conf(&cf, app_role);
-            }
-        }
-        bail!("read app_conf failed.")
+        let app_conf_file = if app_conf_file.is_some() && Path::new(app_conf_file.unwrap()).exists() {
+            PathBuf::from(app_conf_file.unwrap())
+        } else if let Ok(current_exe) = env::current_exe() {
+            current_exe.parent().expect("current_exe's parent should exist").join(CONF_FILE_NAME)
+        } else if let Ok(current_dir) = env::current_dir() {
+            current_dir.join(CONF_FILE_NAME)
+        } else {
+            return Err(ReadAppConfException::GuessAppConfNameFailed);
+        };
+
+        AppConf::read_app_conf(app_conf_file, app_role)
+
+        // if let Some(af) = app_conf_file {
+        //     if let Ok(af) = AppConf::read_app_conf(af, app_role) {
+        //         return Ok(Some(af))
+        //     }
+        // } else {
+        //     if let Ok(current_exe) = env::current_exe() {
+        //         if let Some(pp) = current_exe.parent() {
+        //             let cf = pp.join(CONF_FILE_NAME);
+        //             trace!("found configuration file: {:?}", &cf);
+        //             if let Some(af) = AppConf::read_app_conf(&cf, app_role.clone())? {
+        //                 // if it returned None, continue searching.
+        //                 return Ok(Some(af));
+        //             }
+        //         }
+        //     }
+
+        //     if let Ok(current_dir) = env::current_dir() {
+        //         let cf = current_dir.join(CONF_FILE_NAME);
+        //         trace!("found configuration file: {:?}", &cf);
+        //         return AppConf::read_app_conf(&cf, app_role);
+        //     }
+        // }
+        // bail!("read app_conf failed.")
     }
 
     pub fn lock_working_file(&mut self) -> Result<(), failure::Error> {
@@ -459,7 +496,9 @@ where
         if (server_yml_path.is_absolute() || name.starts_with('/')) && !server_yml_path.exists() {
             // create the directories above this server yml file.
             if server_yml_path.is_absolute() {
-                let sp = string_path::SlashPath::new(name).parent().expect("server yml's parent directory should exist");
+                let sp = string_path::SlashPath::new(name)
+                    .parent()
+                    .expect("server yml's parent directory should exist");
                 fs::create_dir_all(Path::new(sp.slash.as_str()))?;
             }
             bail!(

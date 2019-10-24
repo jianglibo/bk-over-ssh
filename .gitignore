@@ -9,3 +9,4 @@ develope_env.yaml
 /servers
 bk_over_ssh.yml
 /data
+/.env
