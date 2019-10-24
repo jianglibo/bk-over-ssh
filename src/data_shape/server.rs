@@ -226,7 +226,7 @@ where
         remote: impl AsRef<str>,
     ) -> Result<(), failure::Error> {
         let sftp = self.session.as_ref().expect("is ssh connected?").sftp()?;
-        copy_a_file_sftp(local, remote, &sftp)
+        Ok(copy_a_file_sftp(&sftp, local, remote)?)
     }
 
     pub fn dir_equals(&self, directories: &[Directory]) -> bool {
@@ -552,13 +552,6 @@ where
         if std_err.find("server yml file doesn").is_some()
             || std_out.find("server yml file doesn").is_some()
         {
-            // warn!("remote directory doesn't exist, mkdir this directory.");
-            // let sp = string_path::SlashPath::new(self.get_remote_server_yml())
-            //     .parent()
-            //     .expect("remote_server_yml parent should exist");
-            // let p = Path::new(sp.slash.as_str());
-            // sftp.mkdir(p, 0o_0022)?;
-
             // now copy server yml to remote.
             let yml_location = self
                 .yml_location
@@ -566,7 +559,9 @@ where
                 .expect("yml_location should exist")
                 .to_str()
                 .expect("yml_location to_str should succeeded.");
-            copy_a_file_sftp(yml_location, self.get_remote_server_yml(), &sftp)?;
+            if let Err(err) = copy_a_file_sftp(&sftp, yml_location, self.get_remote_server_yml()) {
+                bail!("sftp copy failed: {:?}", err);
+            }
 
             // execute cmd again.
             let mut channel: ssh2::Channel = self.create_channel()?;

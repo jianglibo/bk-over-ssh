@@ -12,6 +12,8 @@ use std::ffi::OsStr;
 use std::io::prelude::Write;
 use std::path::Path;
 use std::{fs, io, io::BufRead};
+use std::fmt;
+use std::error::Error as StdError;
 
 #[allow(dead_code)]
 pub fn copy_file_to_stream(
@@ -581,25 +583,73 @@ fn update_local_file_from_restored(local_file_path: impl AsRef<str>) -> Result<(
     Ok(())
 }
 
-pub fn copy_a_file_sftp(
-        local: impl AsRef<str>,
-        remote: impl AsRef<str>,
-        sftp: &ssh2::Sftp,
-    ) -> Result<(), failure::Error> {
-        let local = local.as_ref();
-        let remote = remote.as_ref();
-        if let Ok(mut r_file) = sftp.create(Path::new(remote)) {
-            let mut l_file = fs::File::open(local)?;
-            io::copy(&mut l_file, &mut r_file)?;
-        } else {
-            bail!(
-                "copy from {:?} to {:?} failed. maybe remote file's parent dir didn't exists.",
-                local,
-                remote
-            );
-        }
-        Ok(())
+#[derive(Debug)]
+pub enum SftpException {
+    NoSuchFile,
+    OpenLocalFailed,
+    CopyStreamFailed,
+    Unknown,
+}
+
+impl fmt::Display for SftpException {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let a = match self {
+            SftpException::NoSuchFile => "no such file",
+            SftpException::OpenLocalFailed => "open local failed",
+            SftpException::CopyStreamFailed => "copy stream failed",
+            SftpException::Unknown => "unknown",
+        };
+        write!(f, "{}", a)
     }
+}
+
+impl StdError for SftpException {
+    fn description(&self) -> &str {
+        "one of 4 possible sftp errors."
+    }
+
+    fn cause(&self) -> Option<&dyn StdError> {
+        None
+    }
+}
+
+pub fn copy_a_file_sftp(
+    sftp: &ssh2::Sftp,
+    local: impl AsRef<str>,
+    remote: impl AsRef<str>,
+) -> Result<(), SftpException> {
+    let local = local.as_ref();
+    let remote = remote.as_ref();
+    match sftp.create(Path::new(remote)) {
+        Ok(mut r_file) => match fs::File::open(local) {
+            Ok(mut l_file) => match io::copy(&mut l_file, &mut r_file) {
+                Ok(_) => Ok(()),
+                Err(err) => {
+                    error!("sftp copy failed: {:?}", err);
+                    Err(SftpException::CopyStreamFailed)
+                }
+            },
+            Err(err) => {
+                error!("sftp open local file failed: {:?}", err);
+                Err(SftpException::OpenLocalFailed)
+            }
+        },
+        Err(err) => {
+            error!(
+                "copy from {:?} to {:?} failed. maybe remote file's parent dir didn't exists. err: {:?}",
+                local,
+                remote,
+                err
+            );
+            // no such file
+            if err.code() == 2 {
+                Err(SftpException::NoSuchFile)
+            } else {
+                Err(SftpException::Unknown)
+            }
+        }
+    }
+}
 
 pub fn copy_a_file_item<'a, M, D>(
     server: &Server<M, D>,
@@ -654,14 +704,17 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data_shape::{FileItem, FileItemProcessResult, RemoteFileItem, Server, SyncType, AppRole, string_path};
+    use crate::actions::{copy_a_file_sftp, ssh_util};
+    use crate::data_shape::{
+        string_path, AppRole, FileItem, FileItemProcessResult, RemoteFileItem, Server, SyncType,
+    };
     use crate::develope::tutil;
-    use crate::actions::{ssh_util};
     use crate::log_util;
+    use dotenv::dotenv;
+    use std::env;
+    use std::io::Read;
     use std::panic;
     use std::{fs, io};
-    use std::io::{Read};
-    
 
     fn log() {
         log_util::setup_logger_detail(
@@ -688,7 +741,13 @@ mod tests {
         D: DbAccess<M>,
     {
         let ri = RemoteFileItem::new(remote_relative_path, remote_file_len);
-        let fi = FileItem::new(local_base_dir, remote_base_dir, ri, sync_type, &AppRole::PullHub);
+        let fi = FileItem::new(
+            local_base_dir,
+            remote_base_dir,
+            ri,
+            sync_type,
+            &AppRole::PullHub,
+        );
         let sftp = server.get_ssh_session().sftp()?;
         let mut buf = vec![0; 8192];
         let app_conf = tutil::load_demo_app_conf_sqlite(None, AppRole::PullHub);
@@ -712,9 +771,33 @@ mod tests {
         let tu = tutil::TestDir::new();
         let dir_str = tu.tmp_dir_str();
         let f_path_buf = tu.make_a_file_with_content("a.txt", "abc")?;
-        let remote_dir_str = string_path::SlashPath::new(dir_str).join("a/b/c/d/e.txt").slash;
-        
-        
+        let remote_dir_str = string_path::SlashPath::new(dir_str)
+            .join("a/b/c/d/e.txt")
+            .slash;
+        dotenv().ok();
+        let username = env::var("username")?;
+        let password = env::var("password")?;
+        let sess = ssh_util::create_ssh_session_password(
+            "localhost:22",
+            username.as_str(),
+            password.as_str(),
+        )?;
+        let sftp = sess.sftp()?;
+        eprintln!("copy {:?} to {:?}", f_path_buf, remote_dir_str);
+        if let Err(err) = copy_a_file_sftp(
+            &sftp,
+            f_path_buf.to_str().expect("f_path_buf to_str failed."),
+            remote_dir_str.as_str(),
+        ) {
+            if let SftpException::NoSuchFile = err {
+                let mut channel = sess.channel_session()?;
+                channel.exec("failed")?;
+            } else {
+                bail!("sftp failed: {:?}", err);
+            }
+        };
+
+        assert!(Path::new(remote_dir_str.as_str()).exists());
         Ok(())
     }
 
@@ -823,5 +906,4 @@ mod tests {
 
         eprintln!("{:?}", p);
     }
-
 }

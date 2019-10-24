@@ -254,18 +254,21 @@ where
     ) -> Result<AppConf<M, D>, ReadAppConfException> {
         let file = file.as_ref();
         if !file.exists() {
-            return Err(ReadAppConfException::AppConfFileNotExist(file.to_path_buf()));
+            return Err(ReadAppConfException::AppConfFileNotExist(
+                file.to_path_buf(),
+            ));
         }
         if let Ok(mut f) = fs::OpenOptions::new().read(true).open(file) {
             let mut buf = String::new();
             if f.read_to_string(&mut buf).is_ok() {
                 match serde_yaml::from_str::<AppConfYml>(&buf) {
                     Ok(app_conf_yml) => {
-                        let data_dir_full_path = if let Ok(gdd) = guess_data_dir(app_conf_yml.data_dir.trim()) {
-                            gdd
-                        } else {
-                            return Err(ReadAppConfException::GuessDataDirFailed);
-                        };
+                        let data_dir_full_path =
+                            if let Ok(gdd) = guess_data_dir(app_conf_yml.data_dir.trim()) {
+                                gdd
+                            } else {
+                                return Err(ReadAppConfException::GuessDataDirFailed);
+                            };
 
                         let log_full_path = {
                             let log_file = &app_conf_yml.log_conf.log_file;
@@ -303,8 +306,7 @@ where
                             if let Err(err) = fs::create_dir_all(&servers_conf_dir) {
                                 error!(
                                     "create servers_conf_dir {:?}, failed: {:?}",
-                                    &servers_conf_dir,
-                                    err
+                                    &servers_conf_dir, err
                                 );
                                 return Err(ReadAppConfException::CreateServersConfDirFailed);
                             }
@@ -336,16 +338,22 @@ where
                     }
                     Err(err) => {
                         error!("deserialize failed: {:?}, {:?}", file, err);
-                        return Err(ReadAppConfException::SerdeDeserializeFailed(file.to_path_buf()));
+                        Err(ReadAppConfException::SerdeDeserializeFailed(
+                            file.to_path_buf(),
+                        ))
                     }
                 }
             } else {
                 error!("read_to_string failure: {:?}", file);
-                return Err(ReadAppConfException::ReadAppConfFileFailed(file.to_path_buf()));
+                Err(ReadAppConfException::ReadAppConfFileFailed(
+                    file.to_path_buf(),
+                ))
             }
         } else {
             error!("open conf file failed: {:?}", file);
-            return Err(ReadAppConfException::ReadAppConfFileFailed(file.to_path_buf()));
+            Err(ReadAppConfException::ReadAppConfFileFailed(
+                file.to_path_buf(),
+            ))
         }
     }
 
@@ -367,11 +375,23 @@ where
         app_conf_file: Option<&str>,
         app_role: AppRole,
     ) -> Result<AppConf<M, D>, ReadAppConfException> {
+        let app_conf_file = if let Some(app_conf_file) = app_conf_file {
+            if Path::new(app_conf_file).exists() {
+                Some(PathBuf::from(app_conf_file))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
 
-        let app_conf_file = if app_conf_file.is_some() && Path::new(app_conf_file.unwrap()).exists() {
-            PathBuf::from(app_conf_file.unwrap())
+        let app_conf_file = if let Some(app_conf_file) = app_conf_file {
+            app_conf_file
         } else if let Ok(current_exe) = env::current_exe() {
-            current_exe.parent().expect("current_exe's parent should exist").join(CONF_FILE_NAME)
+            current_exe
+                .parent()
+                .expect("current_exe's parent should exist")
+                .join(CONF_FILE_NAME)
         } else if let Ok(current_dir) = env::current_dir() {
             current_dir.join(CONF_FILE_NAME)
         } else {
