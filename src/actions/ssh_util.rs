@@ -70,16 +70,15 @@ pub fn create_ssh_session_password(
     Ok(sess)
 }
 
-pub fn get_stdout_eprintln_stderr(
-    channel: &mut ssh2::Channel,
-    eprint_stdout: bool,
-) -> (String, String) {
+pub fn get_stdout_eprintln_stderr(channel: &mut ssh2::Channel, verbose: bool) -> (String, String) {
     let mut s = String::new();
     let std_out = if let Err(err) = channel.read_to_string(&mut s) {
-        eprintln!("read channel stdout failure: {:?}", err);
+        if verbose {
+            eprintln!("read channel stdout failure: {:?}", err);
+        }
         "".to_string()
     } else {
-        if eprint_stdout {
+        if verbose {
             eprintln!("std_out: {}", s);
         }
         s
@@ -87,10 +86,14 @@ pub fn get_stdout_eprintln_stderr(
 
     let mut s = String::new();
     let std_err = if let Err(err) = channel.stderr().read_to_string(&mut s) {
-        eprintln!("read channel stderr failure: {:?}", err);
+        if verbose {
+            eprintln!("read channel stderr failure: {:?}", err);
+        }
         "".to_string()
     } else {
-        eprintln!("std_err: {}", s);
+        if verbose {
+            eprintln!("std_err: {}", s);
+        }
         s
     };
 

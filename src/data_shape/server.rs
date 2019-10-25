@@ -545,7 +545,7 @@ where
         );
         trace!("invoking list remote files by sftp command: {:?}", cmd);
         channel.exec(cmd.as_str())?;
-        let (std_out, std_err) = ssh_util::get_stdout_eprintln_stderr(&mut channel, true);
+        let (std_out, std_err) = ssh_util::get_stdout_eprintln_stderr(&mut channel, self.app_conf.verbose);
 
         let sftp = self.session.as_ref().unwrap().sftp()?;
 

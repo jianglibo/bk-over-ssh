@@ -141,6 +141,7 @@ pub struct MiniAppConf {
     pub archive_cmd: Vec<String>,
     pub app_instance_id: String,
     pub app_role: AppRole,
+    pub verbose: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -204,6 +205,7 @@ where
             buf_len: None,
             archive_cmd: Vec::new(),
             app_role,
+            verbose: false,
         },
     }
 }
@@ -332,6 +334,7 @@ where
                                 buf_len: None,
                                 archive_cmd,
                                 app_role,
+                                verbose: false,
                             },
                         };
                         Ok(app_conf)
@@ -462,10 +465,12 @@ where
         yml_file_name: impl AsRef<str>,
     ) -> Result<(Server<M, D>, Indicator), failure::Error> {
         let server = self.load_server_from_yml(yml_file_name.as_ref())?;
-        eprintln!(
-            "load server yml from: {:?}",
-            server.yml_location.as_ref().map(|pb| pb.as_os_str())
-        );
+        if self.mini_app_conf.verbose {
+            eprintln!(
+                "load server yml from: {:?}",
+                server.yml_location.as_ref().map(|pb| pb.as_os_str())
+            );
+        }
         let indicator = Indicator::new(self.progress_bar.clone());
         Ok((server, indicator))
     }

@@ -97,6 +97,8 @@ fn main() -> Result<(), failure::Error> {
         ""
     };
 
+    app_conf.mini_app_conf.verbose = !verbose.is_empty();
+    
     log_util::setup_logger_for_this_app(
         console_log,
         app_conf.log_full_path.as_path(),
