@@ -107,7 +107,7 @@ impl Signature {
     pub fn signature<R: io::BufRead, B: AsRef<[u8]> + AsMut<[u8]>> (
         mut r: R,
         mut buff: B,
-        pb: &Indicator,
+        progress_bar: &Indicator,
     ) -> Result<Signature, failure::Error> {
         let mut chunks = HashMap::new();
         let mut i = 0;
@@ -118,11 +118,7 @@ impl Signature {
             while j < buff.len() {
                 // full fill the block. for the last block, maybe not full.
                 let r = r.read(&mut buff[j..])?;
-                // if let Some(pb) = pb.as_ref() {
-                //     pb.inc(r as u64);
-                // }
-                // bp(r as u64);
-                pb.inc_pb(r as u64);
+                progress_bar.inc_pb(r as u64);
                 if r == 0 {
                     eof = true;
                     break;

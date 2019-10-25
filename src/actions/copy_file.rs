@@ -31,7 +31,7 @@ pub fn copy_stream_to_file_with_cb<T: AsRef<Path>>(
     to_file: T,
     buf: &mut [u8],
     // mut counter: F,
-    pb: &Indicator,
+    progress_bar: &Indicator,
 ) -> Result<u64, failure::Error> {
     let mut length = 0_u64;
     let path = to_file.as_ref();
@@ -48,7 +48,7 @@ pub fn copy_stream_to_file_with_cb<T: AsRef<Path>>(
                 let nn = n as u64;
                 length += nn;
                 wf.write_all(&buf[..n])?;
-                pb.inc_pb(nn);
+                progress_bar.inc_pb(nn);
             }
             Ok(_) => {
                 trace!("end copy_stream_to_file_with_cb when read zero byte.");
@@ -99,10 +99,8 @@ pub fn copy_stream_to_file_return_sha1_with_cb<T: AsRef<Path>>(
     from: &mut impl std::io::Read,
     to_file: T,
     buf: &mut [u8],
-    // mut counter: F,
-    pb: &Indicator,
+    progress_bar: &Indicator,
 ) -> Result<(u64, String), failure::Error> {
-    // let u8_buf = &mut vec![0; buf_len];
     let mut length = 0_u64;
     let mut hasher = Sha1::new();
     let path = to_file.as_ref();
@@ -120,7 +118,7 @@ pub fn copy_stream_to_file_return_sha1_with_cb<T: AsRef<Path>>(
                 wf.write_all(&buf[..n])?;
                 hasher.input(&buf[..n]);
                 // counter(length);
-                pb.inc_pb(length);
+                progress_bar.inc_pb(length);
             }
             Ok(_) => {
                 trace!("end copy_stream_to_file_return_sha1_with_cb when read zero byte");
@@ -201,6 +199,7 @@ pub fn visit_dirs(dir: &Path, cb: &dyn Fn(&fs::DirEntry)) -> io::Result<()> {
     }
     Ok(())
 }
+
 #[allow(dead_code)]
 pub fn copy_a_file_item_scp<'a>(
     session: &mut ssh2::Session,
@@ -468,7 +467,7 @@ fn sftp_file_with_progress(
 pub fn invoke_remote_ssh_command_receive_progress(
     cmd: impl AsRef<str>,
     mut channel: ssh2::Channel,
-    pb: &Indicator,
+    progress_bar: &Indicator,
 ) -> Result<(), failure::Error> {
     let cmd = cmd.as_ref();
     trace!("about to invoke command: {:?}", cmd);
@@ -480,7 +479,7 @@ pub fn invoke_remote_ssh_command_receive_progress(
         if line.starts_with("size:") {
             let (_, d) = line.split_at(5);
             let i = d.parse::<u64>().ok().unwrap_or(!0);
-                pb.alter_pb(PbProperties {
+                progress_bar.alter_pb(PbProperties {
         reset: true,
         set_style: Some(ProgressStyle::default_bar().template("[{eta_precise}] {bytes_per_sec} {decimal_bytes}/{decimal_total_bytes} {bar:30.cyan/blue} {wide_msg}").progress_chars("#-")),
         set_message: Some("start calculating delta file.".to_string()),
@@ -489,7 +488,7 @@ pub fn invoke_remote_ssh_command_receive_progress(
     });
         } else {
             let i =  line.parse::<u64>().ok().unwrap_or(0);
-            pb.inc_pb(i);
+            progress_bar.inc_pb(i);
         }
     });
     Ok(())
@@ -500,7 +499,7 @@ pub fn copy_a_file_item_rsync<'a, M, D>(
     sftp: &ssh2::Sftp,
     local_file_path: String,
     file_item: &FileItem<'a>,
-    pb: &Indicator,
+    progress_bar: &Indicator,
 ) -> Result<FileItemProcessResult, failure::Error>
 where
     M: r2d2::ManageConnection,
@@ -509,7 +508,7 @@ where
     let remote_file_name = file_item.get_remote_file_name();
     trace!("start signature_a_file {}", &local_file_path);
     let mut sig =
-        Signature::signature_a_file(&local_file_path, Some(server.server_yml.rsync.window), pb)?;
+        Signature::signature_a_file(&local_file_path, Some(server.server_yml.rsync.window), progress_bar)?;
 
     let local_sig_file_name = format!("{}.sig", local_file_path);
     sig.write_to_file(&local_sig_file_name)?;
@@ -521,7 +520,7 @@ where
         &local_sig_file_name,
         &remote_sig_file_name,
         format!("start upload signature file. {:?}", &local_sig_file_name),
-        pb,
+        progress_bar,
     )?;
 
     let remote_delta_file_name = format!("{}.delta", &remote_file_name);
@@ -534,7 +533,7 @@ where
     );
 
     let channel: ssh2::Channel = server.create_channel()?;
-    invoke_remote_ssh_command_receive_progress(cmd, channel, pb)?;
+    invoke_remote_ssh_command_receive_progress(cmd, channel, progress_bar)?;
 
     let local_delta_file_name = format!("{}.delta", local_file_path);
 
@@ -543,7 +542,7 @@ where
         &remote_delta_file_name,
         &local_delta_file_name,
         format!("start download delta file. {:?}", &local_delta_file_name),
-        pb,
+        progress_bar,
     )?;
 
     let local_delta_file = fs::OpenOptions::new()

@@ -566,7 +566,7 @@ where
             // execute cmd again.
             let mut channel: ssh2::Channel = self.create_channel()?;
             channel.exec(cmd.as_str())?;
-            ssh_util::get_stdout_eprintln_stderr(&mut channel, true);
+            ssh_util::get_stdout_eprintln_stderr(&mut channel, self.app_conf.verbose);
         }
 
         let mut f = sftp.open(Path::new(&self.get_remote_file_list_file().as_str()))?;
@@ -633,7 +633,7 @@ where
         );
         info!("invoking remote command: {:?}", cmd);
         channel.exec(cmd.as_str())?;
-        ssh_util::get_stdout_eprintln_stderr(&mut channel, true);
+        ssh_util::get_stdout_eprintln_stderr(&mut channel, self.app_conf.verbose);
         Ok(())
     }
 
@@ -736,12 +736,12 @@ where
     fn start_sync<R: BufRead>(
         &self,
         file_item_lines: R,
-        pb: &mut Indicator,
+        progress_bar: &mut Indicator,
     ) -> Result<FileItemProcessResultStats, failure::Error> {
         let mut current_remote_dir = Option::<String>::None;
         let mut current_local_dir = Option::<&Path>::None;
         let mut consume_count = 0u64;
-        let count_and_len_op = if pb.is_some() {
+        let count_and_len_op = if progress_bar.is_some() {
             self.get_pb_count_and_len().ok()
         } else {
             None
@@ -757,13 +757,13 @@ where
         //     let style = ProgressStyle::default_bar().template("{bytes_per_sec:10} {decimal_bytes:>8}/{decimal_total_bytes:8} {spinner} {percent:>4}% {eta:5} {wide_msg}").progress_chars("#-");
         //     pb_item.set_style(style);
         // }
-        pb.active_pb_total().alter_pb(PbProperties {
-            set_style: Some(ProgressStyle::default_bar().template("{prefix} {bytes_per_sec} {decimal_bytes}/{decimal_total_bytes} {bar:30.cyan/blue} {percent}% {eta}").progress_chars("#-")),
+        progress_bar.active_pb_total().alter_pb(PbProperties {
+            set_style: Some(ProgressStyle::default_bar().template("{prefix} {bytes_per_sec: 11} {decimal_bytes:>11}/{decimal_total_bytes} {bar:30.cyan/blue} {percent}% {eta}").progress_chars("#-")),
             set_length: count_and_len_op.map(|cl| cl.1),
             ..PbProperties::default()
         });
 
-        pb.active_pb_item().alter_pb(PbProperties {
+        progress_bar.active_pb_item().alter_pb(PbProperties {
             set_style: Some(ProgressStyle::default_bar().template("{bytes_per_sec:10} {decimal_bytes:>8}/{decimal_total_bytes:8} {spinner} {percent:>4}% {eta:5} {wide_msg}").progress_chars("#-")),
             ..PbProperties::default()
         });
@@ -805,7 +805,7 @@ where
                                 );
                                 consume_count += 1;
 
-                                pb.active_pb_item().alter_pb(PbProperties {
+                                progress_bar.active_pb_item().alter_pb(PbProperties {
                                     set_length: Some(remote_len),
                                     set_message: Some(
                                         local_item.get_remote_item().get_path().to_owned(),
@@ -819,7 +819,7 @@ where
                                 // let r = if self.server_yml.use_db || local_item.had_changed() { // even use_db still check change or not.
                                 let r = if local_item.had_changed() {
                                     trace!("file had changed. start copy_a_file_item.");
-                                    copy_a_file_item(&self, &sftp, local_item, &mut buff, pb)
+                                    copy_a_file_item(&self, &sftp, local_item, &mut buff, progress_bar)
                                 } else {
                                     skipped = true;
                                     FileItemProcessResult::Skipped(
@@ -828,8 +828,8 @@ where
                                         ),
                                     )
                                 };
-                                if pb.is_some() {
-                                    pb.active_pb_total().alter_pb(PbProperties {
+                                if progress_bar.is_some() {
+                                    progress_bar.active_pb_total().alter_pb(PbProperties {
                                         set_prefix: Some(format!(
                                             "[{}] {}/{} ",
                                             self.get_host(),
@@ -840,7 +840,7 @@ where
                                         ..PbProperties::default()
                                     });
                                     if skipped {
-                                        pb.active_pb_item().inc_pb_item(remote_len);
+                                        progress_bar.active_pb_item().inc_pb_item(remote_len);
                                     }
                                 }
                                 r
