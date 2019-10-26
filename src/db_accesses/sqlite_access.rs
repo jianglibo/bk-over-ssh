@@ -502,7 +502,7 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data_shape::{load_remote_item_to_sqlite, Directory};
+    use crate::data_shape::{load_remote_item_to_sqlite, Directory, string_path::SlashPath};
     use crate::develope::tutil;
     use crate::log_util;
     use chrono::{offset::TimeZone, Utc};
@@ -699,7 +699,7 @@ mod tests {
         t_dir.make_a_file_with_content("b.tar", "abc")?;
 
         let dir = Directory {
-            remote_dir: t_dir.tmp_dir_str().to_owned(),
+            remote_dir: SlashPath::new(t_dir.tmp_dir_str().to_owned()),
             ..Default::default()
         };
 
@@ -802,7 +802,7 @@ mod tests {
         t_dir.make_a_file_with_content("abc2012010203.zip", "abc")?;
 
         let dir = Directory {
-            remote_dir: t_dir.tmp_dir_str().to_owned(),
+            remote_dir: SlashPath::new(t_dir.tmp_dir_str().to_owned()),
             ..Default::default()
         };
 

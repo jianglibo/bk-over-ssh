@@ -629,7 +629,7 @@ mod tests {
     #[test]
     fn t_app_conf_deserd() -> Result<(), failure::Error> {
         let yml = r##"---
-role: controller
+app_instance_id: demo-app-instance-id
 archive_cmd: 
   - C:/Program Files/7-Zip/7z.exe
   - a

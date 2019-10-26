@@ -1,5 +1,6 @@
 use super::Directory;
 use crate::actions::hash_file_sha1;
+use crate::data_shape::SlashPath;
 use crate::db_accesses::{DbAccess, RemoteFileItemInDb};
 use itertools::Itertools;
 use log::*;
@@ -7,7 +8,7 @@ use r2d2;
 use serde::{Deserialize, Serialize};
 use std::io;
 use std::iter::Iterator;
-use std::path::{Path, PathBuf};
+use std::path::{PathBuf};
 use std::time::SystemTime;
 use walkdir::WalkDir;
 
@@ -23,7 +24,7 @@ pub struct RemoteFileItem {
 }
 
 impl RemoteFileItem {
-    pub fn from_path(base_path: impl AsRef<Path>, path: PathBuf, skip_sha1: bool) -> Option<Self> {
+    pub fn from_path(base_path: &SlashPath, path: PathBuf, skip_sha1: bool) -> Option<Self> {
         let metadata_r = path.metadata();
         match metadata_r {
             Ok(metadata) => {
@@ -32,30 +33,24 @@ impl RemoteFileItem {
                 } else {
                     Option::<String>::None
                 };
-                // if let Some(sha1) = hash_file_sha1(&path) {
-                let relative_o = path.strip_prefix(&base_path).ok().and_then(|p| p.to_str());
-                if let Some(relative) = relative_o {
-                    return Some(Self {
-                        path: relative.to_string(),
-                        sha1,
-                        len: metadata.len(),
-                        modified: metadata
-                            .modified()
-                            .ok()
-                            .and_then(|st| st.duration_since(SystemTime::UNIX_EPOCH).ok())
-                            .map(|d| d.as_secs()),
-                        created: metadata
-                            .created()
-                            .ok()
-                            .and_then(|st| st.duration_since(SystemTime::UNIX_EPOCH).ok())
-                            .map(|d| d.as_secs()),
-                        changed: false,
-                        confirmed: false,
-                    });
-                } else {
-                    error!("RemoteFileItem path name to_str() failed. {:?}", path);
-                }
-                // }
+
+                return Some(Self {
+                    path: base_path.strip_prefix(path.as_path()),
+                    sha1,
+                    len: metadata.len(),
+                    modified: metadata
+                        .modified()
+                        .ok()
+                        .and_then(|st| st.duration_since(SystemTime::UNIX_EPOCH).ok())
+                        .map(|d| d.as_secs()),
+                    created: metadata
+                        .created()
+                        .ok()
+                        .and_then(|st| st.duration_since(SystemTime::UNIX_EPOCH).ok())
+                        .map(|d| d.as_secs()),
+                    changed: false,
+                    confirmed: false,
+                });
             }
             Err(err) => {
                 error!("RemoteFileItem from_path failed: {:?}, {:?}", path, err);
@@ -133,18 +128,24 @@ where
         skip_sha1,
         sql_batch_size
     );
-    let base_path = directory.get_remote_canonicalized_dir_str()?;
-    let dir_id = db_access.insert_directory(base_path.as_str())?;
+    // let base_path = directory.get_remote_canonicalized_dir_str()?;
+    let base_path = directory.remote_dir.as_str();
+    // let dir_id = db_access.insert_directory(base_path.as_str())?;
+    let dir_id = db_access.insert_directory(base_path)?;
 
     if sql_batch_size > 1 {
-        WalkDir::new(&base_path)
+        // WalkDir::new(&base_path)
+        WalkDir::new(&directory.remote_dir.as_path())
             .follow_links(false)
             .into_iter()
             .filter_map(|e| e.ok())
             .filter(|d| d.file_type().is_file())
             .filter_map(|d| d.path().canonicalize().ok())
             .filter_map(|d| directory.match_path(d))
-            .filter_map(|d| RemoteFileItemInDb::from_path(&base_path, d, skip_sha1, dir_id))
+            // .filter_map(|d| RemoteFileItemInDb::from_path(&base_path, d, skip_sha1, dir_id))
+            .filter_map(|d| {
+                RemoteFileItemInDb::from_path(&directory.remote_dir, d, skip_sha1, dir_id)
+            })
             .filter(|rfi| !(rfi.path.ends_with(sig_ext) || rfi.path.ends_with(delta_ext)))
             .filter_map(|rfi| db_access.insert_or_update_remote_file_item(rfi, true))
             .map(|(rfi, da)| rfi.to_sql_string(&da))
@@ -163,7 +164,10 @@ where
             .filter(|d| d.file_type().is_file())
             .filter_map(|d| d.path().canonicalize().ok())
             .filter_map(|d| directory.match_path(d))
-            .filter_map(|d| RemoteFileItemInDb::from_path(&base_path, d, skip_sha1, dir_id))
+            .filter_map(|d| {
+                RemoteFileItemInDb::from_path(&directory.remote_dir, d, skip_sha1, dir_id)
+            })
+            // .filter_map(|d| RemoteFileItemInDb::from_path(&base_path, d, skip_sha1, dir_id))
             .filter_map(|rfi| db_access.insert_or_update_remote_file_item(rfi, false))
             .count();
     }
@@ -179,16 +183,17 @@ where
     O: io::Write,
 {
     trace!("load_remote_item, skip_sha1: {}", skip_sha1);
-    let base_path = directory.get_remote_canonicalized_dir_str()?;
-    writeln!(out, "{}", base_path)?;
-    WalkDir::new(&base_path)
+    // let base_path = directory.get_remote_canonicalized_dir_str()?;
+    // writeln!(out, "{}", base_path)?;
+    // WalkDir::new(&base_path)
+    WalkDir::new(directory.remote_dir.as_path())
         .follow_links(false)
         .into_iter()
         .filter_map(|e| e.ok())
         .filter(|d| d.file_type().is_file())
         .filter_map(|d| d.path().canonicalize().ok())
         .filter_map(|d| directory.match_path(d))
-        .filter_map(|d| RemoteFileItem::from_path(&base_path, d, skip_sha1))
+        .filter_map(|d| RemoteFileItem::from_path(&directory.remote_dir, d, skip_sha1))
         .for_each(|rfi| match serde_json::to_string(&rfi) {
             Ok(line) => {
                 if let Err(err) = writeln!(out, "{}", line) {

@@ -2,7 +2,7 @@ use super::{
     app_conf, load_remote_item, load_remote_item_to_sqlite, rolling_files, string_path, AppRole,
     AuthMethod, Directory, FileItem, FileItemProcessResult, FileItemProcessResultStats, Indicator,
     MiniAppConf, PbProperties, ProgressWriter, PruneStrategy, RemoteFileItem, ScheduleItem,
-    SyncType,
+    SlashPath, SyncType,
 };
 use crate::actions::{copy_a_file_item, copy_a_file_sftp, ssh_util, SyncDirReport};
 use crate::db_accesses::{scheduler_util, DbAccess};
@@ -22,6 +22,8 @@ use std::process::Command;
 use std::time::Instant;
 use std::{fs, io, io::Seek};
 use tar::Builder;
+
+const FILE_LIST_FILE_NAME: &str = "file_list_file.txt";
 
 #[derive(Deserialize, Debug, Serialize)]
 #[serde(rename_all(deserialize = "snake_case"))]
@@ -72,6 +74,7 @@ where
 {
     pub server_yml: ServerYml,
     session: Option<ssh2::Session>,
+    // for passive_leaf node, it's dependent on invoking parameter of app_instance_id.
     my_dir: PathBuf,
     reports_dir: PathBuf,
     archives_dir: PathBuf,
@@ -189,18 +192,23 @@ where
             .slash
     }
 
-    /// located in the data/passive_leaf_data/{self.app_conf.app_instance_id}/file_list_file.txt
-    pub fn get_remote_file_list_file(&self) -> String {
+    /// located in the data/passive-leaf-data/{self.app_conf.app_instance_id}/file_list_file.txt
+    pub fn get_passive_leaf_file_list_file(&self) -> String {
         let sp = string_path::SlashPath::new(self.server_yml.remote_exec.as_str());
         let yml = format!(
-            "/data/{}/{}/file_list_file.txt",
+            "/data/{}/{}/{}",
             app_conf::PASSIVE_LEAF_DATA,
-            self.app_conf.app_instance_id
+            self.app_conf.app_instance_id,
+            FILE_LIST_FILE_NAME,
         );
         sp.parent()
             .expect("the remote executable's parent directory should exist")
             .join(yml)
             .slash
+    }
+
+    pub fn get_active_leaf_file_list_file(&self) -> PathBuf {
+        self.my_dir.join(FILE_LIST_FILE_NAME)
     }
 
     pub fn set_db_access(&mut self, db_access: D) {
@@ -230,13 +238,13 @@ where
     }
 
     pub fn dir_equals(&self, directories: &[Directory]) -> bool {
-        let ss: Vec<&String> = self
+        let ss: Vec<&SlashPath> = self
             .server_yml
             .directories
             .iter()
             .map(|d| &d.remote_dir)
             .collect();
-        let ass: Vec<&String> = directories.iter().map(|d| &d.remote_dir).collect();
+        let ass: Vec<&SlashPath> = directories.iter().map(|d| &d.remote_dir).collect();
         ss == ass
     }
 
@@ -364,7 +372,7 @@ where
 
         for dir in self.server_yml.directories.iter() {
             let len = dir.count_total_size();
-            let d_path = Path::new(&dir.local_dir);
+            let d_path = &dir.local_dir.as_path();
             if let Some(d_path_name) = d_path.file_name() {
                 if d_path.exists() {
                     pb.set_message_pb_total(format!(
@@ -412,7 +420,7 @@ where
                     if s == "archive_file_name" {
                         cur_archive_name.to_owned()
                     } else if s == "files_and_dirs" {
-                        OsString::from(&dir.local_dir)
+                        dir.local_dir.get_os_string()
                     } else {
                         OsString::from(s)
                     }
@@ -541,11 +549,12 @@ where
             self.app_conf.app_instance_id,
             app_role.to_str(),
             self.get_remote_server_yml(),
-            self.get_remote_file_list_file(),
+            self.get_passive_leaf_file_list_file(),
         );
         trace!("invoking list remote files by sftp command: {:?}", cmd);
         channel.exec(cmd.as_str())?;
-        let (std_out, std_err) = ssh_util::get_stdout_eprintln_stderr(&mut channel, self.app_conf.verbose);
+        let (std_out, std_err) =
+            ssh_util::get_stdout_eprintln_stderr(&mut channel, self.app_conf.verbose);
 
         let sftp = self.session.as_ref().unwrap().sftp()?;
 
@@ -569,7 +578,7 @@ where
             ssh_util::get_stdout_eprintln_stderr(&mut channel, self.app_conf.verbose);
         }
 
-        let mut f = sftp.open(Path::new(&self.get_remote_file_list_file().as_str()))?;
+        let mut f = sftp.open(Path::new(&self.get_passive_leaf_file_list_file().as_str()))?;
 
         let working_file = self.get_working_file_list_file();
         let mut wf = fs::OpenOptions::new()
@@ -722,18 +731,46 @@ where
         Ok(self.count_and_len(&mut wfb))
     }
 
-    fn start_sync_working_file_list(
+    fn start_pull_sync_working_file_list(
         &self,
         pb: &mut Indicator,
     ) -> Result<FileItemProcessResultStats, failure::Error> {
         self.prepare_file_list()?;
         let working_file = &self.get_working_file_list_file();
         let rb = io::BufReader::new(fs::File::open(working_file)?);
-        self.start_sync(rb, pb)
+        self.start_pull_sync(rb, pb)
     }
 
-    /// Do not try to return item stream from this function. consume it locally, pass in function to alter the behavior.
-    fn start_sync<R: BufRead>(
+    fn start_push_sync_working_file_list(
+        &self,
+        pb: &mut Indicator,
+    ) -> Result<FileItemProcessResultStats, failure::Error> {
+        let mut o = fs::OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .open(self.get_active_leaf_file_list_file())?;
+        self.load_dirs(&mut o)?;
+
+        Ok(FileItemProcessResultStats::default())
+        // let working_file = &self.get_working_file_list_file();
+        // let rb = io::BufReader::new(fs::File::open(working_file)?);
+        // self.start_sync(rb, pb)
+    }
+
+    /// Do not try to return item stream from this function.
+    /// consume it locally, pass in function to alter the behavior.
+    ///
+    /// Take a reader as parameter, each line may be a directory name or a file name.
+    /// the file names are relative to last read directory line.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::fs;
+    ///
+    ///
+    /// ```
+    fn start_pull_sync<R: BufRead>(
         &self,
         file_item_lines: R,
         progress_bar: &mut Indicator,
@@ -779,7 +816,7 @@ where
                     None
                 }
                 Ok(line) => Some(line),
-            }) /*.collect::<Vec<String>>().into_par_iter()*/
+            })
             .map(|line| {
                 if line.starts_with('{') {
                     trace!("got item line {}", line);
@@ -863,11 +900,11 @@ where
                         .server_yml
                         .directories
                         .iter()
-                        .find(|d| string_path::path_equal(&d.remote_dir, &line));
+                        .find(|d| d.remote_dir.slash_equal_to(&line));
 
                     if let Some(found_directory) = found_directory {
                         current_remote_dir = Some(line.clone());
-                        current_local_dir = Some(Path::new(found_directory.local_dir.as_str()));
+                        current_local_dir = Some(found_directory.local_dir.as_path());
                         FileItemProcessResult::Directory(line)
                     } else {
                         // we compare the remote dir line with this server_yml.directories's remote dir
@@ -950,6 +987,28 @@ where
             }
     }
 
+    /// We can push files to multiple destinations simultaneously.
+    pub fn sync_push_dirs(
+        &self,
+        pb: &mut Indicator,
+    ) -> Result<Option<SyncDirReport>, failure::Error> {
+        if self.check_skip_cron("sync-push-dirs") {
+            info!(
+                "start sync_push_dirs on server: {} at: {}",
+                self.get_host(),
+                Local::now()
+            );
+            let start = Instant::now();
+            let started_at = Local::now();
+            let rs = self.start_push_sync_working_file_list(pb)?;
+            self.remove_working_file_list_file();
+            self.confirm_remote_sync()?;
+            Ok(Some(SyncDirReport::new(start.elapsed(), started_at, rs)))
+        } else {
+            Ok(None)
+        }
+    }
+
     pub fn sync_pull_dirs(
         &self,
         pb: &mut Indicator,
@@ -962,7 +1021,7 @@ where
             );
             let start = Instant::now();
             let started_at = Local::now();
-            let rs = self.start_sync_working_file_list(pb)?;
+            let rs = self.start_pull_sync_working_file_list(pb)?;
             self.remove_working_file_list_file();
             self.confirm_remote_sync()?;
             Ok(Some(SyncDirReport::new(start.elapsed(), started_at, rs)))
@@ -1022,6 +1081,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::data_shape::string_path::SlashPath;
     use crate::db_accesses::{DbAccess, SqliteDbAccess};
     use crate::develope::tutil;
     use crate::log_util;
@@ -1103,7 +1163,7 @@ mod tests {
         sqlite_db_access.create_database()?;
         server.set_db_access(sqlite_db_access);
 
-        let a_dir_string = server
+        let a_dir = server
             .server_yml
             .directories
             .iter()
@@ -1111,7 +1171,8 @@ mod tests {
             .expect("should have a directory who's remote_dir end with 'a-dir'")
             .local_dir
             .clone();
-        let a_dir = Path::new(a_dir_string.as_str());
+
+        let a_dir = a_dir.as_path();
         if a_dir.exists() {
             info!("remove directory: {:?}", a_dir);
             fs::remove_dir_all(a_dir)?;
@@ -1211,7 +1272,7 @@ mod tests {
         log_util::setup_logger_empty();
         let mut cur = tutil::get_a_cursor_writer();
         let mut one_dir = Directory {
-            remote_dir: "fixtures/a-dir".to_string(),
+            remote_dir: SlashPath::new("fixtures/a-dir"),
             ..Directory::default()
         };
 
@@ -1223,7 +1284,7 @@ mod tests {
 
         let mut cur = tutil::get_a_cursor_writer();
         let mut one_dir = Directory {
-            remote_dir: "fixtures/a-dir".to_string(),
+            remote_dir: SlashPath::new("fixtures/a-dir"),
             includes: vec!["**/fixtures/a-dir/b/b.txt".to_string()],
             ..Directory::default()
         };
@@ -1236,7 +1297,7 @@ mod tests {
 
         let mut cur = tutil::get_a_cursor_writer();
         let mut one_dir = Directory {
-            remote_dir: "fixtures/a-dir".to_string(),
+            remote_dir: SlashPath::new("fixtures/a-dir"),
             excludes: vec!["**/fixtures/a-dir/b/b.txt".to_string()],
             ..Directory::default()
         };
@@ -1249,7 +1310,7 @@ mod tests {
 
         let mut cur = tutil::get_a_cursor_writer();
         let mut one_dir = Directory {
-            remote_dir: "fixtures/a-dir".to_string(),
+            remote_dir: SlashPath::new("fixtures/a-dir"),
             excludes: vec!["**/Tomcat6/logs/**".to_string()],
             ..Directory::default()
         };

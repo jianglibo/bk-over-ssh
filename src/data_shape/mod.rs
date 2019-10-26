@@ -1,24 +1,28 @@
 pub mod app_conf;
+pub mod count_reader;
+pub mod disk_directory;
 pub mod file_item;
+pub mod file_item_directory;
+pub mod indicator;
 pub mod remote_file_item;
 pub mod rolling_files;
 pub mod server;
-pub mod string_path;
-pub mod disk_directory;
-pub mod writer_with_progress;
 pub mod sha1_reader;
-pub mod count_reader;
-pub mod indicator;
+pub mod string_path;
+pub mod writer_with_progress;
 
-pub use app_conf::{AppConf, MailConf, CONF_FILE_NAME, demo_app_conf, MiniAppConf, AppRole, ReadAppConfException};
+pub use app_conf::{
+    demo_app_conf, AppConf, AppRole, MailConf, MiniAppConf, ReadAppConfException, CONF_FILE_NAME,
+};
+pub use count_reader::CountReader;
+pub use disk_directory::Directory;
 pub use file_item::{FileItem, FileItemProcessResult, FileItemProcessResultStats, SyncType};
-pub use remote_file_item::{load_remote_item, RemoteFileItem, load_remote_item_to_sqlite};
-pub use server::{Server, ServerYml};
-pub use disk_directory::{Directory};
-pub use writer_with_progress::{ProgressWriter};
-pub use count_reader::{CountReader};
 pub use indicator::{Indicator, PbProperties};
-pub use sha1_reader::{Sha1Reader};
+pub use remote_file_item::{load_remote_item, load_remote_item_to_sqlite, RemoteFileItem};
+pub use server::{Server, ServerYml};
+pub use sha1_reader::Sha1Reader;
+pub use string_path::SlashPath;
+pub use writer_with_progress::ProgressWriter;
 
 use serde::{Deserialize, Serialize};
 

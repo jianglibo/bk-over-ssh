@@ -1,16 +1,12 @@
-// placeholders
 pub mod scheduler_util;
 pub mod sqlite_access;
 
 use crate::actions::hash_file_sha1;
+use crate::data_shape::SlashPath;
 use chrono::{DateTime, SecondsFormat, Utc};
 use log::*;
 use r2d2;
-use std::path::{Path, PathBuf};
-
-// lazy_static! {
-//     static ref EMPTY_STRING: String = String::from("");
-// }
+use std::path::{PathBuf};
 
 #[derive(Debug)]
 pub enum DbAction {
@@ -61,7 +57,6 @@ impl CountItemParam {
     }
 }
 
-
 #[derive(Debug, Default)]
 pub struct RemoteFileItemInDb {
     pub id: i64,
@@ -92,7 +87,7 @@ impl RemoteFileItemInDb {
     }
 
     pub fn from_path(
-        base_path: impl AsRef<Path>,
+        base_path: &SlashPath,
         path: PathBuf,
         skip_sha1: bool,
         dir_id: i64,
@@ -105,22 +100,18 @@ impl RemoteFileItemInDb {
                 } else {
                     Option::<String>::None
                 };
-                let relative_o = path.strip_prefix(&base_path).ok().and_then(|p| p.to_str());
-                if let Some(relative) = relative_o {
-                    return Some(Self {
-                        id: 0,
-                        path: relative.to_string(),
-                        sha1,
-                        len: metadata.len() as i64,
-                        modified: metadata.modified().ok().map(Into::into),
-                        created: metadata.created().ok().map(Into::into),
-                        dir_id,
-                        changed: false,
-                        confirmed: false,
-                    });
-                } else {
-                    error!("RemoteFileItem path name to_str() failed. {:?}", path);
-                }
+
+                return Some(Self {
+                    id: 0,
+                    path: base_path.strip_prefix(path.as_path()),
+                    sha1,
+                    len: metadata.len() as i64,
+                    modified: metadata.modified().ok().map(Into::into),
+                    created: metadata.created().ok().map(Into::into),
+                    dir_id,
+                    changed: false,
+                    confirmed: false,
+                });
             }
             Err(err) => {
                 error!("RemoteFileItem metadata failed: {:?}, {:?}", path, err);
@@ -208,7 +199,10 @@ where
     where
         F: FnMut((Option<RemoteFileItemInDb>, Option<String>)) -> ();
 
-    fn iterate_files_by_directory_changed_or_unconfirmed<F>(&self, processor: F) -> Result<(), failure::Error>
+    fn iterate_files_by_directory_changed_or_unconfirmed<F>(
+        &self,
+        processor: F,
+    ) -> Result<(), failure::Error>
     where
         F: FnMut((Option<RemoteFileItemInDb>, Option<String>)) -> ();
 
@@ -240,10 +234,12 @@ mod tests {
 
     #[test]
     fn t_count_item_param() {
-        let p = CountItemParam::default().changed(true).and().confirmed(false);
+        let p = CountItemParam::default()
+            .changed(true)
+            .and()
+            .confirmed(false);
 
         assert_eq!(p.get_changed(), Some(true));
         assert_eq!(p.get_confirmed(), Some(false));
     }
-
 }

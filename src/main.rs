@@ -54,7 +54,11 @@ fn main() -> Result<(), failure::Error> {
     let app1 = App::from_yaml(yml);
     let console_log = m.is_present("console-log");
 
-    let app_role =   m.value_of("app-role").unwrap().parse::<AppRole>().map_err(failure::err_msg)?;
+    let app_role = m
+        .value_of("app-role")
+        .unwrap()
+        .parse::<AppRole>()
+        .map_err(failure::err_msg)?;
 
     let conf = m.value_of("conf");
     // we always open db connection unless no-db parameter provided.
@@ -70,7 +74,7 @@ fn main() -> Result<(), failure::Error> {
         }
     };
 
-    if let Some(aii) =  m.value_of("app-instance-id") {
+    if let Some(aii) = m.value_of("app-instance-id") {
         app_conf.set_app_instance_id(aii);
     }
 
@@ -98,7 +102,6 @@ fn main() -> Result<(), failure::Error> {
     };
 
     app_conf.mini_app_conf.verbose = !verbose.is_empty();
-    
     log_util::setup_logger_for_this_app(
         console_log,
         app_conf.log_full_path.as_path(),
@@ -219,7 +222,9 @@ fn main_entry<'a>(
         ("copy-executable", Some(sub_matches)) => {
             let (mut server, _indicator) =
                 command::load_server_yml(app_conf, sub_matches.value_of("server-yml"), false)?;
-            let executable = sub_matches.value_of("executable").expect("executable paramter missing");
+            let executable = sub_matches
+                .value_of("executable")
+                .expect("executable paramter missing");
             server.connect()?;
             let remote = server.server_yml.remote_exec.clone();
             server.copy_a_file(executable, &remote)?;
@@ -351,7 +356,8 @@ fn main_entry<'a>(
                 };
             if no_db {
                 server.server_yml.use_db = false;
-            } else if !server.get_db_file().exists() || server.get_db_file().metadata()?.len() < 100 {
+            } else if !server.get_db_file().exists() || server.get_db_file().metadata()?.len() < 100
+            {
                 warn!("sqlite db doesn't initialized yet. try to initialize it.");
                 let sqlite_db_access = SqliteDbAccess::new(server.get_db_file());
                 sqlite_db_access.create_database()?;

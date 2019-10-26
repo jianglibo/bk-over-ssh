@@ -1,10 +1,10 @@
-use super::{string_path, RemoteFileItem, AppRole};
+use super::{string_path, AppRole, RemoteFileItem};
 use crate::actions::hash_file_sha1;
 use filetime;
 use log::*;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
-use serde::{Serialize, Deserialize};
 
 #[derive(Debug)]
 pub enum SyncType {

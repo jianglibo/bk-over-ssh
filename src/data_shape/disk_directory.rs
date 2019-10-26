@@ -1,15 +1,16 @@
-use super::string_path;
+use super::string_path::{self, SlashPath};
 use glob::Pattern;
 use log::*;
 use serde::{Deserialize, Serialize};
-use std::fs;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
 #[derive(Deserialize, Serialize, Default, Debug)]
 pub struct Directory {
-    pub remote_dir: String,
-    pub local_dir: String,
+    #[serde(deserialize_with = "string_path::deserialize_slash_path_from_str")]
+    pub remote_dir: string_path::SlashPath,
+    #[serde(deserialize_with = "string_path::deserialize_slash_path_from_str")]
+    pub local_dir: string_path::SlashPath,
     pub includes: Vec<String>,
     pub excludes: Vec<String>,
     #[serde(skip)]
@@ -18,29 +19,41 @@ pub struct Directory {
     pub excludes_patterns: Option<Vec<Pattern>>,
 }
 
-impl Directory {
-    pub fn get_remote_dir(&self) -> &str {
-        self.remote_dir.as_str()
-    }
+// #[derive(Deserialize, Serialize, Default, Debug)]
+// pub struct Directory {
+//     pub remote_dir: String,
+//     pub local_dir: String,
+//     pub includes: Vec<String>,
+//     pub excludes: Vec<String>,
+//     #[serde(skip)]
+//     pub includes_patterns: Option<Vec<Pattern>>,
+//     #[serde(skip)]
+//     pub excludes_patterns: Option<Vec<Pattern>>,
+// }
 
-    pub fn get_remote_canonicalized_dir_str(&self) -> Result<String, failure::Error> {
-        let bp = Path::new(self.get_remote_dir()).canonicalize();
-        match bp {
-            Ok(base_path) => {
-                if let Some(path_str) = base_path.to_str() {
-                    Ok(path_str.to_owned())
-                } else {
-                    bail!("base_path to_str failed: {:?}", base_path);
-                }
-            }
-            Err(_err) => {
-                bail!(
-                    "canonicalize remote path failed: {:?}",
-                    self.get_remote_dir()
-                );
-            }
-        }
-    }
+impl Directory {
+    // pub fn get_remote_dir(&self) -> &str {
+    //     self.remote_dir.as_str()
+    // }
+
+    // pub fn get_remote_canonicalized_dir_str(&self) -> Result<String, failure::Error> {
+    //     let bp = Path::new(self.get_remote_dir()).canonicalize();
+    //     match bp {
+    //         Ok(base_path) => {
+    //             if let Some(path_str) = base_path.to_str() {
+    //                 Ok(path_str.to_owned())
+    //             } else {
+    //                 bail!("base_path to_str failed: {:?}", base_path);
+    //             }
+    //         }
+    //         Err(_err) => {
+    //             bail!(
+    //                 "canonicalize remote path failed: {:?}",
+    //                 self.get_remote_dir()
+    //             );
+    //         }
+    //     }
+    // }
     /// for test purpose.
     /// local_dir will change to absolute when load from yml file.
     #[allow(dead_code)]
@@ -51,8 +64,8 @@ impl Directory {
         excludes: Vec<impl AsRef<str>>,
     ) -> Self {
         let mut o = Self {
-            remote_dir: remote_dir.as_ref().to_string(),
-            local_dir: local_dir.as_ref().to_string(),
+            remote_dir: SlashPath::new(remote_dir),
+            local_dir: SlashPath::new(local_dir),
             includes: includes.iter().map(|s| s.as_ref().to_string()).collect(),
             excludes: excludes.iter().map(|s| s.as_ref().to_string()).collect(),
             ..Directory::default()
@@ -121,7 +134,7 @@ impl Directory {
     }
 
     pub fn count_total_size(&self) -> u64 {
-        WalkDir::new(Path::new(self.local_dir.as_str()))
+        WalkDir::new(self.local_dir.as_path())
             .follow_links(false)
             .into_iter()
             .filter_map(|e| e.ok())
@@ -139,7 +152,7 @@ impl Directory {
 
     #[allow(dead_code)]
     pub fn list_files_recursive(&self) -> impl Iterator<Item = (u64, String)> {
-        WalkDir::new(Path::new(self.local_dir.as_str()))
+        WalkDir::new(self.local_dir.as_path())
             .follow_links(false)
             .into_iter()
             .filter_map(|e| e.ok())
@@ -161,49 +174,23 @@ impl Directory {
         &mut self,
         _directories_dir: impl AsRef<Path>,
     ) -> Result<(), failure::Error> {
-        // let directories_dir = directories_dir.as_ref();
         trace!("origin directory: {:?}", self);
-        let local_dir_str = self.local_dir.trim();
-        if local_dir_str.is_empty() || local_dir_str == "~" || local_dir_str == "null" {
+        if self.local_dir.is_empty() {
             bail!("when in push mode, local_dir cannot be empty.");
-        } else {
-            self.local_dir = local_dir_str.to_string();
         }
 
-        let a_local_dir = Path::new(&self.local_dir);
-
-        if !a_local_dir.exists() {
-            bail!("local_dir does not exist. change to {}", &self.local_dir);
+        if !self.local_dir.exists() {
+            bail!("local_dir does not exist: {}", &self.local_dir);
         }
-        // let directories_dir = directories_dir.as_ref();
+
         trace!("origin directory: {:?}", self);
-        let remote_dir_str = self.remote_dir.trim();
-        if remote_dir_str.is_empty() || remote_dir_str == "~" || remote_dir_str == "null" {
-            let mut split = self.local_dir.rsplitn(3, &['/', '\\'][..]);
-            let mut s = split.next().expect("local_dir should has dir name.");
-            if s.is_empty() {
-                s = split.next().expect("local_dir should has dir name.");
-            }
-            self.remote_dir = s.to_string();
-            trace!("remote_dir is empty. change to {}", s);
-        } else {
-            self.remote_dir = remote_dir_str.to_string();
+
+        if self.remote_dir.is_empty() {
+            self.remote_dir.set_slash(self.local_dir.get_last_name());
         }
 
-        let a_remote_dir = Path::new(&self.remote_dir);
-        if a_remote_dir.is_absolute() {
-            bail!(
-                "In pushing mode, the remote_dir of a server can't be absolute. {}",
-                &self.remote_dir
-            );
-        } else {
-            let remote_path = Path::new("./directories").join(a_remote_dir);
-            self.remote_dir = string_path::strip_verbatim_prefixed(
-                remote_path
-                    .to_str()
-                    .expect("remote directory to_str should succeeded."),
-            );
-        }
+        let remote_path = SlashPath::new("./directories").join(self.remote_dir.get_slash());
+        self.remote_dir = remote_path;
         Ok(())
     }
 
@@ -215,37 +202,51 @@ impl Directory {
     ) -> Result<(), failure::Error> {
         let directories_dir = directories_dir.as_ref();
         trace!("origin directory: {:?}", self);
-        let ld = self.local_dir.trim();
-        if ld.is_empty() || ld == "~" || ld == "null" {
-            let mut split = self.remote_dir.trim().rsplitn(3, &['/', '\\'][..]);
-            let mut s = split.next().expect("remote_dir should has dir name.");
-            if s.is_empty() {
-                s = split.next().expect("remote_dir should has dir name.");
-            }
-            self.local_dir = s.to_string();
-            trace!("local_dir is empty. change to {}", s);
-        } else {
-            self.local_dir = ld.to_string();
+
+        if self.local_dir.is_empty() {
+            self.local_dir.set_slash(self.remote_dir.get_last_name());
         }
 
-        let a_local_dir = Path::new(&self.local_dir);
-        if a_local_dir.is_absolute() {
+        if self.local_dir.as_path().is_absolute() {
             bail!(
                 "the local_dir of a server can't be absolute. {:?}",
-                a_local_dir
+                self.local_dir
             );
-        } else {
-            let ld_path = directories_dir.join(&self.local_dir);
-            self.local_dir = ld_path
-                .to_str()
-                .expect("local_dir to_str should success.")
-                .to_string();
+        }
 
-            self.local_dir = string_path::strip_verbatim_prefixed(&self.local_dir);
+        self.local_dir = SlashPath::from_path(directories_dir).join_another(&self.local_dir);
 
-            if ld_path.exists() {
-                fs::create_dir_all(ld_path)?;
-            }
+        if !self.local_dir.exists() {
+            self.local_dir.create_dir_all()?;
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::BufRead;
+
+    #[test]
+    fn t_directory_i() -> Result<(), failure::Error> {
+        let yml = r##"
+remote_dir: F:/github/bk-over-ssh/fixtures/adir
+local_dir: ~
+includes:
+  - "*.txt"
+  - "*.png"
+excludes:
+  - "*.log"
+  - "*.bak"
+"##;
+
+        let d = serde_yaml::from_str::<Directory>(&yml)?;
+        println!("{:?}", d);
+        let content = serde_yaml::to_string(&d)?;
+        let cur = std::io::Cursor::new(content);
+        for line in cur.lines() {
+            println!("{:?}", line?);
         }
         Ok(())
     }
