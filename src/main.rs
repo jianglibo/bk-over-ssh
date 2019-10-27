@@ -54,9 +54,15 @@ fn main() -> Result<(), failure::Error> {
     let app1 = App::from_yaml(yml);
     let console_log = m.is_present("console-log");
 
+
+    if let ("mkdir", Some(sub_matches)) = m.subcommand() {
+        let dir = sub_matches.value_of("dir").unwrap();
+        return Ok(fs::create_dir_all(dir)?);
+    }
+
     let app_role = m
         .value_of("app-role")
-        .unwrap()
+        .expect("app-role is a must.")
         .parse::<AppRole>()
         .map_err(failure::err_msg)?;
 

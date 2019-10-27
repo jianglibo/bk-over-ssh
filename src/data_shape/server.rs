@@ -590,6 +590,29 @@ where
         Ok(working_file)
     }
 
+    #[allow(dead_code)]
+    pub fn create_remote_dir(
+        &self,
+        dir: &str,
+    ) -> Result<(), failure::Error> {
+        let mut channel: ssh2::Channel = self.create_channel()?;
+        let cmd = format!(
+            "{} {} {} mkdir {}",
+            self.server_yml.remote_exec,
+            if self.app_conf.console_log {
+                "--console-log"
+            } else {
+                ""
+            },
+            if self.app_conf.verbose { "--vv" } else { "" },
+            dir,
+        );
+        info!("invoking remote command: {:?}", cmd);
+        channel.exec(cmd.as_str())?;
+        ssh_util::get_stdout_eprintln_stderr(&mut channel, self.app_conf.verbose);
+        Ok(())
+    }
+
     pub fn create_remote_db(
         &self,
         db_type: impl AsRef<str>,

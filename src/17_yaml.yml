@@ -28,7 +28,7 @@ args:
     - app-role:
         help: The app role if cann't infer from the command line parameters.
         long: app-role
-        required: true
+        required: false
         takes_value: true
         possible_values:
             - pull_hub
@@ -143,6 +143,13 @@ subcommands:
     #             index: 1
     - print-conf:
         about: print out the current configuration of application.
+    - mkdir:
+        about: create a new directory.
+        args:
+            - dir:
+                help: the dir to create.
+                required: true
+                index: 1
     - print-env:
         about: print out environment variables.
     - polling-file:
