@@ -1,4 +1,4 @@
-mod copy_file;
+pub mod copy_file;
 mod reporter;
 pub mod ssh_util;
 

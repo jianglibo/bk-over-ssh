@@ -9,7 +9,25 @@ use std::sync::{Arc, Mutex};
 pub struct PrimaryFileItem {
     pub local_dir: Arc<SlashPath>,
     pub remote_dir: Arc<SlashPath>,
-    pub relative_file_item: RelativeFileItem,
+    pub relative_item: RelativeFileItem,
+}
+
+impl PrimaryFileItem {
+    pub fn get_local_path(&self) -> SlashPath {
+        self.local_dir.join(self.relative_item.get_path())
+    }
+
+    pub fn get_remote_path(&self) -> SlashPath {
+        self.remote_dir.join(self.relative_item.get_path())
+    }
+
+    pub fn get_relative_item(&self) -> &RelativeFileItem {
+        &self.relative_item
+    }
+    pub fn is_sha1_not_equal(&self, local_sha1: impl AsRef<str>) -> bool {
+        Some(local_sha1.as_ref().to_ascii_uppercase())
+            != self.relative_item.get_sha1().map(str::to_ascii_uppercase)
+    }
 }
 
 #[derive(Debug)]
@@ -44,11 +62,11 @@ impl<R: BufRead> Iterator for FileItemDirectory<R> {
                     if line.starts_with('{') {
                         trace!("got item line {}", line);
                         match serde_json::from_str::<RelativeFileItem>(&line) {
-                            Ok(relative_file_item) => {
+                            Ok(relative_item) => {
                                 let fi = PrimaryFileItem {
                                     local_dir: self.local_dir.clone(),
                                     remote_dir: self.remote_dir.clone(),
-                                    relative_file_item,
+                                    relative_item,
                                 };
                                 return Some(fi);
                             }

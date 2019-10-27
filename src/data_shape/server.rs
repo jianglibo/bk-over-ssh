@@ -1,10 +1,10 @@
 use super::{
-    app_conf, load_remote_item, load_remote_item_to_sqlite, rolling_files, string_path, AppRole,
-    AuthMethod, Directory, FileItemMap, FileItemProcessResult, FileItemProcessResultStats, Indicator,
-    MiniAppConf, PbProperties, ProgressWriter, PruneStrategy, RelativeFileItem, ScheduleItem,
-    SlashPath, SyncType, FileItemDirectories, PrimaryFileItem
+    app_conf, rolling_files, string_path, AppRole,
+    AuthMethod, Directory, FileItemDirectories, FileItemMap, FileItemProcessResult,
+    FileItemProcessResultStats, Indicator, MiniAppConf, PbProperties, PrimaryFileItem,
+    ProgressWriter, PruneStrategy, RelativeFileItem, ScheduleItem, SlashPath, SyncType,
 };
-use crate::actions::{copy_a_file_item, copy_a_file_sftp, ssh_util, SyncDirReport};
+use crate::actions::{copy_a_file_item, copy_a_file_sftp, copy_file, ssh_util, SyncDirReport};
 use crate::db_accesses::{scheduler_util, DbAccess};
 use bzip2::write::BzEncoder;
 use bzip2::Compression;
@@ -612,11 +612,7 @@ where
             } else {
                 ""
             },
-            if self.app_conf.verbose {
-                "--vv"
-            } else {
-                ""
-            },
+            if self.app_conf.verbose { "--vv" } else { "" },
             self.app_conf.app_instance_id,
             app_role.to_str(),
             self.get_remote_server_yml(),
@@ -744,7 +740,49 @@ where
     }
 
     fn get_local_remote_pairs(&self) -> Vec<(SlashPath, SlashPath)> {
-        self.server_yml.directories.iter().map(|d|(d.local_dir.clone(), d.remote_dir.clone())).collect()
+        self.server_yml
+            .directories
+            .iter()
+            .map(|d| (d.local_dir.clone(), d.remote_dir.clone()))
+            .collect()
+    }
+
+    #[allow(dead_code)]
+    pub fn push_a_file_item_sftp(
+        sftp: &ssh2::Sftp,
+        local_file_path: SlashPath,
+        file_item: PrimaryFileItem,
+        buf: &mut [u8],
+        pb: &Indicator,
+    ) -> FileItemProcessResult {
+        match sftp.create(file_item.get_remote_path().as_path()) {
+            Ok(mut file) => match local_file_path.get_local_file_reader() {
+                Ok(mut local_reader) => {
+                    match copy_file::copy_stream_with_pb(&mut local_reader, &mut file, buf, pb) {
+                        Ok(length) => {
+                            if length != file_item.get_relative_item().get_len() {
+                                FileItemProcessResult::LengthNotMatch(local_file_path.get_slash())
+                            } else {
+                                FileItemProcessResult::Succeeded(
+                                    length,
+                                    local_file_path.get_slash(),
+                                    SyncType::Sftp,
+                                )
+                            }
+                        }
+                        Err(err) => {
+                            error!("write_stream_to_file failed: {:?}", err);
+                            FileItemProcessResult::CopyFailed(local_file_path.get_slash())
+                        }
+                    }
+                }
+                Err(_err) => FileItemProcessResult::GetLocalPathFailed,
+            },
+            Err(err) => {
+                error!("sftp create failed: {:?}", err);
+                FileItemProcessResult::SftpOpenFailed
+            }
+        }
     }
 
     fn start_push_sync_working_file_list(
@@ -761,11 +799,15 @@ where
             self.load_dirs(&mut o)?;
         }
 
-        let reader = fs::OpenOptions::new().read(true).open(file_list_file.as_path())?;
+        let reader = fs::OpenOptions::new()
+            .read(true)
+            .open(file_list_file.as_path())?;
 
-        let file_item_directories = FileItemDirectories::<io::BufReader<fs::File>>::from_file_reader(reader, self.get_local_remote_pairs());
-
-
+        let file_item_directories =
+            FileItemDirectories::<io::BufReader<fs::File>>::from_file_reader(
+                reader,
+                self.get_local_remote_pairs(),
+            );
 
         Ok(FileItemProcessResultStats::default())
         // let working_file = &self.get_working_file_list_file();
@@ -1051,15 +1093,14 @@ where
             let db_access = self.db_access.as_ref().unwrap();
             for one_dir in self.server_yml.directories.iter() {
                 trace!("start load directory: {:?}", one_dir);
-                load_remote_item_to_sqlite(
-                    one_dir,
+                one_dir.load_relative_item_to_sqlite(
                     db_access,
                     self.is_skip_sha1(),
                     self.server_yml.sql_batch_size,
                     self.server_yml.rsync.sig_ext.as_str(),
                     self.server_yml.rsync.delta_ext.as_str(),
                 )?;
-                trace!("load_remote_item_to_sqlite done.");
+                trace!("load_relative_item_to_sqlite done.");
                 for sql in self.server_yml.exclude_by_sql.iter() {
                     db_access.exclude_by_sql(sql)?;
                 }
@@ -1087,7 +1128,7 @@ where
             }
         } else {
             for one_dir in self.server_yml.directories.iter() {
-                load_remote_item(one_dir, out, self.is_skip_sha1())?;
+                one_dir.load_relative_item(out, self.is_skip_sha1())?;
             }
         }
         Ok(())
@@ -1293,7 +1334,7 @@ mod tests {
         };
 
         one_dir.compile_patterns()?;
-        load_remote_item(&one_dir, &mut cur, true)?;
+        one_dir.load_relative_item(&mut cur, true)?;
         let num = tutil::count_cursor_lines(&mut cur);
         assert_eq!(num, 8);
         tutil::print_cursor_lines(&mut cur);
@@ -1307,7 +1348,7 @@ mod tests {
 
         one_dir.compile_patterns()?;
         assert!(one_dir.excludes_patterns.is_none());
-        load_remote_item(&one_dir, &mut cur, true)?;
+        one_dir.load_relative_item(&mut cur, true)?;
         let num = tutil::count_cursor_lines(&mut cur);
         assert_eq!(num, 2); // one dir line, one file line.
 
@@ -1320,7 +1361,7 @@ mod tests {
 
         one_dir.compile_patterns()?;
         assert!(one_dir.includes_patterns.is_none());
-        load_remote_item(&one_dir, &mut cur, true)?;
+        one_dir.load_relative_item(&mut cur, true)?;
         let num = tutil::count_cursor_lines(&mut cur);
         assert_eq!(num, 7, "if exclude 1 file there should 7 left.");
 
@@ -1333,7 +1374,7 @@ mod tests {
 
         one_dir.compile_patterns()?;
         assert!(one_dir.includes_patterns.is_none());
-        load_remote_item(&one_dir, &mut cur, true)?;
+        one_dir.load_relative_item(&mut cur, true)?;
         let num = tutil::count_cursor_lines(&mut cur);
         assert_eq!(num, 7, "if exclude logs file there should 7 left.");
 

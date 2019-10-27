@@ -26,28 +26,19 @@ pub fn copy_file_to_stream(
     Ok(())
 }
 
-pub fn copy_stream_to_file_with_cb<T: AsRef<Path>>(
+pub fn copy_stream_with_pb(
     from: &mut impl std::io::Read,
-    to_file: T,
+    to: &mut impl std::io::Write,
     buf: &mut [u8],
-    // mut counter: F,
     progress_bar: &Indicator,
 ) -> Result<u64, failure::Error> {
     let mut length = 0_u64;
-    let path = to_file.as_ref();
-    trace!("start copy_stream_to_file_with_cb: {:?}", path);
-    if let Some(pp) = path.parent() {
-        if !pp.exists() {
-            fs::create_dir_all(pp)?;
-        }
-    }
-    let mut wf = fs::OpenOptions::new().create(true).write(true).open(path)?;
     loop {
         match from.read(buf) {
             Ok(n) if n > 0 => {
                 let nn = n as u64;
                 length += nn;
-                wf.write_all(&buf[..n])?;
+                to.write_all(&buf[..n])?;
                 progress_bar.inc_pb(nn);
             }
             Ok(_) => {
@@ -64,6 +55,24 @@ pub fn copy_stream_to_file_with_cb<T: AsRef<Path>>(
         }
     }
     Ok(length)
+}
+
+
+pub fn copy_stream_to_file_with_pb<T: AsRef<Path>>(
+    from: &mut impl std::io::Read,
+    to_file: T,
+    buf: &mut [u8],
+    progress_bar: &Indicator,
+) -> Result<u64, failure::Error> {
+    let path = to_file.as_ref();
+    trace!("start copy_stream_to_file_with_cb: {:?}", path);
+    if let Some(pp) = path.parent() {
+        if !pp.exists() {
+            fs::create_dir_all(pp)?;
+        }
+    }
+    let mut wf = fs::OpenOptions::new().create(true).write(true).open(path)?;
+    copy_stream_with_pb(from, &mut wf, buf, progress_bar)
 }
 
 #[allow(dead_code)]
@@ -208,7 +217,7 @@ pub fn copy_a_file_item_scp<'a>(
     buf: &mut [u8],
     pb: &mut Indicator,
 ) -> FileItemProcessResult {
-    match session.scp_recv(Path::new(file_item.get_relative_file_name().as_str())) {
+    match session.scp_recv(Path::new(file_item.get_remote_path_str().as_str())) {
         Ok((mut file, _stat)) => {
             if let Some(_r_sha1) = file_item.get_relative_item().get_sha1() {
                 match copy_stream_to_file_return_sha1_with_cb(&mut file, &local_file_path, buf, pb)
@@ -234,7 +243,7 @@ pub fn copy_a_file_item_scp<'a>(
                     }
                 }
             } else {
-                match copy_stream_to_file_with_cb(&mut file, &local_file_path, buf, pb) {
+                match copy_stream_to_file_with_pb(&mut file, &local_file_path, buf, pb) {
                     Ok(length) => {
                         if length != file_item.get_relative_item().get_len() {
                             FileItemProcessResult::LengthNotMatch(local_file_path)
@@ -268,7 +277,7 @@ pub fn copy_a_file_item_sftp<'a>(
     buf: &mut [u8],
     pb: &Indicator,
 ) -> FileItemProcessResult {
-    match sftp.open(Path::new(&file_item_map.get_relative_file_name())) {
+    match sftp.open(Path::new(&file_item_map.get_remote_path_str())) {
         Ok(mut file) => {
             if let Some(_r_sha1) = file_item_map.get_relative_item().get_sha1() {
                 match copy_stream_to_file_return_sha1_with_cb(&mut file, &local_file_path, buf, pb)
@@ -294,7 +303,7 @@ pub fn copy_a_file_item_sftp<'a>(
                     }
                 }
             } else {
-                match copy_stream_to_file_with_cb(&mut file, &local_file_path, buf, pb) {
+                match copy_stream_to_file_with_pb(&mut file, &local_file_path, buf, pb) {
                     Ok(length) => {
                         if length != file_item_map.get_relative_item().get_len() {
                             FileItemProcessResult::LengthNotMatch(local_file_path)
@@ -505,7 +514,7 @@ where
     M: r2d2::ManageConnection,
     D: DbAccess<M>,
 {
-    let remote_file_name = file_item.get_relative_file_name();
+    let remote_file_name = file_item.get_remote_path_str();
     trace!("start signature_a_file {}", &local_file_path);
     let mut sig =
         Signature::signature_a_file(&local_file_path, Some(server.server_yml.rsync.window), progress_bar)?;

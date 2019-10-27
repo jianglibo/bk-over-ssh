@@ -502,7 +502,7 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data_shape::{load_remote_item_to_sqlite, Directory, string_path::SlashPath};
+    use crate::data_shape::{Directory, string_path::SlashPath};
     use crate::develope::tutil;
     use crate::log_util;
     use chrono::{offset::TimeZone, Utc};
@@ -707,7 +707,7 @@ mod tests {
         let db_access = tutil::create_a_sqlite_file_db(&db_dir)?;
 
         // after load to db, result in changed 3 items.
-        load_remote_item_to_sqlite(&dir, &db_access, false, 50000, ".sig", ".delta")?;
+        dir.load_relative_item_to_sqlite(&db_access, false, 50000, ".sig", ".delta")?;
 
         assert_eq!(db_access.count_directory()?, 1);
         assert_eq!(
@@ -734,7 +734,7 @@ mod tests {
 
 
         // if invoke successly again. we cannot get the result from changed field alone.
-        load_remote_item_to_sqlite(&dir, &db_access, false, 50000, ".sig", ".delta")?;
+        dir.load_relative_item_to_sqlite(&db_access, false, 50000, ".sig", ".delta")?;
 
         let mut c = 0;
         db_access.iterate_files_by_directory_changed_or_unconfirmed(|(file, _)| {
@@ -777,7 +777,7 @@ mod tests {
             assert_eq!(buf.as_str(), "abc")
         }
 
-        load_remote_item_to_sqlite(&dir, &db_access, false, 50000, ".sig", ".delta")?;
+        dir.load_relative_item_to_sqlite(&db_access, false, 50000, ".sig", ".delta")?;
 
         assert_eq!(db_access.count_directory()?, 1);
         assert_eq!(
@@ -809,7 +809,7 @@ mod tests {
         let db_dir = tutil::TestDir::new();
         let db_access = tutil::create_a_sqlite_file_db(&db_dir)?;
 
-        load_remote_item_to_sqlite(&dir, &db_access, false, 50000, ".sig", ".delta")?;
+        dir.load_relative_item_to_sqlite(&db_access, false, 50000, ".sig", ".delta")?;
         assert_eq!(
             db_access.count_relative_file_item(CountItemParam::default())?,
             4,

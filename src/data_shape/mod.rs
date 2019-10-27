@@ -19,7 +19,7 @@ pub use disk_directory::Directory;
 pub use file_item_map::{FileItemMap, FileItemProcessResult, FileItemProcessResultStats, SyncType};
 pub use file_item_directory::{FileItemDirectory, FileItemDirectories, PrimaryFileItem};
 pub use indicator::{Indicator, PbProperties};
-pub use relative_file_item::{load_remote_item, load_remote_item_to_sqlite, RelativeFileItem};
+pub use relative_file_item::{RelativeFileItem};
 pub use server::{Server, ServerYml};
 pub use sha1_reader::Sha1Reader;
 pub use string_path::SlashPath;

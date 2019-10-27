@@ -59,6 +59,10 @@ impl SlashPath {
         }
     }
 
+    pub fn get_local_file_reader(&self) -> Result<impl std::io::Read, failure::Error> {
+        Ok(fs::OpenOptions::new().read(true).open(self.as_path())?)
+    }
+
     pub fn as_str(&self) -> &str {
         self.slash.as_str()
     }
