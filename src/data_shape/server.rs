@@ -1,8 +1,8 @@
 use super::{
     app_conf, load_remote_item, load_remote_item_to_sqlite, rolling_files, string_path, AppRole,
-    AuthMethod, Directory, FileItem, FileItemProcessResult, FileItemProcessResultStats, Indicator,
-    MiniAppConf, PbProperties, ProgressWriter, PruneStrategy, RemoteFileItem, ScheduleItem,
-    SlashPath, SyncType,
+    AuthMethod, Directory, FileItemMap, FileItemProcessResult, FileItemProcessResultStats, Indicator,
+    MiniAppConf, PbProperties, ProgressWriter, PruneStrategy, RelativeFileItem, ScheduleItem,
+    SlashPath, SyncType, FileItemDirectories, PrimaryFileItem
 };
 use crate::actions::{copy_a_file_item, copy_a_file_sftp, ssh_util, SyncDirReport};
 use crate::db_accesses::{scheduler_util, DbAccess};
@@ -594,36 +594,38 @@ where
         &self,
         db_type: impl AsRef<str>,
         force: bool,
-        server_yml: Option<&str>,
     ) -> Result<(), failure::Error> {
+        let app_role = match self.app_conf.app_role {
+            AppRole::PullHub => AppRole::PassiveLeaf,
+            _ => bail!(
+                "create_remote_db: unsupported app role. {:?}",
+                self.app_conf.app_role
+            ),
+        };
         let mut channel: ssh2::Channel = self.create_channel()?;
         let db_type = db_type.as_ref();
         let cmd = format!(
-            "{} create-db {} --db-type {}{}",
+            "{} {} {} --app-instance-id {} --app-role {}  create-db {} --db-type {}{}",
             self.server_yml.remote_exec,
-            if let Some(server_yml) = server_yml {
-                server_yml
+            if self.app_conf.console_log {
+                "--console-log"
             } else {
                 ""
             },
+            if self.app_conf.verbose {
+                "--vv"
+            } else {
+                ""
+            },
+            self.app_conf.app_instance_id,
+            app_role.to_str(),
+            self.get_remote_server_yml(),
             db_type,
             if force { " --force" } else { "" },
         );
         info!("invoking remote command: {:?}", cmd);
         channel.exec(cmd.as_str())?;
-        let mut contents = String::new();
-        if let Err(err) = channel.read_to_string(&mut contents) {
-            bail!("is remote exec executable? {:?}", err);
-        }
-        if !contents.is_empty() {
-            trace!("create_remote_db output: {:?}", contents);
-        }
-        contents.clear();
-        channel.stderr().read_to_string(&mut contents)?;
-        if !contents.is_empty() {
-            trace!("create_remote_db stderr: {:?}", contents);
-            eprintln!("create_remote_db stderr: {:?}", contents);
-        }
+        ssh_util::get_stdout_eprintln_stderr(&mut channel, self.app_conf.verbose);
         Ok(())
     }
 
@@ -692,7 +694,7 @@ where
                 Ok(0) => break,
                 Ok(_length) => {
                     if buf.starts_with('{') {
-                        match serde_json::from_str::<RemoteFileItem>(&buf) {
+                        match serde_json::from_str::<RelativeFileItem>(&buf) {
                             Ok(remote_item) => {
                                 count_and_len.0 += 1;
                                 count_and_len.1 += remote_item.get_len();
@@ -741,15 +743,29 @@ where
         self.start_pull_sync(rb, pb)
     }
 
+    fn get_local_remote_pairs(&self) -> Vec<(SlashPath, SlashPath)> {
+        self.server_yml.directories.iter().map(|d|(d.local_dir.clone(), d.remote_dir.clone())).collect()
+    }
+
     fn start_push_sync_working_file_list(
         &self,
         pb: &mut Indicator,
     ) -> Result<FileItemProcessResultStats, failure::Error> {
-        let mut o = fs::OpenOptions::new()
-            .write(true)
-            .truncate(true)
-            .open(self.get_active_leaf_file_list_file())?;
-        self.load_dirs(&mut o)?;
+        let file_list_file = self.get_active_leaf_file_list_file();
+
+        {
+            let mut o = fs::OpenOptions::new()
+                .write(true)
+                .truncate(true)
+                .open(file_list_file.as_path())?;
+            self.load_dirs(&mut o)?;
+        }
+
+        let reader = fs::OpenOptions::new().read(true).open(file_list_file.as_path())?;
+
+        let file_item_directories = FileItemDirectories::<io::BufReader<fs::File>>::from_file_reader(reader, self.get_local_remote_pairs());
+
+
 
         Ok(FileItemProcessResultStats::default())
         // let working_file = &self.get_working_file_list_file();
@@ -823,7 +839,7 @@ where
                     if let (Some(rd), Some(local_dir)) =
                         (current_remote_dir.as_ref(), current_local_dir)
                     {
-                        match serde_json::from_str::<RemoteFileItem>(&line) {
+                        match serde_json::from_str::<RelativeFileItem>(&line) {
                             Ok(remote_item) => {
                                 let remote_len = remote_item.get_len();
                                 let sync_type = if self.server_yml.rsync.valve > 0
@@ -833,19 +849,19 @@ where
                                 } else {
                                     SyncType::Sftp
                                 };
-                                let local_item = FileItem::new(
+                                let file_item_map = FileItemMap::new(
                                     local_dir,
                                     rd.as_str(),
                                     remote_item,
                                     sync_type,
-                                    &self.app_conf.app_role,
+                                    true,
                                 );
                                 consume_count += 1;
 
                                 progress_bar.active_pb_item().alter_pb(PbProperties {
                                     set_length: Some(remote_len),
                                     set_message: Some(
-                                        local_item.get_remote_item().get_path().to_owned(),
+                                        file_item_map.get_relative_item().get_path().to_owned(),
                                     ),
                                     reset: true,
                                     ..PbProperties::default()
@@ -854,13 +870,13 @@ where
                                 let mut skipped = false;
                                 // if use_db all received item are changed.
                                 // let r = if self.server_yml.use_db || local_item.had_changed() { // even use_db still check change or not.
-                                let r = if local_item.had_changed() {
+                                let r = if file_item_map.had_changed() {
                                     trace!("file had changed. start copy_a_file_item.");
-                                    copy_a_file_item(&self, &sftp, local_item, &mut buff, progress_bar)
+                                    copy_a_file_item(&self, &sftp, file_item_map, &mut buff, progress_bar)
                                 } else {
                                     skipped = true;
                                     FileItemProcessResult::Skipped(
-                                        local_item.get_local_path_str().expect(
+                                        file_item_map.get_local_path_str().expect(
                                             "get_local_path_str should has some at this point.",
                                         ),
                                     )
@@ -1052,7 +1068,7 @@ where
                     match fi_db_or_path {
                         (Some(fi_db), None) => {
                             if fi_db.changed || !fi_db.confirmed {
-                                match serde_json::to_string(&RemoteFileItem::from(fi_db)) {
+                                match serde_json::to_string(&RelativeFileItem::from(fi_db)) {
                                     Ok(line) => {
                                         writeln!(out, "{}", line).ok();
                                     }

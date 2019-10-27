@@ -1,4 +1,4 @@
-use super::{CountItemParam, DbAccess, DbAction, RemoteFileItemInDb};
+use super::{CountItemParam, DbAccess, DbAction, RelativeFileItemInDb};
 use chrono::{DateTime, Utc};
 use failure;
 use log::*;
@@ -39,8 +39,8 @@ impl SqliteDbAccess {
     }
 }
 
-fn map_to_file_item(row: &Row) -> Result<RemoteFileItemInDb, rusqlite::Error> {
-    Ok(RemoteFileItemInDb {
+fn map_to_file_item(row: &Row) -> Result<RelativeFileItemInDb, rusqlite::Error> {
+    Ok(RelativeFileItemInDb {
         id: row.get(0)?,
         path: row.get(1)?,
         sha1: row.get(2)?,
@@ -78,9 +78,9 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
         Ok(stmt.query_row(params![path.as_ref()], |row| row.get(0))?)
     }
 
-    fn get_file_item(&self, num: usize) -> Result<Vec<RemoteFileItemInDb>, failure::Error> {
+    fn get_file_item(&self, num: usize) -> Result<Vec<RelativeFileItemInDb>, failure::Error> {
         let conn = self.0.get().unwrap();
-        let mut stmt = conn.prepare("SELECT id, path, sha1, len, time_modified, time_created, dir_id, changed, confirmed FROM remote_file_item LIMIT :num")?;
+        let mut stmt = conn.prepare("SELECT id, path, sha1, len, time_modified, time_created, dir_id, changed, confirmed FROM relative_file_item LIMIT :num")?;
         let r = stmt
             .query_map_named(
                 named_params! {
@@ -99,14 +99,14 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
         Ok(r)
     }
 
-    fn find_remote_file_item(
+    fn find_relative_file_item(
         &self,
         dir_id: i64,
         path: impl AsRef<str>,
-    ) -> Result<RemoteFileItemInDb, failure::Error> {
+    ) -> Result<RelativeFileItemInDb, failure::Error> {
         let conn = self.0.get().unwrap();
         let path = path.as_ref();
-        let r = match conn.prepare("SELECT id, path, sha1, len, time_modified, time_created, dir_id, changed, confirmed FROM remote_file_item where dir_id = :dir_id and path = :path") {
+        let r = match conn.prepare("SELECT id, path, sha1, len, time_modified, time_created, dir_id, changed, confirmed FROM relative_file_item where dir_id = :dir_id and path = :path") {
             Ok(mut stmt) => {
         match stmt.query_row_named(
             named_params! {
@@ -134,10 +134,10 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
 
     fn iterate_all_file_items<P>(&self, processor: P) -> Result<(usize, usize), failure::Error>
     where
-        P: Fn(RemoteFileItemInDb) -> (),
+        P: Fn(RelativeFileItemInDb) -> (),
     {
         let conn = self.get_pool().get().unwrap();
-        let mut stmt = conn.prepare("SELECT id, path, sha1, len, time_modified, time_created, dir_id, changed, confirmed FROM remote_file_item")?;
+        let mut stmt = conn.prepare("SELECT id, path, sha1, len, time_modified, time_created, dir_id, changed, confirmed FROM relative_file_item")?;
         let files = stmt.query_map(NO_PARAMS, map_to_file_item)?;
 
         files.filter_map(|fi| fi.ok()).for_each(|fi| processor(fi));
@@ -146,7 +146,7 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
 
     fn iterate_files_by_directory<F>(&self, mut processor: F) -> Result<(), failure::Error>
     where
-        F: FnMut((Option<RemoteFileItemInDb>, Option<String>)) -> (),
+        F: FnMut((Option<RelativeFileItemInDb>, Option<String>)) -> (),
     {
         let conn = self.get_pool().get().unwrap();
         let mut stmt = conn.prepare("SELECT id, path FROM directory")?;
@@ -157,7 +157,7 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
             let dir_id: i64 = dir.0;
             let path = dir.1;
             processor((None, Some(path)));
-            let mut stmt = conn.prepare("SELECT id, path, sha1, len, time_modified, time_created, dir_id, changed, confirmed FROM remote_file_item where dir_id = :dir_id")?;
+            let mut stmt = conn.prepare("SELECT id, path, sha1, len, time_modified, time_created, dir_id, changed, confirmed FROM relative_file_item where dir_id = :dir_id")?;
             let files = stmt.query_map_named(
                 named_params! {
                     ":dir_id": dir_id
@@ -178,7 +178,7 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
         mut processor: F,
     ) -> Result<(), failure::Error>
     where
-        F: FnMut((Option<RemoteFileItemInDb>, Option<String>)) -> (),
+        F: FnMut((Option<RelativeFileItemInDb>, Option<String>)) -> (),
     {
         let conn = self.get_pool().get().unwrap();
         let mut stmt = conn.prepare("SELECT id, path FROM directory")?;
@@ -189,7 +189,7 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
             let dir_id: i64 = dir.0;
             let path = dir.1;
             processor((None, Some(path)));
-            let mut stmt = conn.prepare("SELECT id, path, sha1, len, time_modified, time_created, dir_id, changed, confirmed FROM remote_file_item where dir_id = :dir_id and (changed = :changed or confirmed = :confirmed)")?;
+            let mut stmt = conn.prepare("SELECT id, path, sha1, len, time_modified, time_created, dir_id, changed, confirmed FROM relative_file_item where dir_id = :dir_id and (changed = :changed or confirmed = :confirmed)")?;
             let files = stmt.query_map_named(
                 named_params! {
                     ":dir_id": dir_id,
@@ -215,12 +215,12 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
 
     fn confirm_all(&self) -> Result<u64, failure::Error> {
         let conn = self.0.get().unwrap();
-        let mut stmt = conn.prepare("UPDATE remote_file_item SET confirmed = 1")?;
+        let mut stmt = conn.prepare("UPDATE relative_file_item SET confirmed = 1")?;
         let i = stmt.execute(NO_PARAMS)?;
         Ok(i as u64)
     }
 
-    fn count_remote_file_item(&self, cc: CountItemParam) -> Result<u64, failure::Error> {
+    fn count_relative_file_item(&self, cc: CountItemParam) -> Result<u64, failure::Error> {
         let conn = self.0.get().unwrap();
         let i: i64 = match cc {
             CountItemParam {
@@ -228,7 +228,7 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
                 confirmed: None,
                 ..
             } => {
-                let mut stmt = conn.prepare("SELECT count(id) FROM remote_file_item")?;
+                let mut stmt = conn.prepare("SELECT count(id) FROM relative_file_item")?;
                 stmt.query_row(NO_PARAMS, |row| row.get(0))?
             }
             CountItemParam {
@@ -237,7 +237,7 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
                 ..
             } => {
                 let mut stmt = conn
-                    .prepare("SELECT count(id) FROM remote_file_item WHERE changed = :changed")?;
+                    .prepare("SELECT count(id) FROM relative_file_item WHERE changed = :changed")?;
                 stmt.query_row_named(
                     named_params! {
                         ":changed": changed,
@@ -251,9 +251,9 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
                 is_and,
             } => {
                 let mut stmt = if is_and == 1 {
-                    conn.prepare("SELECT count(id) FROM remote_file_item WHERE changed = :changed and confirmed = :confirmed")?
+                    conn.prepare("SELECT count(id) FROM relative_file_item WHERE changed = :changed and confirmed = :confirmed")?
                 } else {
-                    conn.prepare("SELECT count(id) FROM remote_file_item WHERE changed = :changed or confirmed = :confirmed")?
+                    conn.prepare("SELECT count(id) FROM relative_file_item WHERE changed = :changed or confirmed = :confirmed")?
                 };
                 stmt.query_row_named(
                     named_params! {
@@ -269,7 +269,7 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
                 ..
             } => {
                 let mut stmt = conn.prepare(
-                    "SELECT count(id) FROM remote_file_item WHERE confirmed = :confirmed",
+                    "SELECT count(id) FROM relative_file_item WHERE confirmed = :confirmed",
                 )?;
                 stmt.query_row_named(
                     named_params! {
@@ -282,16 +282,16 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
         Ok(i as u64)
     }
 
-    fn insert_or_update_remote_file_item(
+    fn insert_or_update_relative_file_item(
         &self,
-        mut rfi: RemoteFileItemInDb,
+        mut rfi: RelativeFileItemInDb,
         batch: bool,
-    ) -> Option<(RemoteFileItemInDb, DbAction)> {
+    ) -> Option<(RelativeFileItemInDb, DbAction)> {
         let conn = self.0.get().unwrap();
-        if let Ok(rfi_db) = self.find_remote_file_item(rfi.dir_id, rfi.path.as_str()) {
+        if let Ok(rfi_db) = self.find_relative_file_item(rfi.dir_id, rfi.path.as_str()) {
             if rfi_db.len != rfi.len || rfi_db.sha1 != rfi.sha1 || rfi_db.modified != rfi.modified {
                 if !batch {
-                    let sql_mark_changed = "UPDATE remote_file_item SET len = :len, sha1 = :sha1, time_modified = :modified, changed = :changed, confirmed = :confirmed where id = :id";
+                    let sql_mark_changed = "UPDATE relative_file_item SET len = :len, sha1 = :sha1, time_modified = :modified, changed = :changed, confirmed = :confirmed where id = :id";
                     let mut stmt_mark_changed = conn
                         .prepare(sql_mark_changed)
                         .expect("prepare sql_mark_changed failed.");
@@ -316,7 +316,7 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
                 if !batch {
                     // make changed unchanged.
                     let sql_unmark_changed =
-                        "UPDATE remote_file_item SET changed = :changed, confirmed = :confirmed where id = :id";
+                        "UPDATE relative_file_item SET changed = :changed, confirmed = :confirmed where id = :id";
                     let mut stmt_unmark = conn
                         .prepare(sql_unmark_changed)
                         .expect("prepare sql_unmark_changed failed");
@@ -337,7 +337,7 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
                 // unchanged items.
             }
         } else if !batch {
-            let sql_insert = "INSERT INTO remote_file_item (path, sha1, len, time_modified, time_created, dir_id, changed, confirmed) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)";
+            let sql_insert = "INSERT INTO relative_file_item (path, sha1, len, time_modified, time_created, dir_id, changed, confirmed) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)";
             let mut stmt_insert = conn
                 .prepare(sql_insert)
                 .expect("prepare sql_insert failed.");
@@ -384,7 +384,7 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
     fn exclude_by_sql(&self, select_id_sql: impl AsRef<str>) -> Result<u64, failure::Error> {
         let conn = self.get_pool().get().unwrap();
         let sql = format!(
-            "DELETE FROM remote_file_item WHERE id IN ({})",
+            "DELETE FROM relative_file_item WHERE id IN ({})",
             select_id_sql.as_ref()
         );
         trace!("exclude_by_sql: {}", sql);
@@ -472,7 +472,7 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
                 id  INTEGER PRIMARY KEY,
                 path TEXT NOT NULL UNIQUE
             );
-             CREATE TABLE remote_file_item (
+             CREATE TABLE relative_file_item (
                    id              INTEGER PRIMARY KEY,
                    path            TEXT NOT NULL,
                    sha1            TEXT,
@@ -484,7 +484,7 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
                    dir_id          INTEGER NOT NULL,
                    FOREIGN KEY(dir_id) REFERENCES directory(id)
                    );
-             CREATE UNIQUE INDEX dir_path ON remote_file_item (path, dir_id);
+             CREATE UNIQUE INDEX dir_path ON relative_file_item (path, dir_id);
              CREATE TABLE schedule_done (
                   id  INTEGER PRIMARY KEY,
                   server_yml_path TEXT NOT NULL,
@@ -526,10 +526,10 @@ mod tests {
         .expect("init log should success.");
     }
 
-    fn rfi_gen(dir_id: i64) -> impl FnMut() -> RemoteFileItemInDb {
+    fn rfi_gen(dir_id: i64) -> impl FnMut() -> RelativeFileItemInDb {
         let mut rng = rand::thread_rng();
         let t = Utc.ymd(1970, 1, 1).and_hms(0, 1, 1);
-        move || RemoteFileItemInDb {
+        move || RelativeFileItemInDb {
             id: 0,
             path: std::iter::repeat(())
                 .map(|()| rng.sample(Alphanumeric))
@@ -572,7 +572,7 @@ mod tests {
                 }
             })
             .flat_map(|its| its)
-            .filter_map(|line| db_access.insert_or_update_remote_file_item(line, false))
+            .filter_map(|line| db_access.insert_or_update_relative_file_item(line, false))
             .count();
         eprintln!("elapsed: {}", now.elapsed().as_secs());
         Ok(())
@@ -588,7 +588,7 @@ mod tests {
         let now = Instant::now();
         std::iter::repeat_with(rfi_gen(dir_id))
             .take(10)
-            .filter_map(|it| db_access.insert_or_update_remote_file_item(it, true))
+            .filter_map(|it| db_access.insert_or_update_relative_file_item(it, true))
             .map(|(it, da)| {
                 let s = it.to_sql_string(&da);
                 eprintln!("{:?}, {}", da, s);
@@ -599,7 +599,7 @@ mod tests {
             .for_each(|ck| db_access.execute_batch(ck));
 
         assert_eq!(
-            db_access.count_remote_file_item(CountItemParam::default())?,
+            db_access.count_relative_file_item(CountItemParam::default())?,
             10
         );
 
@@ -609,7 +609,7 @@ mod tests {
         assert!(rfis.get(1).unwrap().changed);
 
         rfis.into_iter()
-            .filter_map(|it| db_access.insert_or_update_remote_file_item(it, true))
+            .filter_map(|it| db_access.insert_or_update_relative_file_item(it, true))
             .map(|(it, da)| {
                 let s = it.to_sql_string(&da);
                 eprintln!("{:?}, {}", da, s);
@@ -631,7 +631,7 @@ mod tests {
         let conn = db_access.get_pool().get().unwrap();
         let now = Utc::now();
 
-        let rfi = RemoteFileItemInDb {
+        let rfi = RelativeFileItemInDb {
             id: 0,
             path: "a".to_owned(),
             sha1: None,
@@ -644,7 +644,7 @@ mod tests {
         };
         conn.execute(rfi.to_insert_sql_string().as_str(), NO_PARAMS)?;
 
-        let rfi = RemoteFileItemInDb {
+        let rfi = RelativeFileItemInDb {
             id: 0,
             path: "a1".to_owned(),
             sha1: Some("b".to_string()),
@@ -657,7 +657,7 @@ mod tests {
         };
         conn.execute(rfi.to_insert_sql_string().as_str(), NO_PARAMS)?;
 
-        let rfi = RemoteFileItemInDb {
+        let rfi = RelativeFileItemInDb {
             id: 0,
             path: "a2".to_owned(),
             sha1: Some("b".to_string()),
@@ -670,7 +670,7 @@ mod tests {
         };
         conn.execute(rfi.to_insert_sql_string().as_str(), NO_PARAMS)?;
 
-        let rfi = RemoteFileItemInDb {
+        let rfi = RelativeFileItemInDb {
             id: 0,
             path: "a3".to_owned(),
             sha1: Some("b".to_string()),
@@ -682,7 +682,7 @@ mod tests {
             dir_id,
         };
         let (mut rfi, _) = db_access
-            .insert_or_update_remote_file_item(rfi, false)
+            .insert_or_update_relative_file_item(rfi, false)
             .expect("insert should success.");
         rfi.changed = true;
         conn.execute(rfi.to_update_changed_sql_string().as_str(), NO_PARAMS)?;
@@ -711,15 +711,15 @@ mod tests {
 
         assert_eq!(db_access.count_directory()?, 1);
         assert_eq!(
-            db_access.count_remote_file_item(CountItemParam::default())?,
+            db_access.count_relative_file_item(CountItemParam::default())?,
             3
         );
         assert_eq!(
-            db_access.count_remote_file_item(CountItemParam::default().changed(true))?,
+            db_access.count_relative_file_item(CountItemParam::default().changed(true))?,
             3
         );
         assert_eq!(
-            db_access.count_remote_file_item(CountItemParam::default().changed(false))?,
+            db_access.count_relative_file_item(CountItemParam::default().changed(false))?,
             0
         );
 
@@ -747,19 +747,19 @@ mod tests {
 
 
         assert_eq!(
-            db_access.count_remote_file_item(CountItemParam::default())?,
+            db_access.count_relative_file_item(CountItemParam::default())?,
             3
         );
         assert_eq!(
-            db_access.count_remote_file_item(CountItemParam::default().changed(true))?,
+            db_access.count_relative_file_item(CountItemParam::default().changed(true))?,
             0
         );
         assert_eq!(
-            db_access.count_remote_file_item(CountItemParam::default().changed(false))?,
+            db_access.count_relative_file_item(CountItemParam::default().changed(false))?,
             3
         );
 
-        let num = db_access.count_remote_file_item(CountItemParam::default().confirmed(false))?;
+        let num = db_access.count_relative_file_item(CountItemParam::default().confirmed(false))?;
         assert_eq!(num, 3);
 
         {
@@ -781,11 +781,11 @@ mod tests {
 
         assert_eq!(db_access.count_directory()?, 1);
         assert_eq!(
-            db_access.count_remote_file_item(CountItemParam::default().changed(true))?,
+            db_access.count_relative_file_item(CountItemParam::default().changed(true))?,
             1
         );
         assert_eq!(
-            db_access.count_remote_file_item(CountItemParam::default().changed(false))?,
+            db_access.count_relative_file_item(CountItemParam::default().changed(false))?,
             2
         );
 
@@ -811,7 +811,7 @@ mod tests {
 
         load_remote_item_to_sqlite(&dir, &db_access, false, 50000, ".sig", ".delta")?;
         assert_eq!(
-            db_access.count_remote_file_item(CountItemParam::default())?,
+            db_access.count_relative_file_item(CountItemParam::default())?,
             4,
             "should be 4 items."
         );
@@ -822,8 +822,8 @@ mod tests {
 
         let conn = db_access.get_pool().get().unwrap();
 
-        let sql = "SELECT id FROM remote_file_item WHERE path LIKE '%.zip' ORDER BY path DESC LIMIT 100000 OFFSET 1";  // is ok
-        // let sql = "SELECT id FROM remote_file_item WHERE path LIKE '%.zip' ORDER BY path DESC OFFSET 1";  // not ok
+        let sql = "SELECT id FROM relative_file_item WHERE path LIKE '%.zip' ORDER BY path DESC LIMIT 100000 OFFSET 1";  // is ok
+        // let sql = "SELECT id FROM relative_file_item WHERE path LIKE '%.zip' ORDER BY path DESC OFFSET 1";  // not ok
 
         let mut stmt = conn.prepare(sql)?;
         let cc: Vec<i64> = stmt
@@ -840,7 +840,7 @@ mod tests {
 
         db_access.exclude_by_sql(sql)?;
         assert_eq!(
-            db_access.count_remote_file_item(CountItemParam::default())?,
+            db_access.count_relative_file_item(CountItemParam::default())?,
             2
         );
 

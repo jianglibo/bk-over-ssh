@@ -1,5 +1,5 @@
 use crate::data_shape::{
-    FileItem, FileItemProcessResult, Indicator, PbProperties, ProgressWriter, Server, SyncType,
+    FileItemMap, FileItemProcessResult, Indicator, PbProperties, ProgressWriter, Server, SyncType,
 };
 use crate::db_accesses::DbAccess;
 use crate::rustsync::{DeltaFileReader, DeltaReader, Signature};
@@ -204,17 +204,17 @@ pub fn visit_dirs(dir: &Path, cb: &dyn Fn(&fs::DirEntry)) -> io::Result<()> {
 pub fn copy_a_file_item_scp<'a>(
     session: &mut ssh2::Session,
     local_file_path: String,
-    file_item: &FileItem<'a>,
+    file_item: &FileItemMap<'a>,
     buf: &mut [u8],
     pb: &mut Indicator,
 ) -> FileItemProcessResult {
-    match session.scp_recv(Path::new(file_item.get_remote_file_name().as_str())) {
+    match session.scp_recv(Path::new(file_item.get_relative_file_name().as_str())) {
         Ok((mut file, _stat)) => {
-            if let Some(_r_sha1) = file_item.get_remote_item().get_sha1() {
+            if let Some(_r_sha1) = file_item.get_relative_item().get_sha1() {
                 match copy_stream_to_file_return_sha1_with_cb(&mut file, &local_file_path, buf, pb)
                 {
                     Ok((length, sha1)) => {
-                        if length != file_item.get_remote_item().get_len() {
+                        if length != file_item.get_relative_item().get_len() {
                             error!("length didn't match: {:?}", file_item);
                             FileItemProcessResult::LengthNotMatch(local_file_path)
                         } else if file_item.is_sha1_not_equal(&sha1) {
@@ -236,7 +236,7 @@ pub fn copy_a_file_item_scp<'a>(
             } else {
                 match copy_stream_to_file_with_cb(&mut file, &local_file_path, buf, pb) {
                     Ok(length) => {
-                        if length != file_item.get_remote_item().get_len() {
+                        if length != file_item.get_relative_item().get_len() {
                             FileItemProcessResult::LengthNotMatch(local_file_path)
                         } else {
                             FileItemProcessResult::Succeeded(
@@ -264,21 +264,21 @@ pub fn copy_a_file_item_scp<'a>(
 pub fn copy_a_file_item_sftp<'a>(
     sftp: &ssh2::Sftp,
     local_file_path: String,
-    file_item: &FileItem<'a>,
+    file_item_map: &FileItemMap<'a>,
     buf: &mut [u8],
     pb: &Indicator,
 ) -> FileItemProcessResult {
-    match sftp.open(Path::new(&file_item.get_remote_file_name())) {
+    match sftp.open(Path::new(&file_item_map.get_relative_file_name())) {
         Ok(mut file) => {
-            if let Some(_r_sha1) = file_item.get_remote_item().get_sha1() {
+            if let Some(_r_sha1) = file_item_map.get_relative_item().get_sha1() {
                 match copy_stream_to_file_return_sha1_with_cb(&mut file, &local_file_path, buf, pb)
                 {
                     Ok((length, sha1)) => {
-                        if length != file_item.get_remote_item().get_len() {
-                            error!("length didn't match: {:?}", file_item);
+                        if length != file_item_map.get_relative_item().get_len() {
+                            error!("length didn't match: {:?}", file_item_map);
                             FileItemProcessResult::LengthNotMatch(local_file_path)
-                        } else if file_item.is_sha1_not_equal(&sha1) {
-                            error!("sha1 didn't match: {:?}, local sha1: {:?}", file_item, sha1);
+                        } else if file_item_map.is_sha1_not_equal(&sha1) {
+                            error!("sha1 didn't match: {:?}, local sha1: {:?}", file_item_map, sha1);
                             FileItemProcessResult::Sha1NotMatch(local_file_path)
                         } else {
                             FileItemProcessResult::Succeeded(
@@ -296,7 +296,7 @@ pub fn copy_a_file_item_sftp<'a>(
             } else {
                 match copy_stream_to_file_with_cb(&mut file, &local_file_path, buf, pb) {
                     Ok(length) => {
-                        if length != file_item.get_remote_item().get_len() {
+                        if length != file_item_map.get_relative_item().get_len() {
                             FileItemProcessResult::LengthNotMatch(local_file_path)
                         } else {
                             FileItemProcessResult::Succeeded(
@@ -498,14 +498,14 @@ pub fn copy_a_file_item_rsync<'a, M, D>(
     server: &Server<M, D>,
     sftp: &ssh2::Sftp,
     local_file_path: String,
-    file_item: &FileItem<'a>,
+    file_item: &FileItemMap<'a>,
     progress_bar: &Indicator,
 ) -> Result<FileItemProcessResult, failure::Error>
 where
     M: r2d2::ManageConnection,
     D: DbAccess<M>,
 {
-    let remote_file_name = file_item.get_remote_file_name();
+    let remote_file_name = file_item.get_relative_file_name();
     trace!("start signature_a_file {}", &local_file_path);
     let mut sig =
         Signature::signature_a_file(&local_file_path, Some(server.server_yml.rsync.window), progress_bar)?;
@@ -653,7 +653,7 @@ pub fn copy_a_file_sftp(
 pub fn copy_a_file_item<'a, M, D>(
     server: &Server<M, D>,
     sftp: &ssh2::Sftp,
-    file_item: FileItem<'a>,
+    file_item: FileItemMap<'a>,
     buf: &mut [u8],
     pb: &mut Indicator,
 ) -> FileItemProcessResult
@@ -705,7 +705,7 @@ mod tests {
     use super::*;
     use crate::actions::{copy_a_file_sftp, ssh_util};
     use crate::data_shape::{
-        string_path, AppRole, FileItem, FileItemProcessResult, RemoteFileItem, Server, SyncType,
+        string_path, AppRole, FileItemMap, FileItemProcessResult, RelativeFileItem, Server, SyncType,
     };
     use crate::develope::tutil;
     use crate::log_util;
@@ -739,13 +739,13 @@ mod tests {
         M: r2d2::ManageConnection,
         D: DbAccess<M>,
     {
-        let ri = RemoteFileItem::new(remote_relative_path, remote_file_len);
-        let fi = FileItem::new(
+        let ri = RelativeFileItem::new(remote_relative_path, remote_file_len);
+        let fi = FileItemMap::new(
             local_base_dir,
             remote_base_dir,
             ri,
             sync_type,
-            &AppRole::PullHub,
+            true,
         );
         let sftp = server.get_ssh_session().sftp()?;
         let mut buf = vec![0; 8192];

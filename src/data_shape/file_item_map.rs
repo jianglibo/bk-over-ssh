@@ -1,4 +1,4 @@
-use super::{string_path, AppRole, RemoteFileItem};
+use super::{string_path, RelativeFileItem};
 use crate::actions::hash_file_sha1;
 use filetime;
 use log::*;
@@ -47,34 +47,34 @@ pub struct FileItemProcessResultStats {
 }
 
 #[derive(Debug)]
-pub struct FileItem<'a> {
-    pub remote_item: RemoteFileItem,
-    base_dir: &'a Path,
+pub struct FileItemMap<'a> {
+    pub relative_item: RelativeFileItem,
+    local_base_dir: &'a Path,
     remote_base_dir: Option<&'a str>,
     pub sync_type: SyncType,
-    pub app_role: &'a AppRole,
+    pub download: bool,
 }
 
-impl<'a> FileItem<'a> {
+impl<'a> FileItemMap<'a> {
     pub fn new(
-        base_dir: &'a Path,
+        local_base_dir: &'a Path,
         remote_base_dir: &'a str,
-        remote_item: RemoteFileItem,
+        relative_item: RelativeFileItem,
         sync_type: SyncType,
-        app_role: &'a AppRole,
+        download: bool,
     ) -> Self {
-        Self {
-            base_dir,
-            remote_item,
+        FileItemMap {
+            local_base_dir,
+            relative_item,
             remote_base_dir: Some(remote_base_dir),
             sync_type,
-            app_role,
+            download,
         }
     }
 
     pub fn had_changed(&self) -> bool {
         let lp = self.get_local_path();
-        let ri = &self.remote_item;
+        let ri = &self.relative_item;
         if !lp.exists() {
             return true;
         }
@@ -105,28 +105,28 @@ impl<'a> FileItem<'a> {
 
     pub fn is_sha1_not_equal(&self, local_sha1: impl AsRef<str>) -> bool {
         Some(local_sha1.as_ref().to_ascii_uppercase())
-            != self.remote_item.get_sha1().map(str::to_ascii_uppercase)
+            != self.relative_item.get_sha1().map(str::to_ascii_uppercase)
     }
 
-    pub fn get_remote_item(&self) -> &RemoteFileItem {
-        &self.remote_item
+    pub fn get_relative_item(&self) -> &RelativeFileItem {
+        &self.relative_item
     }
     pub fn get_local_path(&self) -> PathBuf {
-        let rp = self.remote_item.get_path();
-        self.base_dir.join(&rp)
+        let rp = self.relative_item.get_path();
+        self.local_base_dir.join(&rp)
     }
 
     /// If remote path is absolute then remote path will returned.
     pub fn get_local_path_str(&self) -> Option<String> {
-        let rp = self.remote_item.get_path();
-        self.base_dir.join(&rp).to_str().map(str::to_string)
+        let rp = self.relative_item.get_path();
+        self.local_base_dir.join(&rp).to_str().map(str::to_string)
     }
 
-    pub fn get_remote_file_name(&self) -> String {
+    pub fn get_relative_file_name(&self) -> String {
         if let Some(rbd) = self.remote_base_dir {
-            string_path::join_path(rbd, self.remote_item.get_path())
+            string_path::join_path(rbd, self.relative_item.get_path())
         } else {
-            self.remote_item.get_path().to_string()
+            self.relative_item.get_path().to_string()
         }
     }
 
@@ -140,7 +140,7 @@ impl<'a> FileItem<'a> {
     }
 
     pub fn verify_modified_equal(&self) {
-        if let Some(rmd) = self.remote_item.get_modified() {
+        if let Some(rmd) = self.relative_item.get_modified() {
             if let Ok(md) = self.modified_secs() {
                 if rmd != md {
                     warn!("modified not equal, local: {:?}, remote: {:?}", md, rmd);
@@ -158,7 +158,7 @@ impl<'a> FileItem<'a> {
     }
 
     pub fn set_modified_as_remote(&self) -> Result<(), failure::Error> {
-        if let Some(md) = self.remote_item.get_modified() {
+        if let Some(md) = self.relative_item.get_modified() {
             let ft = filetime::FileTime::from_unix_time(md as i64, 0);
             filetime::set_file_mtime(self.get_local_path(), ft)?;
         } else {

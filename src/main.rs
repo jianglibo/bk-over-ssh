@@ -101,6 +101,8 @@ fn main() -> Result<(), failure::Error> {
         ""
     };
 
+    app_conf.mini_app_conf.console_log = console_log;
+
     app_conf.mini_app_conf.verbose = !verbose.is_empty();
     log_util::setup_logger_for_this_app(
         console_log,
@@ -115,7 +117,7 @@ fn main() -> Result<(), failure::Error> {
         let db_type = sub_matches.value_of("db-type").unwrap_or("sqlite");
         let force = sub_matches.is_present("force");
         server.connect()?;
-        return server.create_remote_db(db_type, force, sub_matches.value_of("server-yml"));
+        return server.create_remote_db(db_type, force);
     }
 
     if let ("create-db", Some(sub_matches)) = m.subcommand() {
@@ -127,7 +129,8 @@ fn main() -> Result<(), failure::Error> {
                 let (mut server, _indicator) =
                     command::load_server_yml_by_name(&app_conf, server_yml, false)?;
                 if force {
-                    fs::remove_file(server.get_db_file())?;
+                    info!("removing server side db file: {:?}", server.get_db_file());
+                    fs::remove_file(server.get_db_file()).ok();
                 }
                 let sqlite_db_access = SqliteDbAccess::new(server.get_db_file());
                 sqlite_db_access.create_database()?;
@@ -138,7 +141,8 @@ fn main() -> Result<(), failure::Error> {
                     SqliteDbAccess,
                 >(conf, None, false)?;
                 if force {
-                    fs::remove_file(app_conf.get_sqlite_db_file())?;
+                    info!("removing app side db file: {:?}", app_conf.get_sqlite_db_file());
+                    fs::remove_file(app_conf.get_sqlite_db_file()).ok();
                 }
                 let sqlite_db_access = SqliteDbAccess::new(app_conf.get_sqlite_db_file());
                 sqlite_db_access.create_database()?;
@@ -253,7 +257,7 @@ fn main_entry<'a>(
             }
         }
         ("copy-server-yml", Some(sub_matches)) => {
-            let (server, _indicator) =
+            let (mut server, _indicator) =
                 command::load_server_yml(app_conf, sub_matches.value_of("server-yml"), false)?;
             let remote = server.get_remote_server_yml();
             let local = server
@@ -262,6 +266,7 @@ fn main_entry<'a>(
                 .and_then(|pb| pb.to_str())
                 .unwrap()
                 .to_string();
+            server.connect()?;
             server.copy_a_file(&local, &remote)?;
             println!(
                 "copy from {} to {} {} succeeded.",

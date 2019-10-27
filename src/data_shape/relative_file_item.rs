@@ -1,7 +1,7 @@
 use super::Directory;
 use crate::actions::hash_file_sha1;
 use crate::data_shape::SlashPath;
-use crate::db_accesses::{DbAccess, RemoteFileItemInDb};
+use crate::db_accesses::{DbAccess, RelativeFileItemInDb};
 use itertools::Itertools;
 use log::*;
 use r2d2;
@@ -13,7 +13,7 @@ use std::time::SystemTime;
 use walkdir::WalkDir;
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct RemoteFileItem {
+pub struct RelativeFileItem {
     path: String,
     sha1: Option<String>,
     len: u64,
@@ -23,7 +23,7 @@ pub struct RemoteFileItem {
     confirmed: bool,
 }
 
-impl RemoteFileItem {
+impl RelativeFileItem {
     pub fn from_path(base_path: &SlashPath, path: PathBuf, skip_sha1: bool) -> Option<Self> {
         let metadata_r = path.metadata();
         match metadata_r {
@@ -53,16 +53,16 @@ impl RemoteFileItem {
                 });
             }
             Err(err) => {
-                error!("RemoteFileItem from_path failed: {:?}, {:?}", path, err);
+                error!("RelativeFileItem from_path failed: {:?}, {:?}", path, err);
             }
         }
         None
     }
 }
 
-impl std::convert::From<RemoteFileItemInDb> for RemoteFileItem {
-    fn from(rfidb: RemoteFileItemInDb) -> Self {
-        RemoteFileItem {
+impl std::convert::From<RelativeFileItemInDb> for RelativeFileItem {
+    fn from(rfidb: RelativeFileItemInDb) -> Self {
+        RelativeFileItem {
             path: rfidb.path,
             sha1: rfidb.sha1,
             len: rfidb.len as u64,
@@ -74,7 +74,7 @@ impl std::convert::From<RemoteFileItemInDb> for RemoteFileItem {
     }
 }
 
-impl RemoteFileItem {
+impl RelativeFileItem {
     #[allow(dead_code)]
     pub fn new(relative_path: &str, len: u64) -> Self {
         Self {
@@ -142,12 +142,12 @@ where
             .filter(|d| d.file_type().is_file())
             .filter_map(|d| d.path().canonicalize().ok())
             .filter_map(|d| directory.match_path(d))
-            // .filter_map(|d| RemoteFileItemInDb::from_path(&base_path, d, skip_sha1, dir_id))
+            // .filter_map(|d| RelativeFileItemInDb::from_path(&base_path, d, skip_sha1, dir_id))
             .filter_map(|d| {
-                RemoteFileItemInDb::from_path(&directory.remote_dir, d, skip_sha1, dir_id)
+                RelativeFileItemInDb::from_path(&directory.remote_dir, d, skip_sha1, dir_id)
             })
             .filter(|rfi| !(rfi.path.ends_with(sig_ext) || rfi.path.ends_with(delta_ext)))
-            .filter_map(|rfi| db_access.insert_or_update_remote_file_item(rfi, true))
+            .filter_map(|rfi| db_access.insert_or_update_relative_file_item(rfi, true))
             .map(|(rfi, da)| rfi.to_sql_string(&da))
             .chunks(sql_batch_size)
             .into_iter()
@@ -165,10 +165,10 @@ where
             .filter_map(|d| d.path().canonicalize().ok())
             .filter_map(|d| directory.match_path(d))
             .filter_map(|d| {
-                RemoteFileItemInDb::from_path(&directory.remote_dir, d, skip_sha1, dir_id)
+                RelativeFileItemInDb::from_path(&directory.remote_dir, d, skip_sha1, dir_id)
             })
-            // .filter_map(|d| RemoteFileItemInDb::from_path(&base_path, d, skip_sha1, dir_id))
-            .filter_map(|rfi| db_access.insert_or_update_remote_file_item(rfi, false))
+            // .filter_map(|d| RelativeFileItemInDb::from_path(&base_path, d, skip_sha1, dir_id))
+            .filter_map(|rfi| db_access.insert_or_update_relative_file_item(rfi, false))
             .count();
     }
     Ok(())
@@ -193,7 +193,7 @@ where
         .filter(|d| d.file_type().is_file())
         .filter_map(|d| d.path().canonicalize().ok())
         .filter_map(|d| directory.match_path(d))
-        .filter_map(|d| RemoteFileItem::from_path(&directory.remote_dir, d, skip_sha1))
+        .filter_map(|d| RelativeFileItem::from_path(&directory.remote_dir, d, skip_sha1))
         .for_each(|rfi| match serde_json::to_string(&rfi) {
             Ok(line) => {
                 if let Err(err) = writeln!(out, "{}", line) {
@@ -218,11 +218,11 @@ mod tests {
         log_util::setup_logger_detail(
             true,
             "output.log",
-            vec!["data_shape::remote_file_item"],
+            vec!["data_shape::relative_file_item"],
             Some(vec!["ssh2"]),
             "",
         )?;
-        let item = RemoteFileItem {
+        let item = RelativeFileItem {
             path: "b b\\b b.txt".to_string(),
             sha1: None,
             len: 5,
@@ -232,46 +232,46 @@ mod tests {
             confirmed: false,
         };
 
-        // let item: RemoteFileItem = RemoteFileItem::from(&item_owned);
+        // let item: RelativeFileItem = RelativeFileItem::from(&item_owned);
 
         info!("item: {:?}", item);
 
         let s = serde_json::to_string(&item)?;
         info!("item str: {}", s);
 
-        // let item: RemoteFileItem = serde_json::from_str(&s)?;
+        // let item: RelativeFileItem = serde_json::from_str(&s)?;
         // assert_eq!(item.get_len(), 5);
 
         let s = r##"{"path":"qrcode.png","sha1":null,"len":6044,"created":1567834936,"modified":1567834936}"##;
-        let fi: RemoteFileItem = serde_json::from_str(s)?;
+        let fi: RelativeFileItem = serde_json::from_str(s)?;
         assert_eq!(fi.get_len(), 6044);
 
         let s = r##"{"path":"b b\b b.txt","sha1":null,"len":5,"created":1565607566,"modified":1565607566}"##;
-        let fi_r = serde_json::from_str::<RemoteFileItem>(s);
+        let fi_r = serde_json::from_str::<RelativeFileItem>(s);
         assert!(fi_r.is_ok());
 
         let s = r##"{"path":"b b\\b b.txt","sha1":null,"len":5,"created":1565607566,"modified":1565607566}"##;
-        let fi_r = serde_json::from_str::<RemoteFileItem>(s);
+        let fi_r = serde_json::from_str::<RelativeFileItem>(s);
         assert!(fi_r.is_ok());
 
         let s = r##"{"path":"b b\\\b b.txt","sha1":null,"len":5,"created":1565607566,"modified":1565607566}"##;
-        let fi_r = serde_json::from_str::<RemoteFileItem>(s);
+        let fi_r = serde_json::from_str::<RelativeFileItem>(s);
         assert!(fi_r.is_ok());
 
         let s = r##"{"path":"b b\\\\b b.txt","sha1":null,"len":5,"created":1565607566,"modified":1565607566}"##;
-        let fi_r = serde_json::from_str::<RemoteFileItem>(s);
+        let fi_r = serde_json::from_str::<RelativeFileItem>(s);
         assert!(fi_r.is_ok());
 
         let s = r##"{"path":"b b\\\\\\b b.txt","sha1":null,"len":5,"created":1565607566,"modified":1565607566}"##;
-        let fi_r = serde_json::from_str::<RemoteFileItem>(s);
+        let fi_r = serde_json::from_str::<RelativeFileItem>(s);
         assert!(fi_r.is_ok());
 
         let s = r##"{"path":"b b\\\\\\\\b b.txt","sha1":null,"len":5,"created":1565607566,"modified":1565607566}"##;
-        let fi_r = serde_json::from_str::<RemoteFileItem>(s);
+        let fi_r = serde_json::from_str::<RelativeFileItem>(s);
         assert!(fi_r.is_ok());
 
         let s = r##"{"path":"b b/b b.txt","sha1":null,"len":5,"created":1565607566,"modified":1565607566}"##;
-        let fi = serde_json::from_str::<RemoteFileItem>(s)?;
+        let fi = serde_json::from_str::<RelativeFileItem>(s)?;
         assert_eq!(fi.get_len(), 5);
 
         Ok(())

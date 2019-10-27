@@ -58,7 +58,7 @@ impl CountItemParam {
 }
 
 #[derive(Debug, Default)]
-pub struct RemoteFileItemInDb {
+pub struct RelativeFileItemInDb {
     pub id: i64,
     pub path: String,
     pub sha1: Option<String>,
@@ -70,10 +70,10 @@ pub struct RemoteFileItemInDb {
     pub confirmed: bool,
 }
 
-impl RemoteFileItemInDb {
+impl RelativeFileItemInDb {
     #[allow(dead_code)]
-    pub fn duplicate_self(&self) -> RemoteFileItemInDb {
-        RemoteFileItemInDb {
+    pub fn duplicate_self(&self) -> RelativeFileItemInDb {
+        RelativeFileItemInDb {
             id: self.id,
             path: self.path.clone(),
             sha1: self.sha1.clone(),
@@ -114,7 +114,7 @@ impl RemoteFileItemInDb {
                 });
             }
             Err(err) => {
-                error!("RemoteFileItem metadata failed: {:?}, {:?}", path, err);
+                error!("RelativeFileItem metadata failed: {:?}, {:?}", path, err);
             }
         }
         None
@@ -122,7 +122,7 @@ impl RemoteFileItemInDb {
 
     pub fn to_insert_sql_string(&self) -> String {
         // path, sha1, len, time_modified, time_created, dir_id, changed
-        format!("INSERT INTO remote_file_item (path, {}len, {}{}dir_id, changed, confirmed) VALUES ('{}', {}{}, {}{}{}, {}, {});"
+        format!("INSERT INTO relative_file_item (path, {}len, {}{}dir_id, changed, confirmed) VALUES ('{}', {}{}, {}{}{}, {}, {});"
         , self.sha1.as_ref().map(|_|"sha1, ").unwrap_or("")
         , self.modified.map(|_|"time_modified, ").unwrap_or("")
         , self.created.map(|_|"time_created, ").unwrap_or("")
@@ -139,7 +139,7 @@ impl RemoteFileItemInDb {
 
     pub fn to_update_sql_string(&self) -> String {
         format!(
-            "UPDATE remote_file_item SET len = {}, {}{}changed = 1, confirmed = 0 where id = {};",
+            "UPDATE relative_file_item SET len = {}, {}{}changed = 1, confirmed = 0 where id = {};",
             self.len,
             self.sha1
                 .as_ref()
@@ -157,7 +157,7 @@ impl RemoteFileItemInDb {
 
     pub fn to_update_changed_sql_string(&self) -> String {
         format!(
-            "UPDATE remote_file_item SET changed = {}, confirmed = 0 where id = {};",
+            "UPDATE relative_file_item SET changed = {}, confirmed = 0 where id = {};",
             if self.changed { 1 } else { 0 },
             self.id
         )
@@ -177,34 +177,34 @@ where
     M: r2d2::ManageConnection,
 {
     fn insert_directory(&self, path: impl AsRef<str>) -> Result<i64, failure::Error>;
-    fn insert_or_update_remote_file_item(
+    fn insert_or_update_relative_file_item(
         &self,
-        rfi: RemoteFileItemInDb,
+        rfi: RelativeFileItemInDb,
         batch: bool,
-    ) -> Option<(RemoteFileItemInDb, DbAction)>;
-    fn get_file_item(&self, num: usize) -> Result<Vec<RemoteFileItemInDb>, failure::Error>;
-    fn find_remote_file_item(
+    ) -> Option<(RelativeFileItemInDb, DbAction)>;
+    fn get_file_item(&self, num: usize) -> Result<Vec<RelativeFileItemInDb>, failure::Error>;
+    fn find_relative_file_item(
         &self,
         dir_id: i64,
         path: impl AsRef<str>,
-    ) -> Result<RemoteFileItemInDb, failure::Error>;
+    ) -> Result<RelativeFileItemInDb, failure::Error>;
     fn create_database(&self) -> Result<(), failure::Error>;
     fn find_directory(&self, path: impl AsRef<str>) -> Result<i64, failure::Error>;
     fn count_directory(&self) -> Result<u64, failure::Error>;
-    fn count_remote_file_item(&self, cc: CountItemParam) -> Result<u64, failure::Error>;
+    fn count_relative_file_item(&self, cc: CountItemParam) -> Result<u64, failure::Error>;
     fn iterate_all_file_items<P>(&self, processor: P) -> Result<(usize, usize), failure::Error>
     where
-        P: Fn(RemoteFileItemInDb) -> ();
+        P: Fn(RelativeFileItemInDb) -> ();
     fn iterate_files_by_directory<F>(&self, processor: F) -> Result<(), failure::Error>
     where
-        F: FnMut((Option<RemoteFileItemInDb>, Option<String>)) -> ();
+        F: FnMut((Option<RelativeFileItemInDb>, Option<String>)) -> ();
 
     fn iterate_files_by_directory_changed_or_unconfirmed<F>(
         &self,
         processor: F,
     ) -> Result<(), failure::Error>
     where
-        F: FnMut((Option<RemoteFileItemInDb>, Option<String>)) -> ();
+        F: FnMut((Option<RelativeFileItemInDb>, Option<String>)) -> ();
 
     fn find_next_execute(
         &self,

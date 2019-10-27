@@ -62,7 +62,7 @@ use_db: true
 skip_sha1: true
 sql_batch_size: 50000
 exclude_by_sql: [] # selected item will delete from database, that's as if excluded too.
-#SELECT id FROM remote_file_item WHERE path LIKE '%.zip' ORDER BY path DESC LIMIT 100000 OFFSET 1 # both limit and offset are required.
+#SELECT id FROM relative_file_item WHERE path LIKE '%.zip' ORDER BY path DESC LIMIT 100000 OFFSET 1 # both limit and offset are required.
 rsync:
   window: 4096
   valve: 419430400 #if file length greater than this value, will use rsync agrithm to transfer file.

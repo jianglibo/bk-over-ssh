@@ -1,22 +1,21 @@
-use super::RemoteFileItem;
+use super::{RelativeFileItem, SlashPath};
 use log::*;
 use std::io;
 use std::io::prelude::{BufRead, Read};
 use std::iter::Iterator;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 #[derive(Debug)]
 pub struct PrimaryFileItem {
-    pub local_dir: Arc<PathBuf>,
-    pub remote_dir: Arc<String>,
-    pub remote_file_item: RemoteFileItem,
+    pub local_dir: Arc<SlashPath>,
+    pub remote_dir: Arc<SlashPath>,
+    pub relative_file_item: RelativeFileItem,
 }
 
 #[derive(Debug)]
 pub struct FileItemDirectory<R: BufRead> {
-    pub dir_name: Arc<PathBuf>,
-    pub remote_dir: Arc<String>,
+    pub local_dir: Arc<SlashPath>,
+    pub remote_dir: Arc<SlashPath>,
     reader: Arc<Mutex<R>>,
     maybe_dir_line: Arc<Mutex<Option<String>>>,
 }
@@ -44,12 +43,12 @@ impl<R: BufRead> Iterator for FileItemDirectory<R> {
                     }
                     if line.starts_with('{') {
                         trace!("got item line {}", line);
-                        match serde_json::from_str::<RemoteFileItem>(&line) {
-                            Ok(remote_file_item) => {
+                        match serde_json::from_str::<RelativeFileItem>(&line) {
+                            Ok(relative_file_item) => {
                                 let fi = PrimaryFileItem {
-                                    local_dir: self.dir_name.clone(),
+                                    local_dir: self.local_dir.clone(),
                                     remote_dir: self.remote_dir.clone(),
-                                    remote_file_item,
+                                    relative_file_item,
                                 };
                                 return Some(fi);
                             }
@@ -65,7 +64,7 @@ impl<R: BufRead> Iterator for FileItemDirectory<R> {
                         self.maybe_dir_line
                             .lock()
                             .expect("maybe_dir_line lock failed")
-                            .replace(line.to_owned());
+                            .replace(SlashPath::new(line).get_slash());
                         return None;
                     }
                 }
@@ -77,31 +76,54 @@ impl<R: BufRead> Iterator for FileItemDirectory<R> {
 
 impl<R: BufRead> FileItemDirectory<R> {
     pub fn new(
-        dir_name: String,
+        local_dir: SlashPath,
+        remote_dir: SlashPath,
         reader: Arc<Mutex<R>>,
         maybe_dir_line: Arc<Mutex<Option<String>>>,
     ) -> Self {
         Self {
-            dir_name: Arc::new(PathBuf::from(dir_name)),
+            local_dir: Arc::new(local_dir),
+            remote_dir: Arc::new(remote_dir),
             reader,
             maybe_dir_line,
-            remote_dir: Arc::new("".to_owned()),
         }
     }
 }
 
 pub struct FileItemDirectories<R: BufRead> {
     reader: Arc<Mutex<R>>,
+    local_remote_pairs: Vec<(SlashPath, SlashPath)>,
     maybe_dir_line: Arc<Mutex<Option<String>>>,
 }
 
 impl<R: BufRead> FileItemDirectories<R> {
-    pub fn from_file_reader<RR: Read>(reader: RR) -> FileItemDirectories<io::BufReader<RR>> {
+    pub fn from_file_reader<RR: Read>(
+        reader: RR,
+        local_remote_pairs: Vec<(SlashPath, SlashPath)>,
+    ) -> FileItemDirectories<io::BufReader<RR>> {
         let reader = io::BufReader::new(reader);
         FileItemDirectories {
             reader: Arc::new(Mutex::new(reader)),
             maybe_dir_line: Arc::new(Mutex::new(None)),
-            // phantom: PhantomData,
+            local_remote_pairs,
+        }
+    }
+
+    fn process_dir_line(&self, line: impl AsRef<str>) -> Option<FileItemDirectory<R>> {
+        let line = SlashPath::new(line);
+
+        if let Some((local_dir, remote_dir)) =
+            self.local_remote_pairs.iter().find(|pair| pair.0 == line)
+        {
+            Some(FileItemDirectory::new(
+                local_dir.clone(),
+                remote_dir.clone(),
+                self.reader.clone(),
+                self.maybe_dir_line.clone(),
+            ))
+        } else {
+            warn!("no matching local directory: {:?}", line);
+            None
         }
     }
 }
@@ -116,45 +138,39 @@ impl<R: BufRead> Iterator for FileItemDirectories<R> {
             .expect("maybe_dir_line lock failed")
             .take()
         {
-            Some(FileItemDirectory::new(
-                line,
-                self.reader.clone(),
-                self.maybe_dir_line.clone(),
-            ))
-        } else {
-            let mut line = String::new();
-            loop {
-                line.clear();
-                match self
-                    .reader
-                    .lock()
-                    .expect("lock FileItemDirectories reader failed")
-                    .read_line(&mut line)
-                {
-                    Ok(0) => {
-                        return None;
+            info!("got maybe_dir_line: {}", line);
+            if let Some(d) = self.process_dir_line(line) {
+                return Some(d);
+            }
+        }
+
+        let mut line = String::new();
+        loop {
+            line.clear();
+            match self
+                .reader
+                .lock()
+                .expect("lock FileItemDirectories reader failed")
+                .read_line(&mut line)
+            {
+                Ok(0) => {
+                    return None;
+                }
+                Ok(_) => {
+                    let line = line.trim();
+                    if line.is_empty() {
+                        continue;
                     }
-                    Ok(_) => {
-                        let line = line.trim();
-                        if line.is_empty() {
-                            continue;
-                        }
-                        if line.starts_with('{') {
-                            trace!("got item line {}", line);
-                        } else {
-                            trace!(
-                            "got directory line, it's a remote represent of path, be careful: {:?}",
+                    if line.starts_with('{') {
+                        warn!(
+                            "got item line {}, it will not happen in the normal condition.",
                             line
                         );
-                            return Some(FileItemDirectory::new(
-                                line.to_owned(),
-                                self.reader.clone(),
-                                self.maybe_dir_line.clone(),
-                            ));
-                        }
+                    } else if let Some(d) = self.process_dir_line(line) {
+                        return Some(d);
                     }
-                    Err(err) => error!("read line failed failed: {:?}", err),
                 }
+                Err(err) => error!("read line failed failed: {:?}", err),
             }
         }
     }
@@ -183,6 +199,8 @@ mod tests {
         log();
         let tu = tutil::TestDir::new();
         let content = r##"
+xabc
+\\?\F:\github\bk-over-ssh\fixtures\a-dir
 \\?\F:\github\bk-over-ssh\fixtures\a-dir
 {"path":"a.txt","sha1":null,"len":1,"modified":1571310663,"created":1571310663,"changed":false,"confirmed":false}
 {"path":"b\\b.txt","sha1":null,"len":1,"modified":1571310663,"created":1571310663,"changed":false,"confirmed":false}
@@ -192,17 +210,39 @@ mod tests {
 {"path":"Tomcat6\\logs\\catalina.out","sha1":null,"len":5,"modified":1571310663,"created":1571310663,"changed":false,"confirmed":false}
 {"path":"鮮やか","sha1":null,"len":6,"modified":1571310663,"created":1571310663,"changed":false,"confirmed":false}
 "##;
-        let f = tu.make_a_file_with_content("abc.txt", content)?;
+        let ge = || {
+            let f = tu
+                .make_a_file_with_content("abc.txt", content)
+                .expect("make_a_file_with_content failed");
 
-        let reader = fs::OpenOptions::new().read(true).open(f)?;
+            let reader = fs::OpenOptions::new()
+                .read(true)
+                .open(f)
+                .expect("read failed");
 
-        let ddd = FileItemDirectories::<io::BufReader<fs::File>>::from_file_reader(reader);
-        // let ddd: FileItemDirectories<io::BufReader<fs::File>> = FileItemDirectories::<_>::from_file_reader(reader);
+            let local_remote_pairs = vec![(
+                SlashPath::new("F:\\github\\bk-over-ssh\\fixtures\\a-dir"),
+                SlashPath::new("a-dir"),
+            )];
 
-        for d in ddd {
-            // println!("{:?}", d);
-            for fi in d {
-                println!("{:?}", fi);
+            FileItemDirectories::<io::BufReader<fs::File>>::from_file_reader(
+                reader,
+                local_remote_pairs,
+            )
+        };
+
+        assert_eq!(ge().count(), 2);
+
+        let mut file_item_directories = ge();
+
+        let one = file_item_directories.next().unwrap();
+        assert_eq!(one.count(), 0);
+        let two = file_item_directories.next().unwrap();
+        assert_eq!(two.count(), 7);
+
+        for file_item_directory in ge() {
+            for primay_file_item in file_item_directory {
+                eprintln!("{:?}", primay_file_item);
             }
         }
         Ok(())

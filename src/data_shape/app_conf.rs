@@ -142,6 +142,7 @@ pub struct MiniAppConf {
     pub app_instance_id: String,
     pub app_role: AppRole,
     pub verbose: bool,
+    pub console_log: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -206,6 +207,7 @@ where
             archive_cmd: Vec::new(),
             app_role,
             verbose: false,
+            console_log: false,
         },
     }
 }
@@ -335,6 +337,7 @@ where
                                 archive_cmd,
                                 app_role,
                                 verbose: false,
+                                console_log: false,
                             },
                         };
                         Ok(app_conf)

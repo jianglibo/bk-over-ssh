@@ -19,41 +19,8 @@ pub struct Directory {
     pub excludes_patterns: Option<Vec<Pattern>>,
 }
 
-// #[derive(Deserialize, Serialize, Default, Debug)]
-// pub struct Directory {
-//     pub remote_dir: String,
-//     pub local_dir: String,
-//     pub includes: Vec<String>,
-//     pub excludes: Vec<String>,
-//     #[serde(skip)]
-//     pub includes_patterns: Option<Vec<Pattern>>,
-//     #[serde(skip)]
-//     pub excludes_patterns: Option<Vec<Pattern>>,
-// }
-
 impl Directory {
-    // pub fn get_remote_dir(&self) -> &str {
-    //     self.remote_dir.as_str()
-    // }
 
-    // pub fn get_remote_canonicalized_dir_str(&self) -> Result<String, failure::Error> {
-    //     let bp = Path::new(self.get_remote_dir()).canonicalize();
-    //     match bp {
-    //         Ok(base_path) => {
-    //             if let Some(path_str) = base_path.to_str() {
-    //                 Ok(path_str.to_owned())
-    //             } else {
-    //                 bail!("base_path to_str failed: {:?}", base_path);
-    //             }
-    //         }
-    //         Err(_err) => {
-    //             bail!(
-    //                 "canonicalize remote path failed: {:?}",
-    //                 self.get_remote_dir()
-    //             );
-    //         }
-    //     }
-    // }
     /// for test purpose.
     /// local_dir will change to absolute when load from yml file.
     #[allow(dead_code)]

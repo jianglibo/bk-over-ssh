@@ -145,8 +145,8 @@ use r2d2_sqlite::SqliteConnectionManager;
     fn t_sftp_resume_file() -> Result<(), failure::Error> {
         // log_util::setup_logger(vec![""], vec![]);
         // let (_tcp, mut sess, _dev_env) = develope_data::connect_to_ubuntu();
-        // let rdo = RemoteFileItemDirOwned::load_dir("fixtures/adir");
-        // let rd: RemoteFileItemDir = (&rdo).into();
+        // let rdo = RelativeFileItemDirOwned::load_dir("fixtures/adir");
+        // let rd: RelativeFileItemDir = (&rdo).into();
         // let remote_item = rd
         //     .get_items()
         //     .iter()
