@@ -1,16 +1,16 @@
 use super::{
     string_path::{self, SlashPath},
-    RelativeFileItem,
+    AppRole, RelativeFileItem,
 };
+use crate::db_accesses::{DbAccess, RelativeFileItemInDb};
 use glob::Pattern;
+use itertools::Itertools;
 use log::*;
+use r2d2;
 use serde::{Deserialize, Serialize};
 use std::io;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
-use crate::db_accesses::{DbAccess, RelativeFileItemInDb};
-use r2d2;
-use itertools::Itertools;
 
 #[derive(Deserialize, Serialize, Default, Debug)]
 pub struct Directory {
@@ -195,12 +195,27 @@ impl Directory {
         Ok(())
     }
 
-    pub fn load_relative_item<O>(&self, out: &mut O, skip_sha1: bool) -> Result<(), failure::Error>
+    /// The method read information of files from disk file.
+    /// but from which directory to read on? local_dir or remote_dir?
+    /// It depends on the role of the running application.
+    /// when as AppRole::PassiveLeaf use remote_dir.
+    /// when as AppRole::ActiveLeaf use local_dir.
+    pub fn load_relative_item<O>(
+        &self,
+        app_role: &AppRole,
+        out: &mut O,
+        skip_sha1: bool,
+    ) -> Result<(), failure::Error>
     where
         O: io::Write,
     {
         trace!("load_relative_item, skip_sha1: {}", skip_sha1);
-        WalkDir::new(self.remote_dir.as_path())
+        let dir_to_read = match app_role {
+            AppRole::PassiveLeaf => &self.remote_dir,
+            AppRole::ActiveLeaf => &self.local_dir,
+            _ => bail!("when invoking load_relative_item, got unsupported app role. {:?}", app_role),
+        };
+        WalkDir::new(dir_to_read.as_path())
             .follow_links(false)
             .into_iter()
             .filter_map(|e| e.ok())
@@ -208,7 +223,7 @@ impl Directory {
             .filter_map(|dir_entry| dir_entry.path().canonicalize().ok())
             .filter_map(|path_buf| self.match_path(path_buf))
             .filter_map(|path_buf| {
-                RelativeFileItem::from_path(&self.remote_dir, path_buf, skip_sha1)
+                RelativeFileItem::from_path(dir_to_read, path_buf, skip_sha1)
             })
             .for_each(|rfi| match serde_json::to_string(&rfi) {
                 Ok(line) => {
@@ -229,69 +244,77 @@ impl Directory {
         vec![]
     }
 
-/// this function will walk over the directory, for every file checking it's metadata and compare to corepsonding item in the db.
-/// for new and changed items mark changed field to true.
-/// for unchanged items, if the status in db is changed chang to unchanged.
-/// So after invoking this method all changed item will be marked, at the same time, metadata of items were updated too, this means you cannot regenerate the same result if the task is interupted.
-/// To avoid this kind of situation, add a confirm field to the table. when the taks is done, we chang the confirm field to true.
-/// Now we get the previous result by select the unconfirmed items.
-pub fn load_relative_item_to_sqlite<M, D>(
-    &self,
-    db_access: &D,
-    skip_sha1: bool,
-    sql_batch_size: usize,
-    sig_ext: &str,
-    delta_ext: &str,
-) -> Result<(), failure::Error>
-where
-    M: r2d2::ManageConnection,
-    D: DbAccess<M>,
-{
-    trace!(
-        "load_relative_item_to_sqlite, skip_sha1: {}, sql_batch_size: {}",
-        skip_sha1,
-        sql_batch_size
-    );
-    let base_path = self.remote_dir.as_str();
-    let dir_id = db_access.insert_directory(base_path)?;
+    /// this function will walk over the directory, for every file checking it's metadata and compare to corepsonding item in the db.
+    /// for new and changed items mark changed field to true.
+    /// for unchanged items, if the status in db is changed chang to unchanged.
+    /// So after invoking this method all changed item will be marked, at the same time, metadata of items were updated too, this means you cannot regenerate the same result if the task is interupted.
+    /// To avoid this kind of situation, add a confirm field to the table. when the taks is done, we chang the confirm field to true.
+    /// Now we get the previous result by select the unconfirmed items.
+    pub fn load_relative_item_to_sqlite<M, D>(
+        &self,
+        app_role: &AppRole,
+        db_access: &D,
+        skip_sha1: bool,
+        sql_batch_size: usize,
+        sig_ext: &str,
+        delta_ext: &str,
+    ) -> Result<(), failure::Error>
+    where
+        M: r2d2::ManageConnection,
+        D: DbAccess<M>,
+    {
+        trace!(
+            "load_relative_item_to_sqlite, skip_sha1: {}, sql_batch_size: {}",
+            skip_sha1,
+            sql_batch_size
+        );
 
-    if sql_batch_size > 1 {
-        WalkDir::new(&base_path)
-            .follow_links(false)
-            .into_iter()
-            .filter_map(|e| e.ok())
-            .filter(|d| d.file_type().is_file())
-            .filter_map(|d| d.path().canonicalize().ok())
-            .filter_map(|d| self.match_path(d))
-            .filter_map(|d| {
-                RelativeFileItemInDb::from_path(&self.remote_dir, d, skip_sha1, dir_id)
-            })
-            .filter(|rfi| !(rfi.path.ends_with(sig_ext) || rfi.path.ends_with(delta_ext)))
-            .filter_map(|rfi| db_access.insert_or_update_relative_file_item(rfi, true))
-            .map(|(rfi, da)| rfi.to_sql_string(&da))
-            .chunks(sql_batch_size)
-            .into_iter()
-            .for_each(|ck| {
-                trace!("start batch insert.");
-                db_access.execute_batch(ck);
-                trace!("end batch insert.");
-            });
-    } else {
-        let _c = WalkDir::new(&base_path)
-            .follow_links(false)
-            .into_iter()
-            .filter_map(|e| e.ok())
-            .filter(|d| d.file_type().is_file())
-            .filter_map(|d| d.path().canonicalize().ok())
-            .filter_map(|d| self.match_path(d))
-            .filter_map(|d| {
-                RelativeFileItemInDb::from_path(&self.remote_dir, d, skip_sha1, dir_id)
-            })
-            .filter_map(|rfi| db_access.insert_or_update_relative_file_item(rfi, false))
-            .count();
+        let dir_to_read = match app_role {
+            AppRole::PassiveLeaf => &self.remote_dir,
+            AppRole::ActiveLeaf => &self.local_dir,
+            _ => bail!("when invoking load_relative_item, got unsupported app role. {:?}", app_role),
+        };
+
+        let base_path = dir_to_read.as_str();
+        let dir_id = db_access.insert_directory(base_path)?;
+
+        if sql_batch_size > 1 {
+            WalkDir::new(&base_path)
+                .follow_links(false)
+                .into_iter()
+                .filter_map(|e| e.ok())
+                .filter(|d| d.file_type().is_file())
+                .filter_map(|d| d.path().canonicalize().ok())
+                .filter_map(|d| self.match_path(d))
+                .filter_map(|d| {
+                    RelativeFileItemInDb::from_path(dir_to_read, d, skip_sha1, dir_id)
+                })
+                .filter(|rfi| !(rfi.path.ends_with(sig_ext) || rfi.path.ends_with(delta_ext)))
+                .filter_map(|rfi| db_access.insert_or_update_relative_file_item(rfi, true))
+                .map(|(rfi, da)| rfi.to_sql_string(&da))
+                .chunks(sql_batch_size)
+                .into_iter()
+                .for_each(|ck| {
+                    trace!("start batch insert.");
+                    db_access.execute_batch(ck);
+                    trace!("end batch insert.");
+                });
+        } else {
+            let _c = WalkDir::new(&base_path)
+                .follow_links(false)
+                .into_iter()
+                .filter_map(|e| e.ok())
+                .filter(|d| d.file_type().is_file())
+                .filter_map(|d| d.path().canonicalize().ok())
+                .filter_map(|d| self.match_path(d))
+                .filter_map(|d| {
+                    RelativeFileItemInDb::from_path(dir_to_read, d, skip_sha1, dir_id)
+                })
+                .filter_map(|rfi| db_access.insert_or_update_relative_file_item(rfi, false))
+                .count();
+        }
+        Ok(())
     }
-    Ok(())
-}
 }
 
 #[cfg(test)]

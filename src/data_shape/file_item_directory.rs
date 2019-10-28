@@ -1,4 +1,4 @@
-use super::{RelativeFileItem, SlashPath};
+use super::{RelativeFileItem, SlashPath, AppRole};
 use log::*;
 use std::io;
 use std::io::prelude::{BufRead, Read};
@@ -112,18 +112,21 @@ pub struct FileItemDirectories<R: BufRead> {
     reader: Arc<Mutex<R>>,
     local_remote_pairs: Vec<(SlashPath, SlashPath)>,
     maybe_dir_line: Arc<Mutex<Option<String>>>,
+    app_role: AppRole,
 }
 
 impl<R: BufRead> FileItemDirectories<R> {
     pub fn from_file_reader<RR: Read>(
         reader: RR,
         local_remote_pairs: Vec<(SlashPath, SlashPath)>,
+        app_role: AppRole,
     ) -> FileItemDirectories<io::BufReader<RR>> {
         let reader = io::BufReader::new(reader);
         FileItemDirectories {
             reader: Arc::new(Mutex::new(reader)),
             maybe_dir_line: Arc::new(Mutex::new(None)),
             local_remote_pairs,
+            app_role,
         }
     }
 
@@ -131,7 +134,13 @@ impl<R: BufRead> FileItemDirectories<R> {
         let line = SlashPath::new(line);
 
         if let Some((local_dir, remote_dir)) =
-            self.local_remote_pairs.iter().find(|pair| pair.0 == line)
+            self.local_remote_pairs.iter().find(|pair| {
+                match &self.app_role {
+                    AppRole::PassiveLeaf => pair.1 == line,
+                    AppRole::ActiveLeaf => pair.0 == line,
+                    _ => false,
+                }
+            })
         {
             Some(FileItemDirectory::new(
                 local_dir.clone(),
@@ -246,6 +255,7 @@ xabc
             FileItemDirectories::<io::BufReader<fs::File>>::from_file_reader(
                 reader,
                 local_remote_pairs,
+                AppRole::PassiveLeaf,
             )
         };
 

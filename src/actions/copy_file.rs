@@ -42,12 +42,12 @@ pub fn copy_stream_with_pb(
                 progress_bar.inc_pb(nn);
             }
             Ok(_) => {
-                trace!("end copy_stream_to_file_with_cb when read zero byte.");
+                trace!("end copy_stream_to_file_with_pb when read zero byte.");
                 break;
             }
             Err(err) => {
                 trace!(
-                    "end copy_stream_to_file_with_cb when catch error. {:?}",
+                    "end copy_stream_to_file_with_pb when catch error. {:?}",
                     err
                 );
                 break;

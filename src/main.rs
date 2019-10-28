@@ -57,7 +57,12 @@ fn main() -> Result<(), failure::Error> {
 
     if let ("mkdir", Some(sub_matches)) = m.subcommand() {
         let dir = sub_matches.value_of("dir").unwrap();
-        return Ok(fs::create_dir_all(dir)?);
+        if let Err(err) = fs::create_dir_all(dir) {
+            error!("mkdir failed: {:?}", err);
+            bail!("mkdir failed: {:?}", dir);
+        } else {
+            return Ok(());
+        }
     }
 
     let app_role = m
@@ -195,7 +200,7 @@ fn main_entry<'a>(
             command::sync_pull_dirs(&app_conf, sub_matches.value_of("server-yml"))?;
         }
         ("sync-push-dirs", Some(sub_matches)) => {
-            command::sync_push_dirs(&app_conf, sub_matches.value_of("server-yml"))?;
+            command::sync_push_dirs(&app_conf, sub_matches.value_of("server-yml"), sub_matches.is_present("force"))?;
         }
         ("pbr", Some(_sub_matches)) => {
             command::misc::demonstrate_pbr()?;
@@ -379,9 +384,9 @@ fn main_entry<'a>(
                     .truncate(true)
                     .write(true)
                     .open(out)?;
-                server.load_dirs(&mut out)?;
+                server.create_file_list_files(&mut out)?;
             } else {
-                server.load_dirs(&mut io::stdout())?;
+                server.create_file_list_files(&mut io::stdout())?;
             }
         }
         ("verify-server-yml", Some(sub_matches)) => {

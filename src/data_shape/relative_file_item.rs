@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{PathBuf};
 use std::time::SystemTime;
 
+/// The RelativeFileItem carry the detail information of the file. It usually generated from a disk file path.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct RelativeFileItem {
     path: String,

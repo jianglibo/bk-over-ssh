@@ -1,4 +1,4 @@
-use super::{string_path, RelativeFileItem};
+use super::{string_path, RelativeFileItem, PrimaryFileItem};
 use crate::actions::hash_file_sha1;
 use filetime;
 use log::*;
@@ -27,6 +27,7 @@ pub enum FileItemProcessResult {
     GetLocalPathFailed,
     SftpOpenFailed,
     ScpOpenFailed,
+    MayBeNoParentDir(PrimaryFileItem),
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]

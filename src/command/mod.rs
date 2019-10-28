@@ -95,6 +95,7 @@ pub fn load_all_server_yml(
         .collect()
 }
 
+/// we prepare the database when loading yml file.
 pub fn load_server_yml_by_name(
     app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
     name: &str,

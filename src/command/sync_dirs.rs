@@ -12,6 +12,7 @@ pub type ServerAndIndicatorSqlite = (Server<SqliteConnectionManager, SqliteDbAcc
 pub fn sync_push_dirs(
     app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
     server_yml: Option<&str>,
+    force: bool,
 ) -> Result<(), failure::Error> {
     if app_conf.mini_app_conf.app_role != AppRole::ActiveLeaf {
         bail!("only when app-role is ActiveLeaf can call sync_push_dirs");
@@ -21,13 +22,21 @@ pub fn sync_push_dirs(
     server_indicator_pairs
         .into_par_iter()
         .for_each(
-            |(server, mut indicator)| match server.sync_push_dirs(&mut indicator) {
+            |(mut server, mut indicator)| {
+                if force && server.get_db_file().exists() {
+                    server.db_access.take();
+                    fs::remove_file(server.get_db_file()).expect("should remove db_file.");
+                    let sqlite_db_access = SqliteDbAccess::new(server.get_db_file());
+                    sqlite_db_access.create_database().expect("should recreate database.");
+                    server.set_db_access(sqlite_db_access);
+                }
+                match server.sync_push_dirs(&mut indicator) {
                 Ok(result) => {
                     indicator.pb_finish();
                     actions::write_dir_sync_result(&server, result.as_ref());
                 }
                 Err(err) => println!("sync-push-dirs failed: {:?}", err),
-            },
+            }}
         );
     wait_progress_bar_finish(join_handler);
     Ok(())

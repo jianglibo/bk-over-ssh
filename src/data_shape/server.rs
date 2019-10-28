@@ -85,6 +85,7 @@ fn accumulate_file_process(
         FileItemProcessResult::GetLocalPathFailed => accu.get_local_path_failed += 1,
         FileItemProcessResult::SftpOpenFailed => accu.sftp_open_failed += 1,
         FileItemProcessResult::ScpOpenFailed => accu.scp_open_failed += 1,
+        FileItemProcessResult::MayBeNoParentDir(_) => (),
     };
     accu
 }
@@ -128,7 +129,11 @@ pub fn push_a_file_item_sftp(
         }
         Err(err) => {
             error!("sftp create failed: {:?}", err);
-            FileItemProcessResult::SftpOpenFailed
+            if err.code() == 2 {
+                FileItemProcessResult::MayBeNoParentDir(file_item)
+            } else {
+                FileItemProcessResult::SftpOpenFailed
+            }
         }
     }
 }
@@ -657,11 +662,10 @@ where
         Ok(working_file)
     }
 
-    #[allow(dead_code)]
     pub fn create_remote_dir(&self, dir: &str) -> Result<(), failure::Error> {
         let mut channel: ssh2::Channel = self.create_channel()?;
         let cmd = format!(
-            "{} {} {} mkdir {}",
+            "{} {} {} mkdir '{}'",
             self.server_yml.remote_exec,
             if self.app_conf.console_log {
                 "--console-log"
@@ -841,13 +845,17 @@ where
         let file_list_file = self.get_active_leaf_file_list_file();
 
         {
+            info!("start creating file_list_file: {:?}", file_list_file);
             let mut o = fs::OpenOptions::new()
                 .write(true)
+                .create(true)
                 .truncate(true)
-                .open(file_list_file.as_path())?;
-            self.load_dirs(&mut o)?;
+                .open(file_list_file.as_path())
+                .expect("file list file should be created.");
+            self.create_file_list_files(&mut o)?;
         }
 
+        info!("start reading file_list_file: {:?}", file_list_file);
         let reader = fs::OpenOptions::new()
             .read(true)
             .open(file_list_file.as_path())?;
@@ -856,6 +864,7 @@ where
             FileItemDirectories::<io::BufReader<fs::File>>::from_file_reader(
                 reader,
                 self.get_local_remote_pairs(),
+                AppRole::ActiveLeaf,
             );
 
         let sftp = self.session.as_ref().unwrap().sftp()?;
@@ -864,7 +873,26 @@ where
         let mut result = FileItemProcessResultStats::default();
         for file_item_dir in file_item_directories {
             result += file_item_dir
-                .map(|item| push_a_file_item_sftp(&sftp, item, &mut buff, progress_bar))
+                .map(|item| {
+                    let r = push_a_file_item_sftp(&sftp, item, &mut buff, progress_bar);
+                    if let FileItemProcessResult::MayBeNoParentDir(item) = r {
+                        if self
+                            .create_remote_dir(
+                                item.get_remote_path()
+                                    .parent()
+                                    .expect("slash path's parent directory should exist.")
+                                    .as_str(),
+                            )
+                            .is_ok()
+                        {
+                            push_a_file_item_sftp(&sftp, item, &mut buff, progress_bar)
+                        } else {
+                            FileItemProcessResult::SftpOpenFailed
+                        }
+                    } else {
+                        r
+                    }
+                })
                 .fold(
                     FileItemProcessResultStats::default(),
                     accumulate_file_process,
@@ -1093,9 +1121,9 @@ where
             );
             let start = Instant::now();
             let started_at = Local::now();
+
             let rs = self.start_push_sync_working_file_list(pb)?;
-            self.remove_working_file_list_file();
-            self.confirm_remote_sync()?;
+            self.confirm_local_sync()?;
             Ok(Some(SyncDirReport::new(start.elapsed(), started_at, rs)))
         } else {
             Ok(None)
@@ -1123,12 +1151,15 @@ where
         }
     }
 
-    pub fn load_dirs<O: io::Write>(&self, out: &mut O) -> Result<(), failure::Error> {
+    /// When in the role of AppRole::ActiveLeaf, it list changed files in the local disk.
+    /// But it has no way to know the changes happen in the remote side, what if the remote file has been deleted? at that situation it should upload again.
+    pub fn create_file_list_files<O: io::Write>(&self, out: &mut O) -> Result<(), failure::Error> {
         if self.db_access.is_some() && self.server_yml.use_db {
             let db_access = self.db_access.as_ref().unwrap();
             for one_dir in self.server_yml.directories.iter() {
                 trace!("start load directory: {:?}", one_dir);
                 one_dir.load_relative_item_to_sqlite(
+                    &self.app_conf.app_role,
                     db_access,
                     self.is_skip_sha1(),
                     self.server_yml.sql_batch_size,
@@ -1163,7 +1194,7 @@ where
             }
         } else {
             for one_dir in self.server_yml.directories.iter() {
-                one_dir.load_relative_item(out, self.is_skip_sha1())?;
+                one_dir.load_relative_item(&self.app_conf.app_role, out, self.is_skip_sha1())?;
             }
         }
         Ok(())
@@ -1173,7 +1204,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data_shape::string_path::SlashPath;
+    use crate::data_shape::{string_path::SlashPath, AppRole};
     use crate::db_accesses::{DbAccess, SqliteDbAccess};
     use crate::develope::tutil;
     use crate::log_util;
@@ -1182,6 +1213,7 @@ mod tests {
     use glob::Pattern;
     use std::net::TcpStream;
     // use indicatif::MultiProgress;
+    use dirs;
     use std::fs;
     use std::io::{self};
     // use std::sync::Arc;
@@ -1226,6 +1258,60 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn t_sync_push_dirs() -> Result<(), failure::Error> {
+        log();
+        let mut app_conf = tutil::load_demo_app_conf_sqlite(None, AppRole::ActiveLeaf);
+        app_conf.mini_app_conf.skip_cron = true;
+
+        assert!(app_conf.mini_app_conf.app_role == AppRole::ActiveLeaf);
+        let mut server = tutil::load_demo_server_sqlite(&app_conf, None);
+
+        let db_file = server.get_db_file();
+
+        if db_file.exists() {
+            fs::remove_file(db_file.as_path())?;
+        }
+
+        let sqlite_db_access = SqliteDbAccess::new(db_file);
+        sqlite_db_access.create_database()?;
+        server.set_db_access(sqlite_db_access);
+
+        let home_dir =
+            SlashPath::from_path(dirs::home_dir().expect("home dir should exist").as_path());
+        
+        let directories_dir = home_dir.join("directories");
+        if directories_dir.exists() {
+            info!("directories path: {:?}", directories_dir.as_path());
+            fs::remove_dir_all(directories_dir.as_path())?;
+        }
+
+        let a_dir = home_dir.join_another(
+            &server
+                .server_yml
+                .directories
+                .iter()
+                .find(|d| d.remote_dir.ends_with("a-dir"))
+                .expect("should have a directory who's remote_dir end with 'a-dir'")
+                .remote_dir,
+        );
+
+        let mut indicator = Indicator::new(None);
+        server.connect()?;
+        let stats = server.sync_push_dirs(&mut indicator)?;
+        indicator.pb_finish();
+        info!("result {:?}", stats);
+        info!("a_dir is {:?}", a_dir);
+        let cc_txt = a_dir.join("b").join("c c").join("c c .txt");
+        info!("cc_txt is {:?}", cc_txt);
+        assert!(cc_txt.exists());
+        assert!(a_dir.join("b").join("b.txt").exists());
+        assert!(a_dir.join("b b").join("b b.txt").exists());
+        assert!(a_dir.join("a.txt").exists());
+        assert!(a_dir.join("qrcode.png").exists());
+        Ok(())
+    }
+
     /// pull downed files were saved in the ./data/pull-servers-data directory.
     /// remote generated file_list_file was saved in the 'file_list_file' property of server.yml point to.
     /// This test also involved compiled executable so remember to compile the app if result is not expected.
@@ -1243,7 +1329,6 @@ mod tests {
         if db_file.exists() {
             fs::remove_file(db_file.as_path())?;
         }
-
         let remote_db_path =
             Path::new("./target/debug/data/passive-leaf-data/demo-app-instance-id/db.db");
 
@@ -1369,7 +1454,7 @@ mod tests {
         };
 
         one_dir.compile_patterns()?;
-        one_dir.load_relative_item(&mut cur, true)?;
+        one_dir.load_relative_item(&AppRole::PassiveLeaf, &mut cur, true)?;
         let num = tutil::count_cursor_lines(&mut cur);
         assert_eq!(num, 8);
         tutil::print_cursor_lines(&mut cur);
@@ -1383,7 +1468,7 @@ mod tests {
 
         one_dir.compile_patterns()?;
         assert!(one_dir.excludes_patterns.is_none());
-        one_dir.load_relative_item(&mut cur, true)?;
+        one_dir.load_relative_item(&AppRole::PassiveLeaf, &mut cur, true)?;
         let num = tutil::count_cursor_lines(&mut cur);
         assert_eq!(num, 2); // one dir line, one file line.
 
@@ -1396,7 +1481,7 @@ mod tests {
 
         one_dir.compile_patterns()?;
         assert!(one_dir.includes_patterns.is_none());
-        one_dir.load_relative_item(&mut cur, true)?;
+        one_dir.load_relative_item(&AppRole::PassiveLeaf, &mut cur, true)?;
         let num = tutil::count_cursor_lines(&mut cur);
         assert_eq!(num, 7, "if exclude 1 file there should 7 left.");
 
@@ -1409,7 +1494,7 @@ mod tests {
 
         one_dir.compile_patterns()?;
         assert!(one_dir.includes_patterns.is_none());
-        one_dir.load_relative_item(&mut cur, true)?;
+        one_dir.load_relative_item(&AppRole::PassiveLeaf, &mut cur, true)?;
         let num = tutil::count_cursor_lines(&mut cur);
         assert_eq!(num, 7, "if exclude logs file there should 7 left.");
 

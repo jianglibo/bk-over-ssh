@@ -293,9 +293,16 @@ subcommands:
     - sync-push-dirs:
         about: sync directories in the configuration file. The configuration file is at fixed location.
         args:
+            - server-yml:
+                required: false
+                index: 1
             - rsync-window:
                 long: rsync-window
                 takes_value: true
+                required: false
+            - force:
+                help: upload all file to the target server.
+                long: force
                 required: false
     - run-round:
         about: run all tasks.
