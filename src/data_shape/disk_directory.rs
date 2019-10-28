@@ -224,6 +224,7 @@ impl Directory {
     }
 
     /// get all leaf directories under this directory.
+    #[allow(dead_code)]
     pub fn get_sub_directory_names(&self) -> Vec<String> {
         vec![]
     }

@@ -3,6 +3,7 @@ use crate::actions::hash_file_sha1;
 use filetime;
 use log::*;
 use serde::{Deserialize, Serialize};
+use std::ops::{Add, AddAssign};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -44,6 +45,43 @@ pub struct FileItemProcessResultStats {
     pub scp_open_failed: u64,
     pub read_line_failed: u64,
     pub bytes_transferred: u64,
+}
+
+impl FileItemProcessResultStats {
+    fn add_fields(&self, other: Self) -> Self {
+        Self {
+            deserialize_failed: self.deserialize_failed + other.deserialize_failed,
+            skipped: self.skipped + other.skipped,
+            no_corresponded_local_dir: self.no_corresponded_local_dir
+                + other.no_corresponded_local_dir,
+            directory: self.directory + other.directory,
+            length_not_match: self.length_not_match + other.length_not_match,
+            sha1_not_match: self.sha1_not_match + other.sha1_not_match,
+            copy_failed: self.copy_failed + other.copy_failed,
+            skip_because_no_base_dir: self.skip_because_no_base_dir
+                + other.skip_because_no_base_dir,
+            succeeded: self.succeeded + other.succeeded,
+            get_local_path_failed: self.get_local_path_failed + other.get_local_path_failed,
+            sftp_open_failed: self.sftp_open_failed + other.sftp_open_failed,
+            scp_open_failed: self.scp_open_failed + other.scp_open_failed,
+            read_line_failed: self.read_line_failed + other.read_line_failed,
+            bytes_transferred: self.bytes_transferred + other.bytes_transferred,
+        }
+    }
+}
+
+impl Add for FileItemProcessResultStats {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self {
+        self.add_fields(other)
+    }
+}
+
+impl AddAssign for FileItemProcessResultStats {
+    fn add_assign(&mut self, other: Self) {
+        *self = self.add_fields(other);
+    }
 }
 
 #[derive(Debug)]

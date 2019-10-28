@@ -1,8 +1,8 @@
 use super::{
-    app_conf, rolling_files, string_path, AppRole,
-    AuthMethod, Directory, FileItemDirectories, FileItemMap, FileItemProcessResult,
-    FileItemProcessResultStats, Indicator, MiniAppConf, PbProperties, PrimaryFileItem,
-    ProgressWriter, PruneStrategy, RelativeFileItem, ScheduleItem, SlashPath, SyncType,
+    app_conf, rolling_files, string_path, AppRole, AuthMethod, Directory, FileItemDirectories,
+    FileItemMap, FileItemProcessResult, FileItemProcessResultStats, Indicator, MiniAppConf,
+    PbProperties, PrimaryFileItem, ProgressWriter, PruneStrategy, RelativeFileItem, ScheduleItem,
+    SlashPath, SyncType,
 };
 use crate::actions::{copy_a_file_item, copy_a_file_sftp, copy_file, ssh_util, SyncDirReport};
 use crate::db_accesses::{scheduler_util, DbAccess};
@@ -48,8 +48,6 @@ pub struct ServerYml {
     pub port: u16,
     pub rsync: RsyncConfig,
     pub remote_exec: String,
-    // pub file_list_file: String,
-    // pub remote_server_yml: String,
     pub username: String,
     pub password: String,
     pub directories: Vec<Directory>,
@@ -65,6 +63,74 @@ pub struct ServerYml {
     pub exclude_by_sql: Vec<String>,
     #[serde(skip)]
     pub yml_location: Option<PathBuf>,
+}
+
+fn accumulate_file_process(
+    mut accu: FileItemProcessResultStats,
+    item: FileItemProcessResult,
+) -> FileItemProcessResultStats {
+    match item {
+        FileItemProcessResult::DeserializeFailed(_) => accu.deserialize_failed += 1,
+        FileItemProcessResult::Skipped(_) => accu.skipped += 1,
+        FileItemProcessResult::NoCorrespondedLocalDir(_) => accu.no_corresponded_local_dir += 1,
+        FileItemProcessResult::Directory(_) => accu.directory += 1,
+        FileItemProcessResult::LengthNotMatch(_) => accu.length_not_match += 1,
+        FileItemProcessResult::Sha1NotMatch(_) => accu.sha1_not_match += 1,
+        FileItemProcessResult::CopyFailed(_) => accu.copy_failed += 1,
+        FileItemProcessResult::SkipBecauseNoBaseDir => accu.skip_because_no_base_dir += 1,
+        FileItemProcessResult::Succeeded(fl, _, _) => {
+            accu.bytes_transferred += fl;
+            accu.succeeded += 1;
+        }
+        FileItemProcessResult::GetLocalPathFailed => accu.get_local_path_failed += 1,
+        FileItemProcessResult::SftpOpenFailed => accu.sftp_open_failed += 1,
+        FileItemProcessResult::ScpOpenFailed => accu.scp_open_failed += 1,
+    };
+    accu
+}
+
+pub fn push_a_file_item_sftp(
+    sftp: &ssh2::Sftp,
+    file_item: PrimaryFileItem,
+    buf: &mut [u8],
+    progress_bar: &Indicator,
+) -> FileItemProcessResult {
+    match sftp.create(file_item.get_remote_path().as_path()) {
+        Ok(mut file) => {
+            let local_file_path = file_item.get_local_path();
+            match local_file_path.get_local_file_reader() {
+                Ok(mut local_reader) => {
+                    match copy_file::copy_stream_with_pb(
+                        &mut local_reader,
+                        &mut file,
+                        buf,
+                        progress_bar,
+                    ) {
+                        Ok(length) => {
+                            if length != file_item.get_relative_item().get_len() {
+                                FileItemProcessResult::LengthNotMatch(local_file_path.get_slash())
+                            } else {
+                                FileItemProcessResult::Succeeded(
+                                    length,
+                                    local_file_path.get_slash(),
+                                    SyncType::Sftp,
+                                )
+                            }
+                        }
+                        Err(err) => {
+                            error!("write_stream_to_file failed: {:?}", err);
+                            FileItemProcessResult::CopyFailed(local_file_path.get_slash())
+                        }
+                    }
+                }
+                Err(_err) => FileItemProcessResult::GetLocalPathFailed,
+            }
+        }
+        Err(err) => {
+            error!("sftp create failed: {:?}", err);
+            FileItemProcessResult::SftpOpenFailed
+        }
+    }
 }
 
 pub struct Server<M, D>
@@ -177,6 +243,7 @@ where
             _m: PhantomData,
         })
     }
+
     /// The passive leaf side of the application will try to find the configuration in the passive-leaf-conf folder which located in the same folder as the executable.
     /// The server yml file should located in the data/passive-leaf-conf/{self.app_conf.app_instance_id}.yml
     pub fn get_remote_server_yml(&self) -> String {
@@ -591,10 +658,7 @@ where
     }
 
     #[allow(dead_code)]
-    pub fn create_remote_dir(
-        &self,
-        dir: &str,
-    ) -> Result<(), failure::Error> {
+    pub fn create_remote_dir(&self, dir: &str) -> Result<(), failure::Error> {
         let mut channel: ssh2::Channel = self.create_channel()?;
         let cmd = format!(
             "{} {} {} mkdir {}",
@@ -770,47 +834,9 @@ where
             .collect()
     }
 
-    #[allow(dead_code)]
-    pub fn push_a_file_item_sftp(
-        sftp: &ssh2::Sftp,
-        local_file_path: SlashPath,
-        file_item: PrimaryFileItem,
-        buf: &mut [u8],
-        pb: &Indicator,
-    ) -> FileItemProcessResult {
-        match sftp.create(file_item.get_remote_path().as_path()) {
-            Ok(mut file) => match local_file_path.get_local_file_reader() {
-                Ok(mut local_reader) => {
-                    match copy_file::copy_stream_with_pb(&mut local_reader, &mut file, buf, pb) {
-                        Ok(length) => {
-                            if length != file_item.get_relative_item().get_len() {
-                                FileItemProcessResult::LengthNotMatch(local_file_path.get_slash())
-                            } else {
-                                FileItemProcessResult::Succeeded(
-                                    length,
-                                    local_file_path.get_slash(),
-                                    SyncType::Sftp,
-                                )
-                            }
-                        }
-                        Err(err) => {
-                            error!("write_stream_to_file failed: {:?}", err);
-                            FileItemProcessResult::CopyFailed(local_file_path.get_slash())
-                        }
-                    }
-                }
-                Err(_err) => FileItemProcessResult::GetLocalPathFailed,
-            },
-            Err(err) => {
-                error!("sftp create failed: {:?}", err);
-                FileItemProcessResult::SftpOpenFailed
-            }
-        }
-    }
-
     fn start_push_sync_working_file_list(
         &self,
-        pb: &mut Indicator,
+        progress_bar: &mut Indicator,
     ) -> Result<FileItemProcessResultStats, failure::Error> {
         let file_list_file = self.get_active_leaf_file_list_file();
 
@@ -832,10 +858,19 @@ where
                 self.get_local_remote_pairs(),
             );
 
-        Ok(FileItemProcessResultStats::default())
-        // let working_file = &self.get_working_file_list_file();
-        // let rb = io::BufReader::new(fs::File::open(working_file)?);
-        // self.start_sync(rb, pb)
+        let sftp = self.session.as_ref().unwrap().sftp()?;
+        let mut buff = vec![0_u8; self.server_yml.buf_len];
+
+        let mut result = FileItemProcessResultStats::default();
+        for file_item_dir in file_item_directories {
+            result += file_item_dir
+                .map(|item| push_a_file_item_sftp(&sftp, item, &mut buff, progress_bar))
+                .fold(
+                    FileItemProcessResultStats::default(),
+                    accumulate_file_process,
+                );
+        }
+        Ok(result)
     }
 
     /// Do not try to return item stream from this function.
@@ -1003,30 +1038,7 @@ where
                     }
                 }
             })
-            .fold(FileItemProcessResultStats::default(), |mut accu, item| {
-                match item {
-                    FileItemProcessResult::DeserializeFailed(_) => accu.deserialize_failed += 1,
-                    FileItemProcessResult::Skipped(_) => accu.skipped += 1,
-                    FileItemProcessResult::NoCorrespondedLocalDir(_) => {
-                        accu.no_corresponded_local_dir += 1
-                    }
-                    FileItemProcessResult::Directory(_) => accu.directory += 1,
-                    FileItemProcessResult::LengthNotMatch(_) => accu.length_not_match += 1,
-                    FileItemProcessResult::Sha1NotMatch(_) => accu.sha1_not_match += 1,
-                    FileItemProcessResult::CopyFailed(_) => accu.copy_failed += 1,
-                    FileItemProcessResult::SkipBecauseNoBaseDir => {
-                        accu.skip_because_no_base_dir += 1
-                    }
-                    FileItemProcessResult::Succeeded(fl, _, _) => {
-                        accu.bytes_transferred += fl;
-                        accu.succeeded += 1;
-                    }
-                    FileItemProcessResult::GetLocalPathFailed => accu.get_local_path_failed += 1,
-                    FileItemProcessResult::SftpOpenFailed => accu.sftp_open_failed += 1,
-                    FileItemProcessResult::ScpOpenFailed => accu.scp_open_failed += 1,
-                };
-                accu
-            });
+            .fold(FileItemProcessResultStats::default(), accumulate_file_process);
         Ok(result)
     }
 
