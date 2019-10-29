@@ -89,20 +89,22 @@ fn main() -> Result<(), failure::Error> {
         app_conf.set_app_instance_id(aii);
     }
 
-    if m.is_present("skip-cron") {
-        app_conf.skip_cron();
-    }
-    if m.is_present("enable-sha1") {
-        app_conf.not_skip_sha1();
-    }
+    app_conf.mini_app_conf.skip_cron = m.is_present("skip-cron");
+    app_conf.mini_app_conf.skip_sha1 = !m.is_present("enable-sha1");
+
     if !m.is_present("no-pb") {
         app_conf
             .progress_bar
             .replace(Arc::new(MultiProgress::new()));
     }
+    
     if let Some(buf_len) = m.value_of("buf-len") {
         app_conf.mini_app_conf.buf_len = Some(buf_len.parse()?);
     }
+
+    
+    app_conf.mini_app_conf.as_service = m.is_present("as-service");
+    
 
     let verbose = if m.is_present("vv") {
         "vv"
@@ -112,9 +114,11 @@ fn main() -> Result<(), failure::Error> {
         ""
     };
 
-    app_conf.mini_app_conf.console_log = console_log;
 
+
+    app_conf.mini_app_conf.console_log = console_log;
     app_conf.mini_app_conf.verbose = !verbose.is_empty();
+
     log_util::setup_logger_for_this_app(
         console_log,
         app_conf.log_full_path.as_path(),
@@ -192,7 +196,7 @@ fn main_entry<'a>(
 ) -> Result<(), failure::Error> {
     let no_db = m.is_present("no-db");
     match m.subcommand() {
-        ("run-round", Some(_sub_matches)) => {
+        ("pull-and-archive", Some(_sub_matches)) => {
             command::sync_pull_dirs(&app_conf, None)?;
             command::archive_local(&app_conf, None, Some("prune"), None)?;
         }
@@ -201,9 +205,6 @@ fn main_entry<'a>(
         }
         ("sync-push-dirs", Some(sub_matches)) => {
             command::sync_push_dirs(&app_conf, sub_matches.value_of("server-yml"), sub_matches.is_present("force"))?;
-        }
-        ("pbr", Some(_sub_matches)) => {
-            command::misc::demonstrate_pbr()?;
         }
         ("send-test-mail", Some(sub_matches)) => {
             let to = sub_matches.value_of("to").unwrap();
@@ -429,9 +430,6 @@ fn main_entry<'a>(
                 println!("please add --help to view usage help.");
             }
         },
-        // ("repl", Some(_)) => {
-        //     main_client();
-        // }
         ("print-env", Some(_)) => {
             for (key, value) in env::vars_os() {
                 println!("{:?}: {:?}", key, value);

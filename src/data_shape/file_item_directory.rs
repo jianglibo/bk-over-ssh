@@ -24,6 +24,7 @@ impl PrimaryFileItem {
     pub fn get_relative_item(&self) -> &RelativeFileItem {
         &self.relative_item
     }
+    #[allow(dead_code)]
     pub fn is_sha1_not_equal(&self, local_sha1: impl AsRef<str>) -> bool {
         Some(local_sha1.as_ref().to_ascii_uppercase())
             != self.relative_item.get_sha1().map(str::to_ascii_uppercase)

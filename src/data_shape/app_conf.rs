@@ -143,6 +143,7 @@ pub struct MiniAppConf {
     pub app_role: AppRole,
     pub verbose: bool,
     pub console_log: bool,
+    pub as_service: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -208,6 +209,7 @@ where
             app_role,
             verbose: false,
             console_log: false,
+            as_service: false,
         },
     }
 }
@@ -237,18 +239,10 @@ where
         self.db_access.as_ref()
     }
 
-    pub fn skip_cron(&mut self) {
-        self.mini_app_conf.skip_cron = true;
-    }
-
     pub fn set_app_instance_id(&mut self, app_instance_id: impl AsRef<str>) {
         let s = app_instance_id.as_ref().to_string();
         self.inner.app_instance_id = s.clone();
         self.mini_app_conf.app_instance_id = s;
-    }
-
-    pub fn not_skip_sha1(&mut self) {
-        self.mini_app_conf.skip_sha1 = false;
     }
 
     /// If parse app configuration file failed, move the failed configuration file to bak. recreate a fresh new one.
@@ -338,6 +332,7 @@ where
                                 app_role,
                                 verbose: false,
                                 console_log: false,
+                                as_service: false,
                             },
                         };
                         Ok(app_conf)

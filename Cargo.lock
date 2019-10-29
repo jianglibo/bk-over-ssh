@@ -162,6 +162,7 @@ dependencies = [
  "glob 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "indicatif 0.12.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "itertools 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "job_scheduler 1.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "lazy_static 1.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "lettre 0.9.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "lettre_email 0.9.2 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -795,6 +796,16 @@ dependencies = [
 name = "itoa"
 version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
+name = "job_scheduler"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+dependencies = [
+ "chrono 0.4.9 (registry+https://github.com/rust-lang/crates.io-index)",
+ "cron 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "uuid 0.8.1 (registry+https://github.com/rust-lang/crates.io-index)",
+]
 
 [[package]]
 name = "lazy_static"
@@ -1684,6 +1695,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "uuid"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+dependencies = [
+ "rand 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
 name = "vcpkg"
 version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1876,6 +1895,7 @@ dependencies = [
 "checksum indicatif 0.12.0 (registry+https://github.com/rust-lang/crates.io-index)" = "a8d596a9576eaa1446996092642d72bfef35cf47243129b7ab883baf5faec31e"
 "checksum itertools 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)" = "5b8467d9c1cebe26feb08c640139247fac215782d35371ade9a2136ed6085358"
 "checksum itoa 0.4.4 (registry+https://github.com/rust-lang/crates.io-index)" = "501266b7edd0174f8530248f87f99c88fbe60ca4ef3dd486835b8d8d53136f7f"
+"checksum job_scheduler 1.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "4df2f5492dd06f72121fda4c62266fd9f471af4ea8fd1589b1be9d85e76a8d13"
 "checksum lazy_static 1.4.0 (registry+https://github.com/rust-lang/crates.io-index)" = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
 "checksum lettre 0.9.2 (registry+https://github.com/rust-lang/crates.io-index)" = "c66afaa5dfadbb81d4e00fd1d1ab057c7cd4c799c5a44e0009386d553587e728"
 "checksum lettre_email 0.9.2 (registry+https://github.com/rust-lang/crates.io-index)" = "bbb68ca999042d965476e47bbdbacd52db0927348b6f8062c44dd04a3b1fd43b"
@@ -1980,6 +2000,7 @@ dependencies = [
 "checksum unicode-xid 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "fc72304796d0818e357ead4e000d19c9c174ab23dc11093ac919054d20a6a7fc"
 "checksum unicode-xid 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)" = "826e7639553986605ec5979c7dd957c7895e93eabed50ab2ffa7f6128a75097c"
 "checksum uuid 0.7.4 (registry+https://github.com/rust-lang/crates.io-index)" = "90dbc611eb48397705a6b0f6e917da23ae517e4d127123d2cf7674206627d32a"
+"checksum uuid 0.8.1 (registry+https://github.com/rust-lang/crates.io-index)" = "9fde2f6a4bea1d6e007c4ad38c6839fa71cbb63b6dbf5b595aa38dc9b1093c11"
 "checksum vcpkg 0.2.7 (registry+https://github.com/rust-lang/crates.io-index)" = "33dd455d0f96e90a75803cfeb7f948768c08d70a6de9a8d2362461935698bf95"
 "checksum version_check 0.1.5 (registry+https://github.com/rust-lang/crates.io-index)" = "914b1a6776c4c929a602fafd8bc742e06365d4bcbe48c30f9cca5824f70dc9dd"
 "checksum walkdir 2.2.9 (registry+https://github.com/rust-lang/crates.io-index)" = "9658c94fa8b940eab2250bd5a457f9c48b748420d71293b165c8cdbe2f55f71e"

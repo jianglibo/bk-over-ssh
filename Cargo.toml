@@ -50,6 +50,7 @@ lazy_static = "1.4.0"
 itertools = "0.8"
 time = "0.1"
 dirs = "2.0.2"
+job_scheduler = "*"
 # zip = "0.5.3"
 # https://docs.rs/crate/rustsync/0.2.3
 [dependencies.clap]

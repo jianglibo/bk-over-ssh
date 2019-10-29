@@ -42,7 +42,7 @@ pub fn verify_server_yml(mut server: Server<SqliteConnectionManager, SqliteDbAcc
             Ok(())
 }
 
-
+#[allow(dead_code)]
 pub fn demonstrate_pbr() -> Result<(), failure::Error> {
     let multi_bar = Arc::new(MultiProgress::new());
 
