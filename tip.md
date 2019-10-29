@@ -4,6 +4,9 @@ environment variables: Get-Childitem env:
 https://blog.ropnop.com/extracting-ssh-private-keys-from-windows-10-ssh-agent/
 Get-Service ssh-agent
 
+## window service.
+https://github.com/kohsuke/winsw/
+
 ## First stage
 * list files
 * compare files

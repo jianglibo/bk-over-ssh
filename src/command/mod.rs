@@ -1,4 +1,5 @@
 pub mod archives;
+pub mod db_cmd;
 pub mod misc;
 pub mod rsync;
 pub mod sync_dirs;
@@ -10,9 +11,7 @@ use std::thread;
 use std::time::Duration;
 use std::{fs, io::Write};
 
-use crate::data_shape::{
-    AppConf, AppRole, Indicator, ReadAppConfException, Server,
-};
+use crate::data_shape::{AppConf, AppRole, Indicator, ReadAppConfException, Server};
 use r2d2_sqlite::SqliteConnectionManager;
 
 pub use archives::archive_local;
@@ -150,4 +149,12 @@ where
 
     message_pb.finish_and_clear();
     Ok(app_conf)
+}
+
+pub fn pull_and_archive(
+    app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
+) -> Result<(), failure::Error> {
+    sync_pull_dirs(&app_conf, None)?;
+    archive_local(&app_conf, None, Some("prune"), None)?;
+    Ok(())
 }

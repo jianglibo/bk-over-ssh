@@ -17,28 +17,30 @@ pub fn sync_push_dirs(
     if app_conf.mini_app_conf.app_role != AppRole::ActiveLeaf {
         bail!("only when app-role is ActiveLeaf can call sync_push_dirs");
     }
-    let (join_handler, server_indicator_pairs) = load_server_indicator_pairs(app_conf, server_yml)?;
+    let (progress_bar_join_handler, server_indicator_pairs) =
+        load_server_indicator_pairs(app_conf, server_yml)?;
 
     server_indicator_pairs
         .into_par_iter()
-        .for_each(
-            |(mut server, mut indicator)| {
-                if force && server.get_db_file().exists() {
-                    server.db_access.take();
-                    fs::remove_file(server.get_db_file()).expect("should remove db_file.");
-                    let sqlite_db_access = SqliteDbAccess::new(server.get_db_file());
-                    sqlite_db_access.create_database().expect("should recreate database.");
-                    server.set_db_access(sqlite_db_access);
-                }
-                match server.sync_push_dirs(&mut indicator) {
+        .for_each(|(mut server, mut indicator)| {
+            if force && server.get_db_file().exists() {
+                server.db_access.take();
+                fs::remove_file(server.get_db_file()).expect("should remove db_file.");
+                let sqlite_db_access = SqliteDbAccess::new(server.get_db_file());
+                sqlite_db_access
+                    .create_database()
+                    .expect("should recreate database.");
+                server.set_db_access(sqlite_db_access);
+            }
+            match server.sync_push_dirs(&mut indicator) {
                 Ok(result) => {
                     indicator.pb_finish();
                     actions::write_dir_sync_result(&server, result.as_ref());
                 }
                 Err(err) => println!("sync-push-dirs failed: {:?}", err),
-            }}
-        );
-    wait_progress_bar_finish(join_handler);
+            }
+        });
+    wait_progress_bar_finish(progress_bar_join_handler);
     Ok(())
 }
 
@@ -49,8 +51,20 @@ pub fn sync_pull_dirs(
     if app_conf.mini_app_conf.app_role != AppRole::PullHub {
         bail!("only when app-role is PullHub can call sync_pull_dirs");
     }
-    let (join_handler, server_indicator_pairs) = load_server_indicator_pairs(app_conf, server_yml)?;
+    let (progress_bar_join_handler, server_indicator_pairs) =
+        load_server_indicator_pairs(app_conf, server_yml)?;
+    if app_conf.mini_app_conf.as_service {
+        by_spawn(server_indicator_pairs)?;
+    } else {
+        by_par_iter(server_indicator_pairs)?;
+    }
+    wait_progress_bar_finish(progress_bar_join_handler);
+    Ok(())
+}
 
+fn by_par_iter(
+    server_indicator_pairs: Vec<ServerAndIndicatorSqlite>,
+) -> Result<(), failure::Error> {
     server_indicator_pairs
         .into_par_iter()
         .for_each(
@@ -62,7 +76,27 @@ pub fn sync_pull_dirs(
                 Err(err) => println!("sync-pull-dirs failed: {:?}", err),
             },
         );
-    wait_progress_bar_finish(join_handler);
+    Ok(())
+}
+
+fn by_spawn(server_indicator_pairs: Vec<ServerAndIndicatorSqlite>) -> Result<(), failure::Error> {
+    let handlers = server_indicator_pairs
+        .into_iter()
+        .map(|(server, mut indicator)| {
+            thread::spawn(move || match server.sync_pull_dirs(&mut indicator) {
+                Ok(result) => {
+                    indicator.pb_finish();
+                    actions::write_dir_sync_result(&server, result.as_ref());
+                }
+                Err(err) => println!("sync-pull-dirs failed: {:?}", err),
+            })
+        })
+        .collect::<Vec<thread::JoinHandle<_>>>();
+
+    for child in handlers {
+        // Wait for the thread to finish. Returns a result.
+        let _ = child.join();
+    }
     Ok(())
 }
 
@@ -86,7 +120,7 @@ fn load_server_indicator_pairs(
 
     // all progress bars already create from here on.
 
-    let t = join_multi_bars(app_conf.progress_bar.clone());
+    let progress_bar_join_handler = join_multi_bars(app_conf.progress_bar.clone());
 
     if server_indicator_pairs.is_empty() {
         println!("found no server yml!");
@@ -107,27 +141,5 @@ fn load_server_indicator_pairs(
             }
         })
         .count();
-
-    // let handlers = servers.into_iter().map(|(server, mut indicator)| {
-    //     thread::spawn(move || {
-    //     match server.sync_pull_dirs(&mut indicator) {
-    //         Ok(result) => {
-    //             indicator.pb_finish();
-    //             actions::write_dir_sync_result(&server, result.as_ref());
-    //             if console_log {
-    //                 let result_yml = serde_yaml::to_string(&result)
-    //                     .expect("SyncDirReport should deserialize success.");
-    //                 println!("{}:\n{}", server.get_host(), result_yml);
-    //             }
-    //         }
-    //         Err(err) => println!("sync-pull-dirs failed: {:?}", err),
-    //     }
-    //     })
-    // }).collect::<Vec<thread::JoinHandle<_>>>();
-
-    // for child in handlers {
-    //     // Wait for the thread to finish. Returns a result.
-    //     let _ = child.join();
-    // }
-    Ok((t, server_indicator_pairs))
+    Ok((progress_bar_join_handler, server_indicator_pairs))
 }

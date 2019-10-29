@@ -31,15 +31,14 @@ extern crate rusqlite;
 use clap::App;
 use clap::ArgMatches;
 use clap::Shell;
+use command::db_cmd;
 use db_accesses::{DbAccess, SqliteDbAccess};
 use indicatif::MultiProgress;
 use log::*;
 use mail::send_test_mail;
 use std::env;
-use std::path::Path;
 use std::sync::Arc;
-use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Instant};
 use std::{fs, io, io::BufRead, io::Write};
 
 use actions::SyncDirReport;
@@ -53,7 +52,6 @@ fn main() -> Result<(), failure::Error> {
     let m: ArgMatches = app.get_matches();
     let app1 = App::from_yaml(yml);
     let console_log = m.is_present("console-log");
-
 
     if let ("mkdir", Some(sub_matches)) = m.subcommand() {
         let dir = sub_matches.value_of("dir").unwrap();
@@ -97,14 +95,11 @@ fn main() -> Result<(), failure::Error> {
             .progress_bar
             .replace(Arc::new(MultiProgress::new()));
     }
-    
     if let Some(buf_len) = m.value_of("buf-len") {
         app_conf.mini_app_conf.buf_len = Some(buf_len.parse()?);
     }
 
-    
     app_conf.mini_app_conf.as_service = m.is_present("as-service");
-    
 
     let verbose = if m.is_present("vv") {
         "vv"
@@ -113,8 +108,6 @@ fn main() -> Result<(), failure::Error> {
     } else {
         ""
     };
-
-
 
     app_conf.mini_app_conf.console_log = console_log;
     app_conf.mini_app_conf.verbose = !verbose.is_empty();
@@ -126,46 +119,10 @@ fn main() -> Result<(), failure::Error> {
         verbose,
     )?;
 
-    if let ("create-remote-db", Some(sub_matches)) = m.subcommand() {
-        let (mut server, _indicator) =
-            command::load_server_yml(&app_conf, sub_matches.value_of("server-yml"), false)?;
-        let db_type = sub_matches.value_of("db-type").unwrap_or("sqlite");
-        let force = sub_matches.is_present("force");
-        server.connect()?;
-        return server.create_remote_db(db_type, force);
+    if db_cmd::create_remote_db(&app_conf, &m)? {
+        return Ok(());
     }
-
-    if let ("create-db", Some(sub_matches)) = m.subcommand() {
-        let db_type = sub_matches.value_of("db-type").unwrap_or("sqlite");
-        let force = sub_matches.is_present("force");
-        if "sqlite" == db_type {
-            // create server's db.
-            if let Some(server_yml) = sub_matches.value_of("server-yml") {
-                let (mut server, _indicator) =
-                    command::load_server_yml_by_name(&app_conf, server_yml, false)?;
-                if force {
-                    info!("removing server side db file: {:?}", server.get_db_file());
-                    fs::remove_file(server.get_db_file()).ok();
-                }
-                let sqlite_db_access = SqliteDbAccess::new(server.get_db_file());
-                sqlite_db_access.create_database()?;
-                server.set_db_access(sqlite_db_access);
-            } else {
-                let mut app_conf = command::process_app_config::<
-                    SqliteConnectionManager,
-                    SqliteDbAccess,
-                >(conf, None, false)?;
-                if force {
-                    info!("removing app side db file: {:?}", app_conf.get_sqlite_db_file());
-                    fs::remove_file(app_conf.get_sqlite_db_file()).ok();
-                }
-                let sqlite_db_access = SqliteDbAccess::new(app_conf.get_sqlite_db_file());
-                sqlite_db_access.create_database()?;
-                app_conf.set_db_access(sqlite_db_access);
-            }
-        } else {
-            println!("unsupported database: {}", db_type);
-        }
+    if db_cmd::create_db(&mut app_conf, &m)? {
         return Ok(());
     }
 
@@ -197,43 +154,24 @@ fn main_entry<'a>(
     let no_db = m.is_present("no-db");
     match m.subcommand() {
         ("pull-and-archive", Some(_sub_matches)) => {
-            command::sync_pull_dirs(&app_conf, None)?;
-            command::archive_local(&app_conf, None, Some("prune"), None)?;
+            command::pull_and_archive(&app_conf)?;
         }
         ("sync-pull-dirs", Some(sub_matches)) => {
             command::sync_pull_dirs(&app_conf, sub_matches.value_of("server-yml"))?;
         }
         ("sync-push-dirs", Some(sub_matches)) => {
-            command::sync_push_dirs(&app_conf, sub_matches.value_of("server-yml"), sub_matches.is_present("force"))?;
+            command::sync_push_dirs(
+                &app_conf,
+                sub_matches.value_of("server-yml"),
+                sub_matches.is_present("force"),
+            )?;
         }
         ("send-test-mail", Some(sub_matches)) => {
             let to = sub_matches.value_of("to").unwrap();
             send_test_mail(&app_conf.get_mail_conf(), to)?;
         }
         ("polling-file", Some(sub_matches)) => {
-            let file = sub_matches.value_of("file").unwrap();
-            let period = sub_matches
-                .value_of("period")
-                .unwrap_or("3")
-                .parse::<u64>()
-                .ok()
-                .unwrap_or(3);
-            let path = Path::new(file);
-            let mut last_len = 0;
-            let mut count = 0;
-            loop {
-                if count > 1 {
-                    break;
-                }
-                thread::sleep(Duration::from_secs(period));
-                let ln = path.metadata()?.len();
-                if ln == last_len {
-                    count += 1;
-                } else {
-                    last_len = ln;
-                }
-                println!("{}", ln);
-            }
+            command::misc::polling_file(sub_matches)?;
         }
         ("copy-executable", Some(sub_matches)) => {
             let (mut server, _indicator) =
@@ -403,33 +341,7 @@ fn main_entry<'a>(
                 &mut io::stdout(),
             );
         }
-        ("rsync", Some(sub_matches)) => match sub_matches.subcommand() {
-            ("restore-a-file", Some(sub_sub_matches)) => {
-                command::rsync::restore_a_file(
-                    sub_sub_matches.value_of("old-file"),
-                    sub_sub_matches.value_of("delta-file"),
-                    sub_sub_matches.value_of("out-file"),
-                )?;
-            }
-            ("delta-a-file", Some(sub_sub_matches)) => {
-                command::rsync::delta_a_file(
-                    sub_sub_matches.value_of("new-file"),
-                    sub_sub_matches.value_of("sig-file"),
-                    sub_sub_matches.value_of("out-file"),
-                    sub_sub_matches.is_present("print-progress"),
-                )?;
-            }
-            ("signature", Some(sub_sub_matches)) => {
-                command::rsync::signature(
-                    sub_sub_matches.value_of("file"),
-                    sub_sub_matches.value_of("block-size"),
-                    sub_sub_matches.value_of("out"),
-                )?;
-            }
-            (_, _) => {
-                println!("please add --help to view usage help.");
-            }
-        },
+        ("rsync", Some(sub_matches)) => command::rsync::rsync_cmd_line(sub_matches)?,
         ("print-env", Some(_)) => {
             for (key, value) in env::vars_os() {
                 println!("{:?}: {:?}", key, value);

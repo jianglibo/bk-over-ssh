@@ -100,3 +100,35 @@ pub fn signature(
     eprintln!("time costs: {:?}", start.elapsed().as_secs());
     Ok(out.to_owned())
 }
+
+
+pub fn rsync_cmd_line<'a>(sub_matches: &'a clap::ArgMatches<'a>,) -> Result<(), failure::Error> {
+    match sub_matches.subcommand() {
+            ("restore-a-file", Some(sub_sub_matches)) => {
+                restore_a_file(
+                    sub_sub_matches.value_of("old-file"),
+                    sub_sub_matches.value_of("delta-file"),
+                    sub_sub_matches.value_of("out-file"),
+                )?;
+            }
+            ("delta-a-file", Some(sub_sub_matches)) => {
+                delta_a_file(
+                    sub_sub_matches.value_of("new-file"),
+                    sub_sub_matches.value_of("sig-file"),
+                    sub_sub_matches.value_of("out-file"),
+                    sub_sub_matches.is_present("print-progress"),
+                )?;
+            }
+            ("signature", Some(sub_sub_matches)) => {
+                signature(
+                    sub_sub_matches.value_of("file"),
+                    sub_sub_matches.value_of("block-size"),
+                    sub_sub_matches.value_of("out"),
+                )?;
+            }
+            (_, _) => {
+                println!("please add --help to view usage help.");
+            }
+        }
+        Ok(())
+}

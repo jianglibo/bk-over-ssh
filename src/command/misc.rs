@@ -6,6 +6,34 @@ use std::time::{Duration};
 use crate::data_shape::{Server, ServerYml};
 use crate::db_accesses::{SqliteDbAccess};
 use r2d2_sqlite::SqliteConnectionManager;
+use std::path::Path;
+
+pub fn polling_file<'a>(sub_matches: &'a clap::ArgMatches<'a>,) -> Result<(), failure::Error> {
+                let file = sub_matches.value_of("file").unwrap();
+            let period = sub_matches
+                .value_of("period")
+                .unwrap_or("3")
+                .parse::<u64>()
+                .ok()
+                .unwrap_or(3);
+            let path = Path::new(file);
+            let mut last_len = 0;
+            let mut count = 0;
+            loop {
+                if count > 1 {
+                    break;
+                }
+                thread::sleep(Duration::from_secs(period));
+                let ln = path.metadata()?.len();
+                if ln == last_len {
+                    count += 1;
+                } else {
+                    last_len = ln;
+                }
+                println!("{}", ln);
+            }
+            Ok(())
+}
 
 pub fn verify_server_yml(mut server: Server<SqliteConnectionManager, SqliteDbAccess>) -> Result<(), failure::Error> {
                 eprintln!(
