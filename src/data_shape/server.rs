@@ -99,12 +99,10 @@ pub fn push_a_file_item_sftp(
     buf: &mut [u8],
     progress_bar: &mut Indicator,
 ) -> FileItemProcessResult {
-    progress_bar.active_pb_item().alter_pb(PbProperties {
-        set_length: Some(file_item.relative_item.get_len()),
-        set_message: Some(file_item.get_local_path().as_str().to_string()),
-        reset: true,
-        ..PbProperties::default()
-    });
+    progress_bar.init_item_pb_style_1(
+        file_item.get_local_path().as_str(),
+        file_item.relative_item.get_len(),
+    );
 
     match sftp.create(file_item.get_remote_path().as_path()) {
         Ok(mut file) => {
@@ -824,10 +822,30 @@ where
         Ok(())
     }
 
-    pub fn get_pb_count_and_len(&self) -> Result<(u64, u64), failure::Error> {
-        let working_file = &self.get_working_file_list_file();
-        let mut wfb = io::BufReader::new(fs::File::open(working_file)?);
-        Ok(self.count_and_len(&mut wfb))
+    fn init_total_progress_bar(
+        &self,
+        progress_bar: &mut Indicator,
+        file_list_file: impl AsRef<Path>,
+    ) -> Result<(), failure::Error> {
+        let count_and_len_op = if progress_bar.is_some() {
+            let mut wfb = io::BufReader::new(fs::File::open(file_list_file.as_ref())?);
+            Some(self.count_and_len(&mut wfb))
+        } else {
+            None
+        };
+        let total_count = count_and_len_op.map(|cl| cl.0).unwrap_or_default();
+        progress_bar.count_total = total_count;
+
+        progress_bar.active_pb_total().alter_pb(PbProperties {
+            set_style: Some(ProgressStyle::default_bar().template("{prefix} {bytes_per_sec: 11} {decimal_bytes:>11}/{decimal_total_bytes} {bar:30.cyan/blue} {percent}% {eta}").progress_chars("#-")),
+            set_length: count_and_len_op.map(|cl| cl.1),
+            ..PbProperties::default()
+        });
+        progress_bar.active_pb_item().alter_pb(PbProperties {
+            set_style: Some(ProgressStyle::default_bar().template("{bytes_per_sec:10} {decimal_bytes:>8}/{decimal_total_bytes:8} {spinner} {percent:>4}% {eta:5} {wide_msg}").progress_chars("#-")),
+            ..PbProperties::default()
+        });
+        Ok(())
     }
 
     fn start_pull_sync_working_file_list(
@@ -852,11 +870,6 @@ where
         &self,
         progress_bar: &mut Indicator,
     ) -> Result<FileItemProcessResultStats, failure::Error> {
-        progress_bar.active_pb_item().alter_pb(PbProperties {
-            set_style: Some(ProgressStyle::default_bar().template("{bytes_per_sec:10} {decimal_bytes:>8}/{decimal_total_bytes:8} {spinner} {percent:>4}% {eta:5} {wide_msg}").progress_chars("#-")),
-            ..PbProperties::default()
-        });
-
         let file_list_file = self.get_active_leaf_file_list_file();
 
         {
@@ -869,6 +882,8 @@ where
                 .expect("file list file should be created.");
             self.create_file_list_files(&mut o)?;
         }
+
+        self.init_total_progress_bar(progress_bar, file_list_file.as_path())?;
 
         info!("start reading file_list_file: {:?}", file_list_file);
         let reader = fs::OpenOptions::new()
@@ -937,23 +952,9 @@ where
         let mut current_remote_dir = Option::<String>::None;
         let mut current_local_dir = Option::<&Path>::None;
         let mut consume_count = 0u64;
-        let count_and_len_op = if progress_bar.is_some() {
-            self.get_pb_count_and_len().ok()
-        } else {
-            None
-        };
-        let total_count = count_and_len_op.map(|cl| cl.0).unwrap_or_default();
 
-        progress_bar.active_pb_total().alter_pb(PbProperties {
-            set_style: Some(ProgressStyle::default_bar().template("{prefix} {bytes_per_sec: 11} {decimal_bytes:>11}/{decimal_total_bytes} {bar:30.cyan/blue} {percent}% {eta}").progress_chars("#-")),
-            set_length: count_and_len_op.map(|cl| cl.1),
-            ..PbProperties::default()
-        });
-
-        progress_bar.active_pb_item().alter_pb(PbProperties {
-            set_style: Some(ProgressStyle::default_bar().template("{bytes_per_sec:10} {decimal_bytes:>8}/{decimal_total_bytes:8} {spinner} {percent:>4}% {eta:5} {wide_msg}").progress_chars("#-")),
-            ..PbProperties::default()
-        });
+        self.init_total_progress_bar(progress_bar, self.get_working_file_list_file())?;
+        // let total_count = progress_bar.count_total;
 
         let sftp = self.session.as_ref().unwrap().sftp()?;
         let mut buff = vec![0_u8; self.server_yml.buf_len];
@@ -992,14 +993,16 @@ where
                                 );
                                 consume_count += 1;
 
-                                progress_bar.active_pb_item().alter_pb(PbProperties {
-                                    set_length: Some(remote_len),
-                                    set_message: Some(
-                                        file_item_map.get_relative_item().get_path().to_owned(),
-                                    ),
-                                    reset: true,
-                                    ..PbProperties::default()
-                                });
+                                progress_bar.init_item_pb_style_1(file_item_map.get_relative_item().get_path(), remote_len);
+
+                                // progress_bar.active_pb_item().alter_pb(PbProperties {
+                                //     set_length: Some(remote_len),
+                                //     set_message: Some(
+                                //         file_item_map.get_relative_item().get_path().to_owned(),
+                                //     ),
+                                //     reset: true,
+                                //     ..PbProperties::default()
+                                // });
 
                                 let mut skipped = false;
                                 // if use_db all received item are changed.
@@ -1015,21 +1018,21 @@ where
                                         ),
                                     )
                                 };
-                                if progress_bar.is_some() {
-                                    progress_bar.active_pb_total().alter_pb(PbProperties {
-                                        set_prefix: Some(format!(
-                                            "[{}] {}/{} ",
-                                            self.get_host(),
-                                            total_count - consume_count,
-                                            total_count
-                                        )),
-                                        inc: Some(remote_len),
-                                        ..PbProperties::default()
-                                    });
+
+                                progress_bar.tick_total_pb_style_1(self.get_host(), consume_count, remote_len);
+                                    // progress_bar.active_pb_total().alter_pb(PbProperties {
+                                    //     set_prefix: Some(format!(
+                                    //         "[{}] {}/{} ",
+                                    //         self.get_host(),
+                                    //         total_count - consume_count,
+                                    //         total_count
+                                    //     )),
+                                    //     inc: Some(remote_len),
+                                    //     ..PbProperties::default()
+                                    // });
                                     if skipped {
                                         progress_bar.active_pb_item().inc_pb_item(remote_len);
                                     }
-                                }
                                 r
                             }
                             Err(err) => {

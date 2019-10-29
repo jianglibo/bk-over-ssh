@@ -14,6 +14,7 @@ pub struct PbProperties {
 
 #[derive(Default, Debug)]
 pub struct Indicator {
+    pub count_total: u64,
     pub pb_total: Option<ProgressBar>,
     pub pb_item: Option<ProgressBar>,
     active_pb: u8, // 0 means pb_total is active, 1 means another.
@@ -36,10 +37,35 @@ impl Indicator {
                 pb_total: Some(pb_total),
                 pb_item: Some(pb_item),
                 active_pb: 0,
+                count_total: 0,
             }
         } else {
             Self::default()
         }
+    }
+
+    pub fn init_item_pb_style_1(&mut self, file_name: &str, file_len: u64) {
+        self.active_pb_item();
+        self.alter_pb(PbProperties {
+            set_length: Some(file_len),
+            set_message: Some(file_name.to_string()),
+            reset: true,
+            ..PbProperties::default()
+        });
+    }
+
+    pub fn tick_total_pb_style_1(&mut self, host: &str, consume_count: u64, file_len: u64) {
+        self.active_pb_total();
+        self.alter_pb(PbProperties {
+            set_prefix: Some(format!(
+                "[{}] {}/{} ",
+                host,
+                self.count_total - consume_count,
+                self.count_total
+            )),
+            inc: Some(file_len),
+            ..PbProperties::default()
+        });
     }
 
     pub fn is_some(&self) -> bool {
@@ -131,7 +157,6 @@ impl Indicator {
         if let Some(pb) = self.pb_item.as_ref() {
             pb.finish_and_clear();
         }
-        
     }
 
     pub fn set_message(&self, message: String) {
