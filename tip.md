@@ -49,6 +49,10 @@ Every user will create a linux account and a home directory. For example: userad
 
 .\target\debug\bk-over-ssh.exe --console-log --skip-cron --app-role active_leaf sync-push-dirs .\data\active-leaf-conf\localhost.yml
 
+.\target\debug\bk-over-ssh.exe --console-log --vv --skip-cron  --app-role pull_hub create-remote-db .\data\pull-servers-conf\go2wheel.yml --force
+
+.\target\debug\bk-over-ssh.exe --console-log --vv --skip-cron  --app-role active_leaf sync-push-dirs .\data\active-leaf-conf\go2wheel.yml --force
+
 ## window service.
 https://github.com/kohsuke/winsw/
 

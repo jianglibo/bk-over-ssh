@@ -97,8 +97,15 @@ pub fn push_a_file_item_sftp(
     sftp: &ssh2::Sftp,
     file_item: PrimaryFileItem,
     buf: &mut [u8],
-    progress_bar: &Indicator,
+    progress_bar: &mut Indicator,
 ) -> FileItemProcessResult {
+    progress_bar.active_pb_item().alter_pb(PbProperties {
+        set_length: Some(file_item.relative_item.get_len()),
+        set_message: Some(file_item.get_local_path().as_str().to_string()),
+        reset: true,
+        ..PbProperties::default()
+    });
+
     match sftp.create(file_item.get_remote_path().as_path()) {
         Ok(mut file) => {
             let local_file_path = file_item.get_local_path();
@@ -845,6 +852,11 @@ where
         &self,
         progress_bar: &mut Indicator,
     ) -> Result<FileItemProcessResultStats, failure::Error> {
+        progress_bar.active_pb_item().alter_pb(PbProperties {
+            set_style: Some(ProgressStyle::default_bar().template("{bytes_per_sec:10} {decimal_bytes:>8}/{decimal_total_bytes:8} {spinner} {percent:>4}% {eta:5} {wide_msg}").progress_chars("#-")),
+            ..PbProperties::default()
+        });
+
         let file_list_file = self.get_active_leaf_file_list_file();
 
         {
@@ -932,15 +944,6 @@ where
         };
         let total_count = count_and_len_op.map(|cl| cl.0).unwrap_or_default();
 
-        // if let Some((pb_total, pb_item)) = self.pb.as_ref() {
-        // // let style = ProgressStyle::default_bar().template("[{eta_precise}] {prefix:.bold.dim} {bytes_per_sec} {decimal_bytes}/{decimal_total_bytes} {bar:30.cyan/blue} {spinner} {wide_msg}").progress_chars("#-");
-        // let style = ProgressStyle::default_bar().template("{prefix} {bytes_per_sec} {decimal_bytes}/{decimal_total_bytes} {bar:30.cyan/blue} {percent}% {eta}").progress_chars("#-");
-        // pb_total.set_length(count_and_len_op.map(|cl| cl.1).unwrap_or(0u64));
-        // pb_total.set_style(style);
-
-        //     let style = ProgressStyle::default_bar().template("{bytes_per_sec:10} {decimal_bytes:>8}/{decimal_total_bytes:8} {spinner} {percent:>4}% {eta:5} {wide_msg}").progress_chars("#-");
-        //     pb_item.set_style(style);
-        // }
         progress_bar.active_pb_total().alter_pb(PbProperties {
             set_style: Some(ProgressStyle::default_bar().template("{prefix} {bytes_per_sec: 11} {decimal_bytes:>11}/{decimal_total_bytes} {bar:30.cyan/blue} {percent}% {eta}").progress_chars("#-")),
             set_length: count_and_len_op.map(|cl| cl.1),
@@ -1085,7 +1088,8 @@ where
         self.server_yml
             .schedules
             .iter()
-            .find(|it| it.name.as_str() == cron_name).cloned()
+            .find(|it| it.name.as_str() == cron_name)
+            .cloned()
     }
 
     fn check_skip_cron(&self, cron_name: &str) -> bool {
@@ -1116,7 +1120,7 @@ where
     /// We can push files to multiple destinations simultaneously.
     pub fn sync_push_dirs(
         &self,
-        pb: &mut Indicator,
+        progress_bar: &mut Indicator,
     ) -> Result<Option<SyncDirReport>, failure::Error> {
         if self.check_skip_cron("sync-push-dirs") {
             info!(
@@ -1127,7 +1131,7 @@ where
             let start = Instant::now();
             let started_at = Local::now();
 
-            let rs = self.start_push_sync_working_file_list(pb)?;
+            let rs = self.start_push_sync_working_file_list(progress_bar)?;
             self.confirm_local_sync()?;
             Ok(Some(SyncDirReport::new(start.elapsed(), started_at, rs)))
         } else {
