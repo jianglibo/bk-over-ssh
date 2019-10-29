@@ -21,27 +21,81 @@ pub fn sync_push_dirs(
     let (progress_bar_join_handler, server_indicator_pairs) =
         load_server_indicator_pairs(app_conf, server_yml)?;
 
+    if app_conf.mini_app_conf.as_service {
+        push_by_spawn(server_indicator_pairs, force)?;
+    } else {
+        push_by_par_iter(server_indicator_pairs, force)?;
+    }
+
+    wait_progress_bar_finish(progress_bar_join_handler);
+    Ok(())
+}
+
+fn push_one_server(
+    server: &mut Server<SqliteConnectionManager, SqliteDbAccess>,
+    indicator: &mut Indicator,
+    force: bool,
+) {
+    if force && server.get_db_file().exists() {
+        server.db_access.take();
+        fs::remove_file(server.get_db_file()).expect("should remove db_file.");
+        let sqlite_db_access = SqliteDbAccess::new(server.get_db_file());
+        sqlite_db_access
+            .create_database()
+            .expect("should recreate database.");
+        server.set_db_access(sqlite_db_access);
+    }
+    match server.sync_push_dirs(indicator) {
+        Ok(result) => {
+            indicator.pb_finish();
+            actions::write_dir_sync_result(&server, result.as_ref());
+        }
+        Err(err) => println!("sync-push-dirs failed: {:?}", err),
+    }
+}
+
+fn push_by_par_iter(
+    server_indicator_pairs: Vec<ServerAndIndicatorSqlite>,
+    force: bool,
+) -> Result<(), failure::Error> {
     server_indicator_pairs
         .into_par_iter()
         .for_each(|(mut server, mut indicator)| {
-            if force && server.get_db_file().exists() {
-                server.db_access.take();
-                fs::remove_file(server.get_db_file()).expect("should remove db_file.");
-                let sqlite_db_access = SqliteDbAccess::new(server.get_db_file());
-                sqlite_db_access
-                    .create_database()
-                    .expect("should recreate database.");
-                server.set_db_access(sqlite_db_access);
-            }
-            match server.sync_push_dirs(&mut indicator) {
-                Ok(result) => {
-                    indicator.pb_finish();
-                    actions::write_dir_sync_result(&server, result.as_ref());
-                }
-                Err(err) => println!("sync-push-dirs failed: {:?}", err),
-            }
+            push_one_server(&mut server, &mut indicator, force);
         });
-    wait_progress_bar_finish(progress_bar_join_handler);
+    Ok(())
+}
+
+fn push_by_spawn_do(mut pair: ServerAndIndicatorSqlite, force: bool) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        if let Some(schedule_item) = pair.0.find_cron_by_name(server::CRON_NAME_SYNC_PUSH_DIRS) {
+            let mut sched = JobScheduler::new();
+            sched.add(Job::new(schedule_item.cron.parse().unwrap(), || {
+                push_one_server(&mut pair.0, &mut pair.1, force);
+            }));
+
+            eprintln!("entering sched ticking.");
+            loop {
+                sched.tick();
+                thread::sleep(Duration::from_millis(500));
+            }
+        }
+    })
+}
+
+fn push_by_spawn(
+    server_indicator_pairs: Vec<ServerAndIndicatorSqlite>,
+    force: bool,
+) -> Result<(), failure::Error> {
+    let handlers = server_indicator_pairs
+        .into_iter()
+        .map(|pair| push_by_spawn_do(pair, force))
+        .collect::<Vec<thread::JoinHandle<_>>>();
+
+    for child in handlers {
+        // Wait for the thread to finish. Returns a result.
+        let _ = child.join();
+    }
     Ok(())
 }
 
@@ -63,15 +117,15 @@ pub fn sync_pull_dirs_follow_archive(
     let (progress_bar_join_handler, server_indicator_pairs) =
         load_server_indicator_pairs(app_conf, server_yml)?;
     if app_conf.mini_app_conf.as_service {
-        by_spawn(server_indicator_pairs, follow_archive)?;
+        pull_by_spawn(server_indicator_pairs, follow_archive)?;
     } else {
-        by_par_iter(server_indicator_pairs, follow_archive)?;
+        pull_by_par_iter(server_indicator_pairs, follow_archive)?;
     }
     wait_progress_bar_finish(progress_bar_join_handler);
     Ok(())
 }
 
-fn by_par_iter(
+fn pull_by_par_iter(
     server_indicator_pairs: Vec<ServerAndIndicatorSqlite>,
     follow_archive: bool,
 ) -> Result<(), failure::Error> {
@@ -93,7 +147,10 @@ fn by_par_iter(
     Ok(())
 }
 
-fn by_spawn_do(pair: ServerAndIndicatorSqlite, follow_archive: bool) -> thread::JoinHandle<()> {
+fn pull_by_spawn_do(
+    pair: ServerAndIndicatorSqlite,
+    follow_archive: bool,
+) -> thread::JoinHandle<()> {
     let (server, mut indicator) = pair;
     thread::spawn(move || {
         if let Some(schedule_item) = server.find_cron_by_name(server::CRON_NAME_SYNC_PULL_DIRS) {
@@ -121,13 +178,13 @@ fn by_spawn_do(pair: ServerAndIndicatorSqlite, follow_archive: bool) -> thread::
     })
 }
 
-fn by_spawn(
+fn pull_by_spawn(
     server_indicator_pairs: Vec<ServerAndIndicatorSqlite>,
     follow_archive: bool,
 ) -> Result<(), failure::Error> {
     let handlers = server_indicator_pairs
         .into_iter()
-        .map(|pair| by_spawn_do(pair, follow_archive))
+        .map(|pair| pull_by_spawn_do(pair, follow_archive))
         .collect::<Vec<thread::JoinHandle<_>>>();
 
     for child in handlers {

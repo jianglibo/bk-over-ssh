@@ -1085,8 +1085,7 @@ where
         self.server_yml
             .schedules
             .iter()
-            .find(|it| it.name.as_str() == cron_name)
-            .map(|it| it.clone())
+            .find(|it| it.name.as_str() == cron_name).cloned()
     }
 
     fn check_skip_cron(&self, cron_name: &str) -> bool {

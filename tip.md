@@ -4,9 +4,6 @@ environment variables: Get-Childitem env:
 https://blog.ropnop.com/extracting-ssh-private-keys-from-windows-10-ssh-agent/
 Get-Service ssh-agent
 
-## window service.
-https://github.com/kohsuke/winsw/
-
 ## First stage
 * list files
 * compare files
@@ -46,3 +43,12 @@ Every user will create a linux account and a home directory. For example: userad
 .\target\debug\bk-over-ssh.exe --console-log --skip-cron --app-role pull_hub sync-pull-dirs .\data\pull-servers-conf\localhost.yml
 
 .\target\debug\bk-over-ssh.exe --console-log --as-service --app-role pull_hub sync-pull-dirs .\data\pull-servers-conf\localhost.yml
+
+
+.\target\debug\bk-over-ssh.exe --console-log --as-service --app-role active_leaf sync-push-dirs .\data\active-leaf-conf\localhost.yml
+
+.\target\debug\bk-over-ssh.exe --console-log --skip-cron --app-role active_leaf sync-push-dirs .\data\active-leaf-conf\localhost.yml
+
+## window service.
+https://github.com/kohsuke/winsw/
+
