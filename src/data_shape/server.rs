@@ -23,9 +23,8 @@ use std::time::Instant;
 use std::{fs, io, io::Seek};
 use tar::Builder;
 
-pub const CRON_NAME_SYNC_PULL_DIRS: &str =  "sync-pull-dirs";
-pub const CRON_NAME_PULL_AND_ARCHIVE: &str =  "pull-and-archive";
-pub const CRON_NAME_SYNC_PUSH_DIRS: &str =  "sync-push-dirs";
+pub const CRON_NAME_SYNC_PULL_DIRS: &str = "sync-pull-dirs";
+pub const CRON_NAME_SYNC_PUSH_DIRS: &str = "sync-push-dirs";
 
 const FILE_LIST_FILE_NAME: &str = "file_list_file.txt";
 
@@ -523,22 +522,22 @@ where
         Ok(cur_archive_path)
     }
 
+    /// Archive need not to schedule standalone.
+    /// Because of conflict with the sync operation.
     pub fn archive_local(&self, pb: &mut Indicator) -> Result<(), failure::Error> {
-        if self.check_skip_cron("archive-local") {
-            info!(
-                "start archive_local on server: {} at: {}",
-                self.get_host(),
-                Local::now()
-            );
-            let cur = if self.app_conf.archive_cmd.is_empty() {
-                self.archive_internal(pb)?
-            } else {
-                self.archive_out(pb)?
-            };
-            let nf = self.next_archive_file();
-            trace!("move fie to {:?}", nf);
-            fs::rename(cur, nf)?;
-        }
+        info!(
+            "start archive_local on server: {} at: {}",
+            self.get_host(),
+            Local::now()
+        );
+        let cur = if self.app_conf.archive_cmd.is_empty() {
+            self.archive_internal(pb)?
+        } else {
+            self.archive_out(pb)?
+        };
+        let nf = self.next_archive_file();
+        trace!("move fie to {:?}", nf);
+        fs::rename(cur, nf)?;
         Ok(())
     }
     pub fn prune_backups(&self) -> Result<(), failure::Error> {

@@ -154,10 +154,10 @@ fn main_entry<'a>(
     let no_db = m.is_present("no-db");
     match m.subcommand() {
         ("pull-and-archive", Some(_sub_matches)) => {
-            command::pull_and_archive(&app_conf)?;
+            command::sync_dirs::sync_pull_dirs_follow_archive(&app_conf, None, true)?;
         }
         ("sync-pull-dirs", Some(sub_matches)) => {
-            command::sync_pull_dirs(&app_conf, sub_matches.value_of("server-yml"), true)?;
+            command::sync_pull_dirs(&app_conf, sub_matches.value_of("server-yml"))?;
         }
         ("sync-push-dirs", Some(sub_matches)) => {
             command::sync_push_dirs(

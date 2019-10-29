@@ -1,10 +1,9 @@
-use crate::db_accesses::SqliteDbAccess;
-use rayon::prelude::*;
-use log::*;
 use crate::actions;
 use crate::data_shape::{server, AppConf, Indicator, Server};
+use crate::db_accesses::SqliteDbAccess;
 use job_scheduler::{Job, JobScheduler};
 use r2d2_sqlite::SqliteConnectionManager;
+use rayon::prelude::*;
 use std::time::Duration;
 
 use super::*;
@@ -49,7 +48,14 @@ pub fn sync_push_dirs(
 pub fn sync_pull_dirs(
     app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
     server_yml: Option<&str>,
-    enable_schedule: bool,
+) -> Result<(), failure::Error> {
+    sync_pull_dirs_follow_archive(app_conf, server_yml, false)
+}
+
+pub fn sync_pull_dirs_follow_archive(
+    app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
+    server_yml: Option<&str>,
+    follow_archive: bool,
 ) -> Result<(), failure::Error> {
     if app_conf.mini_app_conf.app_role != AppRole::PullHub {
         bail!("only when app-role is PullHub can call sync_pull_dirs");
@@ -57,9 +63,9 @@ pub fn sync_pull_dirs(
     let (progress_bar_join_handler, server_indicator_pairs) =
         load_server_indicator_pairs(app_conf, server_yml)?;
     if app_conf.mini_app_conf.as_service {
-        by_spawn(server_indicator_pairs, enable_schedule)?;
+        by_spawn(server_indicator_pairs, follow_archive)?;
     } else {
-        by_par_iter(server_indicator_pairs)?;
+        by_par_iter(server_indicator_pairs, follow_archive)?;
     }
     wait_progress_bar_finish(progress_bar_join_handler);
     Ok(())
@@ -67,52 +73,49 @@ pub fn sync_pull_dirs(
 
 fn by_par_iter(
     server_indicator_pairs: Vec<ServerAndIndicatorSqlite>,
+    follow_archive: bool,
 ) -> Result<(), failure::Error> {
     server_indicator_pairs
         .into_par_iter()
-        .for_each(
-            |(server, mut indicator)| match server.sync_pull_dirs(&mut indicator, false) {
+        .for_each(|(server, mut indicator)| {
+            match server.sync_pull_dirs(&mut indicator, false) {
                 Ok(result) => {
                     indicator.pb_finish();
                     actions::write_dir_sync_result(&server, result.as_ref());
                 }
                 Err(err) => println!("sync-pull-dirs failed: {:?}", err),
-            },
-        );
+            }
+            if follow_archive {
+                server.archive_local(&mut indicator).ok();
+                server.prune_backups().ok();
+            }
+        });
     Ok(())
 }
 
-fn by_spawn_do(pair: ServerAndIndicatorSqlite, enable_schedule: bool) -> thread::JoinHandle<()> {
+fn by_spawn_do(pair: ServerAndIndicatorSqlite, follow_archive: bool) -> thread::JoinHandle<()> {
     let (server, mut indicator) = pair;
     thread::spawn(move || {
-        if enable_schedule {
-            if let Some(schedule_item) = server.find_cron_by_name(server::CRON_NAME_SYNC_PULL_DIRS)
-            {
-                let mut sched = JobScheduler::new();
-                sched.add(Job::new(
-                    schedule_item.cron.parse().unwrap(),
-                    || match server.sync_pull_dirs(&mut indicator, true) {
-                        Ok(result) => {
-                            indicator.pb_finish();
-                            actions::write_dir_sync_result(&server, result.as_ref());
-                        }
-                        Err(err) => println!("sync-pull-dirs failed: {:?}", err),
-                    },
-                ));
+        if let Some(schedule_item) = server.find_cron_by_name(server::CRON_NAME_SYNC_PULL_DIRS) {
+            let mut sched = JobScheduler::new();
+            sched.add(Job::new(schedule_item.cron.parse().unwrap(), || {
+                match server.sync_pull_dirs(&mut indicator, true) {
+                    Ok(result) => {
+                        indicator.pb_finish();
+                        actions::write_dir_sync_result(&server, result.as_ref());
+                    }
+                    Err(err) => println!("sync-pull-dirs failed: {:?}", err),
+                }
+                if follow_archive {
+                    server.archive_local(&mut indicator).ok();
+                    server.prune_backups().ok();
+                }
+            }));
 
-                eprintln!("entering sched ticking.");
-                loop {
-                    sched.tick();
-                    thread::sleep(Duration::from_millis(500));
-                }
-            }
-        } else {
-            match server.sync_pull_dirs(&mut indicator, true) {
-                Ok(result) => {
-                    indicator.pb_finish();
-                    actions::write_dir_sync_result(&server, result.as_ref());
-                }
-                Err(err) => println!("sync-pull-dirs failed: {:?}", err),
+            eprintln!("entering sched ticking.");
+            loop {
+                sched.tick();
+                thread::sleep(Duration::from_millis(500));
             }
         }
     })
@@ -120,11 +123,11 @@ fn by_spawn_do(pair: ServerAndIndicatorSqlite, enable_schedule: bool) -> thread:
 
 fn by_spawn(
     server_indicator_pairs: Vec<ServerAndIndicatorSqlite>,
-    enable_schedule: bool,
+    follow_archive: bool,
 ) -> Result<(), failure::Error> {
     let handlers = server_indicator_pairs
         .into_iter()
-        .map(|pair| by_spawn_do(pair, enable_schedule))
+        .map(|pair| by_spawn_do(pair, follow_archive))
         .collect::<Vec<thread::JoinHandle<_>>>();
 
     for child in handlers {
