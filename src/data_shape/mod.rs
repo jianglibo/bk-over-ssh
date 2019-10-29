@@ -27,7 +27,7 @@ pub use writer_with_progress::ProgressWriter;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct ScheduleItem {
     pub name: String,
     pub cron: String,

@@ -23,6 +23,10 @@ use std::time::Instant;
 use std::{fs, io, io::Seek};
 use tar::Builder;
 
+pub const CRON_NAME_SYNC_PULL_DIRS: &str =  "sync-pull-dirs";
+pub const CRON_NAME_PULL_AND_ARCHIVE: &str =  "pull-and-archive";
+pub const CRON_NAME_SYNC_PUSH_DIRS: &str =  "sync-push-dirs";
+
 const FILE_LIST_FILE_NAME: &str = "file_list_file.txt";
 
 #[derive(Deserialize, Debug, Serialize)]
@@ -1078,14 +1082,17 @@ where
             .sum()
     }
 
+    pub fn find_cron_by_name(&self, cron_name: &str) -> Option<ScheduleItem> {
+        self.server_yml
+            .schedules
+            .iter()
+            .find(|it| it.name.as_str() == cron_name)
+            .map(|it| it.clone())
+    }
+
     fn check_skip_cron(&self, cron_name: &str) -> bool {
         self.app_conf.skip_cron
-            || if let Some(si) = self
-                .server_yml
-                .schedules
-                .iter()
-                .find(|it| it.name == cron_name)
-            {
+            || if let Some(si) = self.find_cron_by_name(cron_name) {
                 match scheduler_util::need_execute(
                     self.db_access.as_ref(),
                     self.yml_location.as_ref().unwrap().to_str().unwrap(),
@@ -1133,8 +1140,9 @@ where
     pub fn sync_pull_dirs(
         &self,
         pb: &mut Indicator,
+        as_service: bool,
     ) -> Result<Option<SyncDirReport>, failure::Error> {
-        if self.check_skip_cron("sync-pull-dirs") {
+        if as_service || self.check_skip_cron(CRON_NAME_SYNC_PULL_DIRS) {
             info!(
                 "start sync_pull_dirs on server: {} at: {}",
                 self.get_host(),
@@ -1279,7 +1287,6 @@ mod tests {
 
         let home_dir =
             SlashPath::from_path(dirs::home_dir().expect("home dir should exist").as_path());
-        
         let directories_dir = home_dir.join("directories");
         if directories_dir.exists() {
             info!("directories path: {:?}", directories_dir.as_path());
@@ -1369,7 +1376,7 @@ mod tests {
         // let mut indicator = Indicator::new(Some(mb2));
         let mut indicator = Indicator::new(None);
         server.connect()?;
-        let stats = server.sync_pull_dirs(&mut indicator)?;
+        let stats = server.sync_pull_dirs(&mut indicator, false)?;
         indicator.pb_finish();
         info!("result {:?}", stats);
         info!("a_dir is {:?}", a_dir);

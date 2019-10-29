@@ -157,7 +157,7 @@ fn main_entry<'a>(
             command::pull_and_archive(&app_conf)?;
         }
         ("sync-pull-dirs", Some(sub_matches)) => {
-            command::sync_pull_dirs(&app_conf, sub_matches.value_of("server-yml"))?;
+            command::sync_pull_dirs(&app_conf, sub_matches.value_of("server-yml"), true)?;
         }
         ("sync-push-dirs", Some(sub_matches)) => {
             command::sync_push_dirs(

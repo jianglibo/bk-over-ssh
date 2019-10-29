@@ -154,7 +154,7 @@ where
 pub fn pull_and_archive(
     app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
 ) -> Result<(), failure::Error> {
-    sync_pull_dirs(&app_conf, None)?;
+    sync_pull_dirs(&app_conf, None, false)?;
     archive_local(&app_conf, None, Some("prune"), None)?;
     Ok(())
 }

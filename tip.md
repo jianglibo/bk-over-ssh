@@ -39,3 +39,10 @@ Every user will create a linux account and a home directory. For example: userad
 ## ActiveLeaf
 1. list local file.
 2. upload changed file.
+
+## common commands example
+.\target\debug\bk-over-ssh.exe --console-log --app-role pull_hub create-db .\data\pull-servers-conf\localhost.yml
+
+.\target\debug\bk-over-ssh.exe --console-log --skip-cron --app-role pull_hub sync-pull-dirs .\data\pull-servers-conf\localhost.yml
+
+.\target\debug\bk-over-ssh.exe --console-log --as-service --app-role pull_hub sync-pull-dirs .\data\pull-servers-conf\localhost.yml
