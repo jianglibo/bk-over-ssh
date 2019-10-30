@@ -263,8 +263,8 @@ fn main_entry<'a>(
             command::archive_local(
                 app_conf,
                 sub_matches.value_of("server-yml"),
-                sub_matches.value_of("prune"),
-                sub_matches.value_of("prune-only"),
+                sub_matches.is_present("prune"),
+                sub_matches.is_present("prune-only"),
             )?;
         }
         ("confirm-remote-sync", Some(sub_matches)) => {

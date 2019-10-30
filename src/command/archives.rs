@@ -10,8 +10,8 @@ use super::*;
 pub fn archive_local(
     app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
     server_yml: Option<&str>,
-    prune_op: Option<&str>,
-    prune_only_op: Option<&str>,
+    prune: bool,
+    prune_only: bool,
 ) -> Result<(), failure::Error>
 {
     let mut servers: Vec<(Server<SqliteConnectionManager, SqliteDbAccess>, Indicator)> = Vec::new();
@@ -36,7 +36,7 @@ pub fn archive_local(
     servers
         .into_par_iter()
         .map(|(server, mut indicator)| {
-            if prune_op.is_some() {
+            if prune {
                 if let Err(err) = server.archive_local(&mut indicator) {
                     error!("{:?}", err);
                     eprintln!("{:?}", err);
@@ -45,7 +45,7 @@ pub fn archive_local(
                     error!("{:?}", err);
                     eprintln!("{:?}", err);
                 }
-            } else if prune_only_op.is_some() {
+            } else if prune_only {
                 if let Err(err) = server.prune_backups() {
                     error!("{:?}", err);
                     eprintln!("{:?}", err);
