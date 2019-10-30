@@ -400,30 +400,6 @@ where
         };
 
         AppConf::read_app_conf(app_conf_file, app_role)
-
-        // if let Some(af) = app_conf_file {
-        //     if let Ok(af) = AppConf::read_app_conf(af, app_role) {
-        //         return Ok(Some(af))
-        //     }
-        // } else {
-        //     if let Ok(current_exe) = env::current_exe() {
-        //         if let Some(pp) = current_exe.parent() {
-        //             let cf = pp.join(CONF_FILE_NAME);
-        //             trace!("found configuration file: {:?}", &cf);
-        //             if let Some(af) = AppConf::read_app_conf(&cf, app_role.clone())? {
-        //                 // if it returned None, continue searching.
-        //                 return Ok(Some(af));
-        //             }
-        //         }
-        //     }
-
-        //     if let Ok(current_dir) = env::current_dir() {
-        //         let cf = current_dir.join(CONF_FILE_NAME);
-        //         trace!("found configuration file: {:?}", &cf);
-        //         return AppConf::read_app_conf(&cf, app_role);
-        //     }
-        // }
-        // bail!("read app_conf failed.")
     }
 
     pub fn lock_working_file(&mut self) -> Result<(), failure::Error> {
@@ -440,23 +416,6 @@ where
         trace!("locked!");
         Ok(())
     }
-
-    // pub fn load_this_server_yml(&self) -> Result<(Server<M, D>, Indicator), failure::Error> {
-    //     let this_server_yml_path = self.data_dir_full_path.join("this_server.yml");
-    //     if !this_server_yml_path.exists() {
-    //         let bytes = include_bytes!("../server_template.yaml");
-    //         let mut file = fs::OpenOptions::new()
-    //             .write(true)
-    //             .create(true)
-    //             .open(&this_server_yml_path)?;
-    //         file.write_all(bytes)?;
-    //         bail!("this_server.yml doesn't exists, have created one for you, please edit content of it. {:?}", this_server_yml_path);
-    //     }
-    //     let yml_file_name = this_server_yml_path
-    //         .to_str()
-    //         .expect("this_server.yml should load succeeded.");
-    //     self.load_server_yml(yml_file_name)
-    // }
 
     pub fn load_server_yml(
         &self,

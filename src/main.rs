@@ -138,7 +138,7 @@ fn main() -> Result<(), failure::Error> {
     if let Some(delay) = delay {
         command::delay_exec(delay);
     }
-    if let Err(err) = main_entry(app1, &app_conf, &m, console_log) {
+    if let Err(err) = main_entry(app1, &mut app_conf, &m, console_log) {
         error!("{:?}", err);
         eprintln!("{:?}", err);
     }
@@ -147,22 +147,31 @@ fn main() -> Result<(), failure::Error> {
 
 fn main_entry<'a>(
     mut app1: App,
-    app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
+    app_conf: &mut AppConf<SqliteConnectionManager, SqliteDbAccess>,
     m: &'a clap::ArgMatches<'a>,
     _console_log: bool,
 ) -> Result<(), failure::Error> {
     let no_db = m.is_present("no-db");
     match m.subcommand() {
         ("pull-and-archive", Some(_sub_matches)) => {
+            app_conf.progress_bar.take();
             command::sync_dirs::sync_pull_dirs_follow_archive(&app_conf, None, true)?;
         }
         ("sync-pull-dirs", Some(sub_matches)) => {
-            command::sync_pull_dirs(&app_conf, sub_matches.value_of("server-yml"))?;
+            let server_yml = sub_matches.value_of("server-yml");
+            if server_yml.is_none() {
+                app_conf.progress_bar.take();
+            }
+            command::sync_pull_dirs(&app_conf, server_yml)?;
         }
         ("sync-push-dirs", Some(sub_matches)) => {
+            let server_yml = sub_matches.value_of("server-yml");
+            if server_yml.is_none() {
+                app_conf.progress_bar.take();
+            }
             command::sync_push_dirs(
                 &app_conf,
-                sub_matches.value_of("server-yml"),
+                server_yml, 
                 sub_matches.is_present("force"),
             )?;
         }

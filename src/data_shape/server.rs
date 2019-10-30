@@ -904,8 +904,10 @@ where
         for file_item_dir in file_item_directories {
             result += file_item_dir
                 .map(|item| {
-                    let r = push_a_file_item_sftp(&sftp, item, &mut buff, progress_bar);
-                    if let FileItemProcessResult::MayBeNoParentDir(item) = r {
+                    let file_len = item.get_relative_item().get_len();
+                    let push_result = push_a_file_item_sftp(&sftp, item, &mut buff, progress_bar);
+                    progress_bar.tick_total_pb_style_1(self.get_host(), file_len);
+                    if let FileItemProcessResult::MayBeNoParentDir(item) = push_result {
                         if self
                             .create_remote_dir(
                                 item.get_remote_path()
@@ -920,7 +922,7 @@ where
                             FileItemProcessResult::SftpOpenFailed
                         }
                     } else {
-                        r
+                        push_result
                     }
                 })
                 .fold(
@@ -951,10 +953,8 @@ where
     ) -> Result<FileItemProcessResultStats, failure::Error> {
         let mut current_remote_dir = Option::<String>::None;
         let mut current_local_dir = Option::<&Path>::None;
-        let mut consume_count = 0u64;
 
         self.init_total_progress_bar(progress_bar, self.get_working_file_list_file())?;
-        // let total_count = progress_bar.count_total;
 
         let sftp = self.session.as_ref().unwrap().sftp()?;
         let mut buff = vec![0_u8; self.server_yml.buf_len];
@@ -991,18 +991,8 @@ where
                                     sync_type,
                                     true,
                                 );
-                                consume_count += 1;
 
                                 progress_bar.init_item_pb_style_1(file_item_map.get_relative_item().get_path(), remote_len);
-
-                                // progress_bar.active_pb_item().alter_pb(PbProperties {
-                                //     set_length: Some(remote_len),
-                                //     set_message: Some(
-                                //         file_item_map.get_relative_item().get_path().to_owned(),
-                                //     ),
-                                //     reset: true,
-                                //     ..PbProperties::default()
-                                // });
 
                                 let mut skipped = false;
                                 // if use_db all received item are changed.
@@ -1019,17 +1009,7 @@ where
                                     )
                                 };
 
-                                progress_bar.tick_total_pb_style_1(self.get_host(), consume_count, remote_len);
-                                    // progress_bar.active_pb_total().alter_pb(PbProperties {
-                                    //     set_prefix: Some(format!(
-                                    //         "[{}] {}/{} ",
-                                    //         self.get_host(),
-                                    //         total_count - consume_count,
-                                    //         total_count
-                                    //     )),
-                                    //     inc: Some(remote_len),
-                                    //     ..PbProperties::default()
-                                    // });
+                                progress_bar.tick_total_pb_style_1(self.get_host(), remote_len);
                                     if skipped {
                                         progress_bar.active_pb_item().inc_pb_item(remote_len);
                                     }
