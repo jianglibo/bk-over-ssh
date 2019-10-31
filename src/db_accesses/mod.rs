@@ -100,10 +100,10 @@ impl RelativeFileItemInDb {
                 } else {
                     Option::<String>::None
                 };
-
-                return Some(Self {
+                if let Some(bp) = base_path.strip_prefix(path.as_path()) {
+                Some(Self {
                     id: 0,
-                    path: base_path.strip_prefix(path.as_path()),
+                    path: bp,
                     sha1,
                     len: metadata.len() as i64,
                     modified: metadata.modified().ok().map(Into::into),
@@ -111,13 +111,17 @@ impl RelativeFileItemInDb {
                     dir_id,
                     changed: false,
                     confirmed: false,
-                });
+                })
+
+                } else {
+                    None
+                }
             }
             Err(err) => {
                 error!("RelativeFileItem metadata failed: {:?}, {:?}", path, err);
+                None
             }
         }
-        None
     }
 
     pub fn to_insert_sql_string(&self) -> String {

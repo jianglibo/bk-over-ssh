@@ -1272,13 +1272,13 @@ mod tests {
 
         let home_dir =
             SlashPath::from_path(dirs::home_dir().expect("home dir should exist").as_path());
-        let directories_dir = home_dir.join("directories");
+        let directories_dir = home_dir.as_ref().expect("home dir to_str should succeed.").join("directories");
         if directories_dir.exists() {
             info!("directories path: {:?}", directories_dir.as_path());
             fs::remove_dir_all(directories_dir.as_path())?;
         }
 
-        let a_dir = home_dir.join_another(
+        let a_dir = home_dir.expect("home dir to_str should succeed.").join_another(
             &server
                 .server_yml
                 .directories

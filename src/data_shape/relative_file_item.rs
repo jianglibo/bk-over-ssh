@@ -29,8 +29,9 @@ impl RelativeFileItem {
                     Option::<String>::None
                 };
 
-                return Some(Self {
-                    path: base_path.strip_prefix(path.as_path()),
+                if let Some(bp) = base_path.strip_prefix(path.as_path()) {
+                Some(Self {
+                    path: bp,
                     sha1,
                     len: metadata.len(),
                     modified: metadata
@@ -45,13 +46,16 @@ impl RelativeFileItem {
                         .map(|d| d.as_secs()),
                     changed: false,
                     confirmed: false,
-                });
+                })
+                } else {
+                    None
+                }
             }
             Err(err) => {
                 error!("RelativeFileItem from_path failed: {:?}, {:?}", path, err);
+                None
             }
         }
-        None
     }
 }
 

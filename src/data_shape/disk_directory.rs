@@ -187,7 +187,9 @@ impl Directory {
             );
         }
 
-        self.local_dir = SlashPath::from_path(directories_dir).join_another(&self.local_dir);
+        self.local_dir = SlashPath::from_path(directories_dir)
+            .expect("directories_dir to_str should succeed.")
+            .join_another(&self.local_dir);
 
         if !self.local_dir.exists() {
             self.local_dir.create_dir_all()?;
@@ -213,7 +215,10 @@ impl Directory {
         let dir_to_read = match app_role {
             AppRole::PassiveLeaf => &self.remote_dir,
             AppRole::ActiveLeaf => &self.local_dir,
-            _ => bail!("when invoking load_relative_item, got unsupported app role. {:?}", app_role),
+            _ => bail!(
+                "when invoking load_relative_item, got unsupported app role. {:?}",
+                app_role
+            ),
         };
         WalkDir::new(dir_to_read.as_path())
             .follow_links(false)
@@ -222,9 +227,7 @@ impl Directory {
             .filter(|dir_entry| dir_entry.file_type().is_file())
             .filter_map(|dir_entry| dir_entry.path().canonicalize().ok())
             .filter_map(|path_buf| self.match_path(path_buf))
-            .filter_map(|path_buf| {
-                RelativeFileItem::from_path(dir_to_read, path_buf, skip_sha1)
-            })
+            .filter_map(|path_buf| RelativeFileItem::from_path(dir_to_read, path_buf, skip_sha1))
             .for_each(|rfi| match serde_json::to_string(&rfi) {
                 Ok(line) => {
                     if let Err(err) = writeln!(out, "{}", line) {
@@ -272,7 +275,10 @@ impl Directory {
         let dir_to_read = match app_role {
             AppRole::PassiveLeaf => &self.remote_dir,
             AppRole::ActiveLeaf => &self.local_dir,
-            _ => bail!("when invoking load_relative_item, got unsupported app role. {:?}", app_role),
+            _ => bail!(
+                "when invoking load_relative_item, got unsupported app role. {:?}",
+                app_role
+            ),
         };
 
         let base_path = dir_to_read.as_str();
@@ -286,9 +292,7 @@ impl Directory {
                 .filter(|d| d.file_type().is_file())
                 .filter_map(|d| d.path().canonicalize().ok())
                 .filter_map(|d| self.match_path(d))
-                .filter_map(|d| {
-                    RelativeFileItemInDb::from_path(dir_to_read, d, skip_sha1, dir_id)
-                })
+                .filter_map(|d| RelativeFileItemInDb::from_path(dir_to_read, d, skip_sha1, dir_id))
                 .filter(|rfi| !(rfi.path.ends_with(sig_ext) || rfi.path.ends_with(delta_ext)))
                 .filter_map(|rfi| db_access.insert_or_update_relative_file_item(rfi, true))
                 .map(|(rfi, da)| rfi.to_sql_string(&da))
@@ -307,9 +311,7 @@ impl Directory {
                 .filter(|d| d.file_type().is_file())
                 .filter_map(|d| d.path().canonicalize().ok())
                 .filter_map(|d| self.match_path(d))
-                .filter_map(|d| {
-                    RelativeFileItemInDb::from_path(dir_to_read, d, skip_sha1, dir_id)
-                })
+                .filter_map(|d| RelativeFileItemInDb::from_path(dir_to_read, d, skip_sha1, dir_id))
                 .filter_map(|rfi| db_access.insert_or_update_relative_file_item(rfi, false))
                 .count();
         }

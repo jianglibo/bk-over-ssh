@@ -67,17 +67,19 @@ impl SlashPath {
         self.slash.as_str()
     }
 
-    pub fn strip_prefix(&self, full_path: impl AsRef<Path>) -> String {
+    pub fn strip_prefix(&self, full_path: impl AsRef<Path>) -> Option<String> {
         let full = SlashPath::from_path(full_path.as_ref());
-        full.as_str().split_at(self.as_str().len() + 1).1.to_owned()
+        full.map(|f|f.as_str().split_at(self.as_str().len() + 1).1.to_owned())
     }
 
-    pub fn from_path(path: &Path) -> Self {
-        let s = match path.to_str() {
-            Some(s) => s,
-            None => panic!("path to string failed: {:?}", path),
-        };
-        SlashPath::new(s)
+    pub fn from_path(path: &Path) -> Option<Self> {
+        match path.to_str() {
+            Some(s) => Some(SlashPath::new(s)),
+            None => {
+                error!("path to string failed: {:?}", path);
+                None
+            }
+        }
     }
 
     pub fn set_slash(&mut self, any_path: impl AsRef<str>) {
@@ -138,15 +140,18 @@ impl SlashPath {
             extra_path.get_not_slash_start_str()
         ))
     }
-
     #[allow(dead_code)]
-    pub fn join_path(&self, path: &Path) -> SlashPath {
-        let extra_path = SlashPath::from_path(path);
-        SlashPath::new(format!(
+    pub fn join_path(&self, path: &Path) -> Option<SlashPath> {
+        if let Some(extra_path) = SlashPath::from_path(path) {
+            Some(        SlashPath::new(format!(
             "{}/{}",
             self.get_not_slash_end_str(),
             extra_path.get_not_slash_start_str()
-        ))
+        )))
+        } else {
+            None
+        }
+
     }
 
     pub fn join_another(&self, another: &SlashPath) -> SlashPath {
