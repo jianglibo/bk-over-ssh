@@ -73,7 +73,10 @@ impl SlashPath {
     }
 
     pub fn from_path(path: &Path) -> Self {
-        let s = path.to_str().expect("path to string failed: {:?}");
+        let s = match path.to_str() {
+            Some(s) => s,
+            None => panic!("path to string failed: {:?}", path),
+        };
         SlashPath::new(s)
     }
 

@@ -188,9 +188,8 @@ fn group_file_copies(
         })
 }
 
-/// We group by files by different unit. For every unit keep only the number of keep_num.
-/// But there is a problem to handle items cross the unit, for example, if the keep_num for WEEK is 1, keep_num for DAY is 3,
-/// if it's Monday today, then will only one copy will remain, because other two copy were in the last week.
+/// We group files by different unit. For every unit other than latest unit keep only the number of keep_num.
+/// for the latest unit if the sub item number is greater than sub_keep_num, also delete it.
 fn prune_period(
     mut file_group: HashMap<i32, Vec<FileCopy>>,
     keep_num: usize,
@@ -202,8 +201,8 @@ fn prune_period(
     keys.reverse(); // [2014, 2013, 2012]
 
     let mut file_copies_to_delete: Vec<FileCopy> = Vec::new();
-    // let mut file_copies_to_remain: Vec<FileCopy> = Vec::new();
-    if keys.len() > keep_num {
+
+    let remain_keys = if keys.len() > keep_num {
         // delete copy more than specified number.
         let (remain_keys, about_delete) = keys.split_at(keep_num);
         for it in about_delete {
@@ -211,34 +210,37 @@ fn prune_period(
                 file_copies_to_delete.append(&mut cfs);
             }
         }
-        if let Some((latest_key, other_keys)) = remain_keys.split_first() {
-            for period_key in other_keys {
-                // except latest year all others years keep the last file copy only.
-                if let Some(file_copies) = file_group.get_mut(period_key) {
-                    if file_copies.len() > 1 {
-                        file_copies_to_delete
-                            .append(&mut file_copies.drain(0..file_copies.len() - 1).collect());
-                    } else {
-                        warn!("file copy items can't be empty.");
-                    }
+        remain_keys
+    } else {
+        keys.split_at(0).1
+    };
+    if let Some((latest_key, other_keys)) = remain_keys.split_first() {
+        for period_key in other_keys {
+            // except latest year all others years keep the last file copy only.
+            if let Some(file_copies) = file_group.get_mut(period_key) {
+                if file_copies.len() > 1 {
+                    file_copies_to_delete
+                        .append(&mut file_copies.drain(0..file_copies.len() - 1).collect());
+                } else {
+                    warn!("file copy items can't be empty.");
                 }
             }
-
-            if sub_keep_num > 0 {
-                if let Some(file_copies) = file_group.get_mut(latest_key) {
-                    if file_copies.len() > sub_keep_num {
-                        file_copies_to_delete.append(
-                            &mut file_copies
-                                .drain(0..file_copies.len() - sub_keep_num)
-                                .collect(),
-                        );
-                    } else {
-                        warn!("file copy items can't be empty.");
-                    }
+        }
+        if sub_keep_num > 0 {
+            if let Some(file_copies) = file_group.get_mut(latest_key) {
+                if file_copies.len() > sub_keep_num {
+                    file_copies_to_delete.append(
+                        &mut file_copies
+                            .drain(0..file_copies.len() - sub_keep_num)
+                            .collect(),
+                    );
+                } else {
+                    warn!("file copy items can't be empty.");
                 }
             }
         }
     }
+
     (FileCopies { inner: file_group }, file_copies_to_delete)
 }
 
@@ -280,7 +282,7 @@ fn prune_dir_result(
 
     let lastest_remain = if prune_strategy.weekly > 0 {
         let mp = group_file_copies(lastest_remain, GroupPeriod::Weekly); // weekly
-        let (mut file_copies, mut to_delete) = prune_period(mp, weekly_keep_num, 0);
+        let (mut file_copies, mut to_delete) = prune_period(mp, weekly_keep_num, daily_keep_num);
 
         let lastest_remain = file_copies
             .take_latest()
@@ -296,7 +298,7 @@ fn prune_dir_result(
         lastest_remain
     } else {
         let mp = group_file_copies(lastest_remain, GroupPeriod::Monthly); //monthly
-        let (mut file_copies, mut to_delete) = prune_period(mp, monthly_keep_num, 0);
+        let (mut file_copies, mut to_delete) = prune_period(mp, monthly_keep_num, daily_keep_num);
         let lastest_remain = file_copies
             .take_latest()
             .expect("monthly latest remains should't empty.");
@@ -326,7 +328,7 @@ fn prune_dir_result(
     );
 
     let mp = group_file_copies(lastest_remain, GroupPeriod::Hourly); // hourly
-    let (mut file_copies, mut to_delete) = prune_period(mp, hourly_keep_num, 0);
+    let (mut file_copies, mut to_delete) = prune_period(mp, hourly_keep_num, minutely_keep_num);
     let lastest_remain = file_copies
         .take_latest()
         .expect("hourly latest remains should't empty.");
@@ -352,7 +354,6 @@ fn prune_dir_result(
         all_remains.len() + lastest_remain.len(),
         all_to_delete.len()
     );
-
 
     all_remains.append(&mut lastest_remain);
     all_remains.sort_unstable_by_key(|it| it.copy_trait);

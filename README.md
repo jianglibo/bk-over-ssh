@@ -22,6 +22,13 @@ pros:
 cons:  
 1. too simple, don't know how to handle constantly changing files.
 
+## initialize commands.
+```
+.\bk-over-ssh.exe --console-log --vv --app-role pull_hub copy-executable .\data\pull-servers-conf\xx.xx.xx.xx.yml C:\Users\Administrator\bk-over-ssh
+.\bk-over-ssh.exe --console-log --vv --skip-cron --app-role pull_hub sync-pull-dirs .\data\pull-servers-conf\xx.xx.xx.xx.yml
+.\bk-over-ssh.exe --console-log --vv --skip-cron --app-role pull_hub create-remote-db .\data\pull-servers-conf\xx.xx.xx.xx.yml --force
+```
+
 ## An example configuration
 application configuration:  
 ```yml

@@ -136,12 +136,13 @@ fn pull_by_par_iter(
                 Ok(result) => {
                     indicator.pb_finish();
                     actions::write_dir_sync_result(&server, result.as_ref());
+                    // archive when succeeded.
+                    if follow_archive {
+                        server.archive_local(&mut indicator).ok();
+                        server.prune_backups().ok();
+                    }
                 }
                 Err(err) => println!("sync-pull-dirs failed: {:?}", err),
-            }
-            if follow_archive {
-                server.archive_local(&mut indicator).ok();
-                server.prune_backups().ok();
             }
         });
     Ok(())
@@ -160,12 +161,13 @@ fn pull_by_spawn_do(
                     Ok(result) => {
                         indicator.pb_finish();
                         actions::write_dir_sync_result(&server, result.as_ref());
+                        // archive when succeeded.
+                        if follow_archive {
+                            server.archive_local(&mut indicator).ok();
+                            server.prune_backups().ok();
+                        }
                     }
                     Err(err) => println!("sync-pull-dirs failed: {:?}", err),
-                }
-                if follow_archive {
-                    server.archive_local(&mut indicator).ok();
-                    server.prune_backups().ok();
                 }
             }));
 
