@@ -524,7 +524,7 @@ where
         // We must use command line app_instance_id to override the value in the app_conf_yml,
         // Then use app_instance_id as my_dir.
         let my_dir = match self.mini_app_conf.app_role {
-            AppRole::PassiveLeaf => servers_data_dir.join(self.inner.app_instance_id.as_str()),
+            AppRole::PassiveLeaf | AppRole::ReceiveHub => servers_data_dir.join(self.inner.app_instance_id.as_str()),
             _ => servers_data_dir.join(&server_yml.host),
         };
 

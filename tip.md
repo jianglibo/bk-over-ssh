@@ -56,3 +56,7 @@ Every user will create a linux account and a home directory. For example: userad
 ## window service.
 https://github.com/kohsuke/winsw/
 
+
+## ActiveLeaf mode sync details.
+1. fetch the file list from the remote pair. compare to the file list in local db. These two should have same count and each item should have same len. considering compare count only.
+2. list local changed files plus the differences from the step 1.

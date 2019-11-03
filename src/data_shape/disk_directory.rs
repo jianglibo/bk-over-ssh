@@ -167,6 +167,32 @@ impl Directory {
         Ok(())
     }
 
+    /// When in receive hub mode, the local directory is absolute, the remote directory is relative.
+    /// The remote directory is always relative to the 'directories' dir in the user's home directory.
+    pub fn normalize_receive_hub_sync(
+        &mut self,
+        _directories_dir: impl AsRef<Path>,
+    ) -> Result<(), failure::Error> {
+        trace!("origin directory: {:?}", self);
+
+        if self.local_dir.is_empty() {
+            bail!("when in push mode, local_dir cannot be empty.");
+        }
+
+        // doesn't need to exists.
+        // if !self.local_dir.exists() {
+        //     bail!("local_dir does not exist: {}", &self.local_dir);
+        // }
+
+        if self.remote_dir.is_empty() {
+            self.remote_dir.set_slash(self.local_dir.get_last_name());
+        }
+
+        let remote_path = SlashPath::new("./directories").join(self.remote_dir.get_slash());
+        self.remote_dir = remote_path;
+        Ok(())
+    }
+
     /// When pulling remote the remote directory is absolute path, local path is relative.
     /// This method is for normalize local directory ready for coping.
     pub fn normalize_pull_hub_sync(
@@ -253,6 +279,7 @@ impl Directory {
     /// So after invoking this method all changed item will be marked, at the same time, metadata of items were updated too, this means you cannot regenerate the same result if the task is interupted.
     /// To avoid this kind of situation, add a confirm field to the table. when the taks is done, we chang the confirm field to true.
     /// Now we get the previous result by select the unconfirmed items.
+    /// This iteration doesn't pick out deleted items!!!
     pub fn load_relative_item_to_sqlite<M, D>(
         &self,
         app_role: &AppRole,
@@ -273,10 +300,10 @@ impl Directory {
         );
 
         let dir_to_read = match app_role {
-            AppRole::PassiveLeaf => &self.remote_dir,
+            AppRole::PassiveLeaf | AppRole::ReceiveHub => &self.remote_dir,
             AppRole::ActiveLeaf => &self.local_dir,
             _ => bail!(
-                "when invoking load_relative_item, got unsupported app role. {:?}",
+                "when invoking load_relative_item_to_sqlite, got unsupported app role. {:?}",
                 app_role
             ),
         };

@@ -41,7 +41,7 @@ use std::sync::Arc;
 use std::time::{Instant};
 use std::{fs, io, io::BufRead, io::Write};
 
-use actions::SyncDirReport;
+use actions::{SyncDirReport, ssh_util};
 use data_shape::{AppConf, AppRole};
 use r2d2_sqlite::SqliteConnectionManager;
 
@@ -305,6 +305,20 @@ fn main_entry<'a>(
             }
 
             println!("time costs: {:?}", start.elapsed().as_secs());
+        }
+        ("count-local-files", Some(sub_matches)) => {
+            let (server, _indicator) = {
+                    let server_yml = sub_matches.value_of("server-yml").unwrap();
+                    command::load_server_yml_by_name(app_conf, server_yml, true)?
+            };
+            ssh_util::print_scalar_value(format!("{}",server.count_local_files()));
+        }
+        ("count-remote-files", Some(sub_matches)) => {
+            let (server, _indicator) = {
+                    let server_yml = sub_matches.value_of("server-yml").unwrap();
+                    command::load_server_yml_by_name(app_conf, server_yml, true)?
+            };
+            ssh_util::print_scalar_value(format!("{}",server.count_remote_files()));
         }
         ("list-local-files", Some(sub_matches)) => {
             let (mut server, _indicator) =

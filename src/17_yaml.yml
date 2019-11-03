@@ -147,6 +147,22 @@ subcommands:
     #             index: 1
     - print-conf:
         about: print out the current configuration of application.
+    - count-local-files:
+        about: count the files in the configuration file.
+        args:
+            - server-yml:
+                help: the configuration file.
+                long: server-yml
+                required: true
+                index: 1
+    - count-remote-files:
+        about: count the files in the configuration file at another side..
+        args:
+            - server-yml:
+                help: the configuration file.
+                long: server-yml
+                required: true
+                index: 1
     - mkdir:
         about: create a new directory.
         args:
