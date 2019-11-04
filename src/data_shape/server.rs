@@ -162,6 +162,7 @@ where
     pub db_access: Option<D>,
     _m: PhantomData<M>,
     app_conf: MiniAppConf,
+    lock_file: Option<fs::File>,
 }
 
 unsafe impl<M, D> Sync for Server<M, D>
@@ -238,8 +239,12 @@ where
                     .iter_mut()
                     .try_for_each(|d| d.compile_patterns())?;
             }
-            _ => {
-                bail!("unexpected app_role: {:?}", app_conf.app_role);
+            AppRole::ReceiveHub => {
+                server_yml.directories.iter_mut().try_for_each(|d| {
+                    d.compile_patterns()
+                        .expect("compile_patterns should succeeded.");
+                    d.normalize_receive_hub_sync(directories_dir.as_path())
+                })?;
             }
         }
 
@@ -254,16 +259,45 @@ where
             yml_location: None,
             app_conf,
             _m: PhantomData,
+            lock_file: None,
         })
+    }
+    /// Lock the server, preventing server from concurrently executing.
+    pub fn lock_working_file(&mut self) -> Result<(), failure::Error> {
+        let lof = self.working_dir.join("working.lock");
+        trace!("start locking file: {:?}", lof);
+        if lof.exists() {
+            if fs::remove_file(lof.as_path()).is_err() {
+                eprintln!("create lock file failed: {:?}, if you can sure app isn't running, you can delete it manually.", lof);
+            }
+        } else {
+            self.lock_file
+                .replace(fs::OpenOptions::new().write(true).create(true).open(&lof)?);
+        }
+        trace!("locked!");
+        Ok(())
+    }
+
+    pub fn count_local_files(&self) -> u64 {
+        0
+    }
+
+    pub fn count_remote_files(&self) -> u64 {
+        0
     }
 
     /// The passive leaf side of the application will try to find the configuration in the passive-leaf-conf folder which located in the same folder as the executable.
     /// The server yml file should located in the data/passive-leaf-conf/{self.app_conf.app_instance_id}.yml
     pub fn get_remote_server_yml(&self) -> String {
         let sp = string_path::SlashPath::new(self.server_yml.remote_exec.as_str());
+        let conf_folder = match self.app_conf.app_role {
+            AppRole::PullHub => app_conf::PASSIVE_LEAF_CONF,
+            AppRole::ActiveLeaf => app_conf::RECEIVE_SERVERS_CONF,
+            _ => panic!("get_remote_server_yml got unsupported app role. {:?}", self.app_conf.app_role),
+        };
         let yml = format!(
             "/data/{}/{}.yml",
-            app_conf::PASSIVE_LEAF_CONF,
+            conf_folder,
             self.app_conf.app_instance_id
         );
         sp.parent()

@@ -99,3 +99,23 @@ pub fn get_stdout_eprintln_stderr(channel: &mut ssh2::Channel, verbose: bool) ->
 
     (std_out, std_err)
 }
+
+pub fn print_scalar_value(str_value: impl AsRef<str>) {
+    println!("<bk-over-ssh>{}<bk-over-ssh>", str_value.as_ref());
+}
+
+#[allow(dead_code)]
+pub fn parse_scalar_value(std_out_err: (String, String)) -> Option<String> {
+    let (std_out, std_err) = std_out_err;
+    let values: Vec<&str> = std_out.split("<bk-over-ssh>").collect();
+    if values.len() == 3 {
+        values.get(1).map(|s| s.to_string())
+    } else {
+        let values: Vec<&str> = std_err.split("<bk-over-ssh>").collect();
+        if values.len() == 3 {
+            values.get(1).map(|s| s.to_string())
+        } else {
+            None
+        }
+    }
+}
