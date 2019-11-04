@@ -133,7 +133,8 @@ fn main() -> Result<(), failure::Error> {
         app_conf.set_db_access(sqlite_db_access);
     }
 
-    app_conf.lock_working_file()?;
+    // app_conf.lock_working_file()?;
+
     let delay = m.value_of("delay");
     if let Some(delay) = delay {
         command::delay_exec(delay);

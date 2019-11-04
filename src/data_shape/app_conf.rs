@@ -401,7 +401,7 @@ where
 
         AppConf::read_app_conf(app_conf_file, app_role)
     }
-
+    #[allow(dead_code)]
     pub fn lock_working_file(&mut self) -> Result<(), failure::Error> {
         let lof = self.data_dir_full_path.as_path().join("working.lock");
         trace!("start locking file: {:?}", lof);
@@ -529,6 +529,8 @@ where
         };
 
         let mut server = Server::new(self.mini_app_conf.clone(), my_dir, server_yml)?;
+
+        server.lock_working_file()?;
 
         if let Some(bl) = self.mini_app_conf.buf_len {
             server.server_yml.buf_len = bl;

@@ -162,6 +162,7 @@ where
     pub db_access: Option<D>,
     _m: PhantomData<M>,
     app_conf: MiniAppConf,
+    lock_file: Option<fs::File>,
 }
 
 unsafe impl<M, D> Sync for Server<M, D>
@@ -258,7 +259,23 @@ where
             yml_location: None,
             app_conf,
             _m: PhantomData,
+            lock_file: None,
         })
+    }
+    /// Lock the server, preventing server from concurrently executing.
+    pub fn lock_working_file(&mut self) -> Result<(), failure::Error> {
+        let lof = self.working_dir.join("working.lock");
+        trace!("start locking file: {:?}", lof);
+        if lof.exists() {
+            if fs::remove_file(lof.as_path()).is_err() {
+                eprintln!("create lock file failed: {:?}, if you can sure app isn't running, you can delete it manually.", lof);
+            }
+        } else {
+            self.lock_file
+                .replace(fs::OpenOptions::new().write(true).create(true).open(&lof)?);
+        }
+        trace!("locked!");
+        Ok(())
     }
 
     pub fn count_local_files(&self) -> u64 {
