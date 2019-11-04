@@ -153,9 +153,10 @@ fn main_entry<'a>(
 ) -> Result<(), failure::Error> {
     let no_db = m.is_present("no-db");
     match m.subcommand() {
-        ("pull-and-archive", Some(_sub_matches)) => {
+        ("pull-and-archive", Some(sub_matches)) => {
+            let server_yml = sub_matches.value_of("server-yml");
             app_conf.progress_bar.take();
-            command::sync_dirs::sync_pull_dirs_follow_archive(&app_conf, None, true)?;
+            command::sync_dirs::sync_pull_dirs_follow_archive(&app_conf, server_yml, true)?;
         }
         ("sync-pull-dirs", Some(sub_matches)) => {
             let server_yml = sub_matches.value_of("server-yml");
