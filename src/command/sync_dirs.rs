@@ -131,7 +131,7 @@ fn pull_by_par_iter(
 ) -> Result<(), failure::Error> {
     server_indicator_pairs
         .into_par_iter()
-        .for_each(|(server, mut indicator)| {
+        .for_each(|(mut server, mut indicator)| {
             match server.sync_pull_dirs(&mut indicator, false) {
                 Ok(result) => {
                     indicator.pb_finish();
@@ -152,7 +152,7 @@ fn pull_by_spawn_do(
     pair: ServerAndIndicatorSqlite,
     follow_archive: bool,
 ) -> thread::JoinHandle<()> {
-    let (server, mut indicator) = pair;
+    let (mut server, mut indicator) = pair;
     thread::spawn(move || {
         if let Some(schedule_item) = server.find_cron_by_name(server::CRON_NAME_SYNC_PULL_DIRS) {
             let mut sched = JobScheduler::new();
@@ -180,6 +180,9 @@ fn pull_by_spawn_do(
     })
 }
 
+/// If invoking with parameter as-service, this branch will be called.
+/// Because it is a long running thread, We should choose to connect to server when schedule time is meet.
+/// and disconnect from server when task is done.
 fn pull_by_spawn(
     server_indicator_pairs: Vec<ServerAndIndicatorSqlite>,
     follow_archive: bool,
@@ -224,16 +227,18 @@ fn load_server_indicator_pairs(
             server_indicator_pairs.len()
         );
     }
-    server_indicator_pairs
-        .iter_mut()
-        .filter_map(|s| {
-            if let Err(err) = s.0.connect() {
-                eprintln!("{:?}", err);
-                None
-            } else {
-                Some(s)
-            }
-        })
-        .count();
+    if !app_conf.mini_app_conf.as_service {
+        server_indicator_pairs
+            .iter_mut()
+            .filter_map(|s| {
+                if let Err(err) = s.0.connect() {
+                    eprintln!("{:?}", err);
+                    None
+                } else {
+                    Some(s)
+                }
+            })
+            .count();
+    }
     Ok((progress_bar_join_handler, server_indicator_pairs))
 }

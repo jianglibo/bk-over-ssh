@@ -89,8 +89,10 @@ fn main() -> Result<(), failure::Error> {
 
     app_conf.mini_app_conf.skip_cron = m.is_present("skip-cron");
     app_conf.mini_app_conf.skip_sha1 = !m.is_present("enable-sha1");
+    app_conf.mini_app_conf.as_service = m.is_present("as-service");
 
-    if !m.is_present("no-pb") {
+
+    if !m.is_present("no-pb") && !app_conf.mini_app_conf.as_service {
         app_conf
             .progress_bar
             .replace(Arc::new(MultiProgress::new()));
@@ -99,7 +101,6 @@ fn main() -> Result<(), failure::Error> {
         app_conf.mini_app_conf.buf_len = Some(buf_len.parse()?);
     }
 
-    app_conf.mini_app_conf.as_service = m.is_present("as-service");
 
     let verbose = if m.is_present("vv") {
         "vv"

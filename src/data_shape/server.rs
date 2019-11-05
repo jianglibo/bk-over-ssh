@@ -293,12 +293,14 @@ where
         let conf_folder = match self.app_conf.app_role {
             AppRole::PullHub => app_conf::PASSIVE_LEAF_CONF,
             AppRole::ActiveLeaf => app_conf::RECEIVE_SERVERS_CONF,
-            _ => panic!("get_remote_server_yml got unsupported app role. {:?}", self.app_conf.app_role),
+            _ => panic!(
+                "get_remote_server_yml got unsupported app role. {:?}",
+                self.app_conf.app_role
+            ),
         };
         let yml = format!(
             "/data/{}/{}.yml",
-            conf_folder,
-            self.app_conf.app_instance_id
+            conf_folder, self.app_conf.app_instance_id
         );
         sp.parent()
             .expect("the remote executable's parent directory should exist")
@@ -1155,9 +1157,9 @@ where
             Ok(None)
         }
     }
-
+    /// If as_service is true, one must connect to server first, and then after executing task close the connection.
     pub fn sync_pull_dirs(
-        &self,
+        &mut self,
         pb: &mut Indicator,
         as_service: bool,
     ) -> Result<Option<SyncDirReport>, failure::Error> {
@@ -1167,11 +1169,21 @@ where
                 self.get_host(),
                 Local::now()
             );
+            if as_service {
+                self.session.take();
+                self.connect()?;
+            }
             let start = Instant::now();
             let started_at = Local::now();
             let rs = self.start_pull_sync_working_file_list(pb)?;
             self.remove_working_file_list_file();
             self.confirm_remote_sync()?;
+            if as_service {
+                if let Some(sess) = self.session.as_mut() {
+                    sess.disconnect(None, "", None).ok();
+                }
+                self.session.take();
+            }
             Ok(Some(SyncDirReport::new(start.elapsed(), started_at, rs)))
         } else {
             Ok(None)
@@ -1306,21 +1318,26 @@ mod tests {
 
         let home_dir =
             SlashPath::from_path(dirs::home_dir().expect("home dir should exist").as_path());
-        let directories_dir = home_dir.as_ref().expect("home dir to_str should succeed.").join("directories");
+        let directories_dir = home_dir
+            .as_ref()
+            .expect("home dir to_str should succeed.")
+            .join("directories");
         if directories_dir.exists() {
             info!("directories path: {:?}", directories_dir.as_path());
             fs::remove_dir_all(directories_dir.as_path())?;
         }
 
-        let a_dir = home_dir.expect("home dir to_str should succeed.").join_another(
-            &server
-                .server_yml
-                .directories
-                .iter()
-                .find(|d| d.remote_dir.ends_with("a-dir"))
-                .expect("should have a directory who's remote_dir end with 'a-dir'")
-                .remote_dir,
-        );
+        let a_dir = home_dir
+            .expect("home dir to_str should succeed.")
+            .join_another(
+                &server
+                    .server_yml
+                    .directories
+                    .iter()
+                    .find(|d| d.remote_dir.ends_with("a-dir"))
+                    .expect("should have a directory who's remote_dir end with 'a-dir'")
+                    .remote_dir,
+            );
 
         let mut indicator = Indicator::new(None);
         server.connect()?;
