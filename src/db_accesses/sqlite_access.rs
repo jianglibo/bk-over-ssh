@@ -1,5 +1,5 @@
 use super::{CountItemParam, DbAccess, DbAction, RelativeFileItemInDb};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Local};
 use failure;
 use log::*;
 use r2d2;
@@ -398,7 +398,7 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
         &self,
         server_yml_path: impl AsRef<str>,
         task_name: impl AsRef<str>,
-    ) -> Option<(i64, DateTime<Utc>, bool)> {
+    ) -> Option<(i64, DateTime<Local>, bool)> {
         let conn = self.get_pool().get().unwrap();
         let r = match conn.prepare("SELECT id, time_execution, done FROM schedule_done
                                          WHERE server_yml_path = :server_yml_path AND task_name = :task_name
@@ -439,7 +439,7 @@ impl DbAccess<SqliteConnectionManager> for SqliteDbAccess {
         &self,
         server_yml_path: impl AsRef<str>,
         task_name: impl AsRef<str>,
-        time_execution: DateTime<Utc>,
+        time_execution: DateTime<Local>,
     ) {
         let conn = self.get_pool().get().unwrap();
         match conn.prepare("INSERT INTO schedule_done (server_yml_path, task_name, time_execution, done) VALUES (?1, ?2, ?3, ?4)") {

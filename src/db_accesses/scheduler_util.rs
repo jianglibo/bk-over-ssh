@@ -1,14 +1,14 @@
 use crate::db_accesses::DbAccess;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Local};
 use cron::Schedule;
 use r2d2;
 use std::str::FromStr;
 use log::*;
 
-fn upcomming(expression: impl AsRef<str>) -> DateTime<Utc> {
+fn upcomming(expression: impl AsRef<str>) -> DateTime<Local> {
     let schedule = Schedule::from_str(expression.as_ref()).unwrap();
     schedule
-        .upcoming(Utc)
+        .upcoming(Local)
         .take(1)
         .next()
         .expect("Can't retrive next execution time")
@@ -35,7 +35,7 @@ pub fn need_execute<M, D>(
     server_yml_path: impl AsRef<str>,
     task_name: impl AsRef<str>,
     expression: impl AsRef<str>,
-) -> (bool, Option<DateTime<Utc>>)
+) -> (bool, Option<DateTime<Local>>)
 where
     M: r2d2::ManageConnection,
     D: DbAccess<M>,
@@ -49,7 +49,7 @@ where
     let server_yml_path = server_yml_path.as_ref();
     let task_name = task_name.as_ref();
     let next_execute_in_db = db_access.find_next_execute(server_yml_path, task_name);
-    let now = Utc::now();
+    let now = Local::now();
     trace!("now: {:?}, find next_execute_in_db: {:?}", now, next_execute_in_db);
     let b = match next_execute_in_db {
         Some((row_id, next_execute_in_db, true)) => {

@@ -3,7 +3,7 @@ pub mod sqlite_access;
 
 use crate::actions::hash_file_sha1;
 use crate::data_shape::SlashPath;
-use chrono::{DateTime, SecondsFormat, Utc};
+use chrono::{DateTime, SecondsFormat, Utc, Local};
 use log::*;
 use r2d2;
 use std::path::{PathBuf};
@@ -214,12 +214,12 @@ where
         &self,
         server_yml_path: impl AsRef<str>,
         task_name: impl AsRef<str>,
-    ) -> Option<(i64, DateTime<Utc>, bool)>;
+    ) -> Option<(i64, DateTime<Local>, bool)>;
     fn insert_next_execute(
         &self,
         server_yml_path: impl AsRef<str>,
         task_name: impl AsRef<str>,
-        time_execution: DateTime<Utc>,
+        time_execution: DateTime<Local>,
     );
     fn update_next_execute_done(&self, id: i64) -> Result<(), failure::Error>;
     fn delete_next_execute(&self, id: i64) -> Result<(), failure::Error>;
