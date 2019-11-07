@@ -1,15 +1,17 @@
 use crate::actions;
 use crate::data_shape::{server, AppConf, Indicator, Server};
-use crate::db_accesses::SqliteDbAccess;
+use crate::db_accesses::{SqliteDbAccess, CountItemParam};
 use job_scheduler::{Job, JobScheduler};
 use r2d2_sqlite::SqliteConnectionManager;
 use rayon::prelude::*;
 use std::time::Duration;
+use log::*;
 
 use super::*;
 
 pub type ServerAndIndicatorSqlite = (Server<SqliteConnectionManager, SqliteDbAccess>, Indicator);
 
+/// When force parameter is true, the db file will be deleted and that means all file will be upload again.
 pub fn sync_push_dirs(
     app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
     server_yml: Option<&str>,
@@ -31,12 +33,26 @@ pub fn sync_push_dirs(
     Ok(())
 }
 
+
 fn push_one_server(
     server: &mut Server<SqliteConnectionManager, SqliteDbAccess>,
     indicator: &mut Indicator,
     force: bool,
 ) {
-    if force && server.get_db_file().exists() {
+    let mut need_reset = force && server.get_db_file().exists();
+    if !need_reset {
+        let rfs = server.count_remote_files().unwrap_or(0);
+        if let Some(db_access) = server.db_access.as_ref() {
+            if let Ok(c) = db_access.count_relative_file_item(CountItemParam::default()) {
+                if c != rfs {
+                    need_reset = true;
+                }
+            } else {
+                error!("count_relative_file_item failed");
+            }
+        }
+    }
+    if need_reset {
         server.db_access.take();
         fs::remove_file(server.get_db_file()).expect("should remove db_file.");
         let sqlite_db_access = SqliteDbAccess::new(server.get_db_file());
@@ -45,6 +61,7 @@ fn push_one_server(
             .expect("should recreate database.");
         server.set_db_access(sqlite_db_access);
     }
+
     match server.sync_push_dirs(indicator) {
         Ok(result) => {
             indicator.pb_finish();

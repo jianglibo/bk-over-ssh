@@ -1,5 +1,5 @@
 use super::{
-    app_conf, rolling_files, string_path, AppRole, AuthMethod, Directory, FileItemDirectories,
+    app_conf, rolling_files, AppRole, AuthMethod, Directory, FileItemDirectories,
     FileItemMap, FileItemProcessResult, FileItemProcessResultStats, Indicator, MiniAppConf,
     PbProperties, PrimaryFileItem, ProgressWriter, PruneStrategy, RelativeFileItem, ScheduleItem,
     SlashPath, SyncType,
@@ -9,6 +9,7 @@ use crate::db_accesses::{scheduler_util, DbAccess};
 use bzip2::write::BzEncoder;
 use bzip2::Compression;
 use chrono::Local;
+use dirs;
 use indicatif::ProgressStyle;
 use log::*;
 use r2d2;
@@ -279,17 +280,60 @@ where
     }
 
     pub fn count_local_files(&self) -> u64 {
-        0
+        self.server_yml
+            .directories
+            .iter()
+            .filter_map(|dir| dir.count_local_files(&self.app_conf.app_role).ok())
+            .count() as u64
+    }
+    /// For app_role is ReceiveHub, remote exec is from user's home directory.
+    pub fn get_remote_exec(&self) -> SlashPath {
+        let remote_exec_slash = SlashPath::new(&self.server_yml.remote_exec);
+        match self.app_conf.app_role {
+            AppRole::ReceiveHub => SlashPath::from_path(
+                dirs::home_dir()
+                    .expect("dir::home_dir should succeed")
+                    .as_path(),
+            )
+            .expect("home_dir to slash should succeed.")
+            .join(remote_exec_slash.get_last_name()),
+            _ => remote_exec_slash,
+        }
     }
 
-    pub fn count_remote_files(&self) -> u64 {
-        0
+    pub fn count_remote_files(&self) -> Result<u64, failure::Error> {
+        let app_role = match self.app_conf.app_role {
+            AppRole::ActiveLeaf => AppRole::ReceiveHub,
+            _ => bail!(
+                "create_remote_files: unsupported app role. {:?}",
+                self.app_conf.app_role
+            ),
+        };
+        let mut channel: ssh2::Channel = self.create_channel()?;
+        let cmd = format!(
+            "{} {} {} --app-instance-id {} --app-role {}  count-local-files {}",
+            self.get_remote_exec(),
+            if self.app_conf.console_log {
+                "--console-log"
+            } else {
+                ""
+            },
+            if self.app_conf.verbose { "--vv" } else { "" },
+            self.app_conf.app_instance_id,
+            app_role.to_str(),
+            self.get_remote_server_yml(),
+        );
+        info!("invoking remote command: {:?}", cmd);
+        channel.exec(cmd.as_str())?;
+        let ss = ssh_util::get_stdout_eprintln_stderr(&mut channel, true);
+        Ok(ssh_util::parse_scalar_value(ss)
+            .unwrap_or_else(|| "0".to_string())
+            .parse()?)
     }
 
     /// The passive leaf side of the application will try to find the configuration in the passive-leaf-conf folder which located in the same folder as the executable.
     /// The server yml file should located in the data/passive-leaf-conf/{self.app_conf.app_instance_id}.yml
     pub fn get_remote_server_yml(&self) -> String {
-        let sp = string_path::SlashPath::new(self.server_yml.remote_exec.as_str());
         let conf_folder = match self.app_conf.app_role {
             AppRole::PullHub => app_conf::PASSIVE_LEAF_CONF,
             AppRole::ActiveLeaf => app_conf::RECEIVE_SERVERS_CONF,
@@ -302,7 +346,7 @@ where
             "/data/{}/{}.yml",
             conf_folder, self.app_conf.app_instance_id
         );
-        sp.parent()
+        self.get_remote_exec().parent()
             .expect("the remote executable's parent directory should exist")
             .join(yml)
             .slash
@@ -310,14 +354,13 @@ where
 
     /// located in the data/passive-leaf-data/{self.app_conf.app_instance_id}/file_list_file.txt
     pub fn get_passive_leaf_file_list_file(&self) -> String {
-        let sp = string_path::SlashPath::new(self.server_yml.remote_exec.as_str());
         let yml = format!(
             "/data/{}/{}/{}",
             app_conf::PASSIVE_LEAF_DATA,
             self.app_conf.app_instance_id,
             FILE_LIST_FILE_NAME,
         );
-        sp.parent()
+        self.get_remote_exec().parent()
             .expect("the remote executable's parent directory should exist")
             .join(yml)
             .slash
@@ -365,8 +408,7 @@ where
     }
 
     pub fn stats_remote_exec(&mut self) -> Result<ssh2::FileStat, failure::Error> {
-        let re = &self.server_yml.remote_exec.clone();
-        self.get_server_file_stats(&re)
+        self.get_server_file_stats(self.get_remote_exec().as_str())
     }
 
     fn get_server_file_stats(
@@ -656,7 +698,7 @@ where
         };
         let cmd = format!(
             "{} {} --app-instance-id {} --app-role {} list-local-files {} --out {}",
-            self.server_yml.remote_exec,
+            self.get_remote_exec(),
             if self.is_skip_sha1() {
                 ""
             } else {
@@ -710,7 +752,7 @@ where
         let mut channel: ssh2::Channel = self.create_channel()?;
         let cmd = format!(
             "{} {} {} mkdir '{}'",
-            self.server_yml.remote_exec,
+            self.get_remote_exec(),
             if self.app_conf.console_log {
                 "--console-log"
             } else {
@@ -741,7 +783,7 @@ where
         let db_type = db_type.as_ref();
         let cmd = format!(
             "{} {} {} --app-instance-id {} --app-role {}  create-db {} --db-type {}{}",
-            self.server_yml.remote_exec,
+            self.get_remote_exec(),
             if self.app_conf.console_log {
                 "--console-log"
             } else {
@@ -768,7 +810,7 @@ where
         };
         let cmd = format!(
             "{} --app-instance-id {} --app-role {} confirm-local-sync {}",
-            self.server_yml.remote_exec,
+            self.get_remote_exec(),
             self.app_conf.app_instance_id,
             app_role.to_str(),
             self.get_remote_server_yml(),
@@ -794,7 +836,7 @@ where
         let mut channel: ssh2::Channel = self.create_channel()?;
         let cmd = format!(
             "{} {} --app-instance-id {} --app-role {} {} list-local-files {}",
-            self.server_yml.remote_exec,
+            self.get_remote_exec(),
             if self.is_skip_sha1() {
                 ""
             } else {
@@ -1398,18 +1440,6 @@ mod tests {
             fs::remove_dir_all(a_dir)?;
         }
 
-        // let mb = Arc::new(MultiProgress::new());
-
-        // let mb1 = Arc::clone(&mb);
-        // let mb2 = Arc::clone(&mb);
-
-        // let t = thread::spawn(move || {
-        //     thread::sleep(Duration::from_millis(200));
-        //     if let Err(err) = mb1.join() {
-        //         warn!("join account failure. {:?}", err);
-        //     }
-        // });
-        // let mut indicator = Indicator::new(Some(mb2));
         let mut indicator = Indicator::new(None);
         server.connect()?;
         let stats = server.sync_pull_dirs(&mut indicator, false)?;

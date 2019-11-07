@@ -104,7 +104,6 @@ pub fn print_scalar_value(str_value: impl AsRef<str>) {
     println!("<bk-over-ssh>{}<bk-over-ssh>", str_value.as_ref());
 }
 
-#[allow(dead_code)]
 pub fn parse_scalar_value(std_out_err: (String, String)) -> Option<String> {
     let (std_out, std_err) = std_out_err;
     let values: Vec<&str> = std_out.split("<bk-over-ssh>").collect();

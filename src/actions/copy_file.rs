@@ -535,7 +535,7 @@ where
     let remote_delta_file_name = format!("{}.delta", &remote_file_name);
     let cmd = format!(
         "{} rsync delta-a-file --print-progress --new-file {} --sig-file {} --out-file {}",
-        server.server_yml.remote_exec,
+        server.get_remote_exec(),
         &remote_file_name,
         &remote_sig_file_name,
         &remote_delta_file_name,

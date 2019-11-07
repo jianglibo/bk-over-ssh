@@ -48,7 +48,7 @@ pub fn verify_server_yml(mut server: Server<SqliteConnectionManager, SqliteDbAcc
             if let Err(err) = server.stats_remote_exec() {
                 eprintln!(
                     "CAN'T FIND SERVER SIDE EXEC. {:?}\n{:?}",
-                    server.server_yml.remote_exec, err
+                    server.get_remote_exec(), err
                 );
             } else {
                 let rp = server.get_remote_server_yml();

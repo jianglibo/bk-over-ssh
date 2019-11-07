@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::io;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
+use dirs;
 
 #[derive(Deserialize, Serialize, Default, Debug)]
 pub struct Directory {
@@ -271,6 +272,31 @@ impl Directory {
     #[allow(dead_code)]
     pub fn get_sub_directory_names(&self) -> Vec<String> {
         vec![]
+    }
+
+    pub fn count_local_files(
+        &self,
+        app_role: &AppRole,
+    ) -> Result<u64, failure::Error> {
+        let dir_to_read = match app_role {
+            AppRole::ReceiveHub => &self.remote_dir,
+            _ => bail!(
+                "when invoking load_relative_item_to_sqlite, got unsupported app role. {:?}",
+                app_role
+            ),
+        };
+        let d = if let Some(hd) = dirs::home_dir() {
+            hd.join(dir_to_read.as_path())
+        } else {
+            dir_to_read.as_path().to_path_buf()
+        };
+        let file_num = WalkDir::new(&d)
+                .follow_links(false)
+                .into_iter()
+                .filter_map(|dir_entry| dir_entry.ok())
+                .filter(|dir_entry| dir_entry.file_type().is_file())
+                .count();
+        Ok(file_num as u64)
     }
 
     /// this function will walk over the directory, for every file checking it's metadata and compare to corepsonding item in the db.

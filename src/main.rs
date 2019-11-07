@@ -172,10 +172,11 @@ fn main_entry<'a>(
             if server_yml.is_none() {
                 app_conf.progress_bar.take();
             }
+            let force = sub_matches.is_present("force");
             command::sync_push_dirs(
                 &app_conf,
                 server_yml, 
-                sub_matches.is_present("force"),
+                force,
             )?;
         }
         ("send-test-mail", Some(sub_matches)) => {
@@ -192,8 +193,8 @@ fn main_entry<'a>(
                 .value_of("executable")
                 .expect("executable paramter missing");
             server.connect()?;
-            let remote = server.server_yml.remote_exec.clone();
-            server.copy_a_file(executable, &remote)?;
+            let remote = server.get_remote_exec();
+            server.copy_a_file(executable, remote.as_str())?;
             eprintln!(
                 "copy from {} to {} {} succeeded.",
                 executable,
@@ -321,7 +322,7 @@ fn main_entry<'a>(
                     let server_yml = sub_matches.value_of("server-yml").unwrap();
                     command::load_server_yml_by_name(app_conf, server_yml, true)?
             };
-            ssh_util::print_scalar_value(format!("{}",server.count_remote_files()));
+           server.count_remote_files()?;
         }
         ("list-local-files", Some(sub_matches)) => {
             let (mut server, _indicator) =
