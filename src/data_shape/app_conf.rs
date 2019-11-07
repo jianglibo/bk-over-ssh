@@ -104,17 +104,18 @@ impl Default for AppConfYml {
     }
 }
 
-/// The data dir is a fixed path no matter the role of the app.
+/// The data dir is a fixed path relative to the exec file no matter the role of the app.
 ///
 fn guess_data_dir(data_dir: impl AsRef<str>) -> Result<PathBuf, failure::Error> {
-    let data_dir = data_dir.as_ref();
-    let data_dir = if data_dir.is_empty() {
-        "data"
-    } else {
-        data_dir
+    let mut path_buf = {
+        let data_dir = data_dir.as_ref();
+        let data_dir = if data_dir.is_empty() {
+            "data"
+        } else {
+            data_dir
+        };
+        PathBuf::from(data_dir)
     };
-
-    let mut path_buf = Path::new(data_dir).to_path_buf();
 
     if !&path_buf.is_absolute() {
         path_buf = env::current_exe()?

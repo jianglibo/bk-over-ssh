@@ -1,6 +1,6 @@
 use super::{
     string_path::{self, SlashPath},
-    AppRole, RelativeFileItem,
+    AppRole, RelativeFileItem,app_conf,
 };
 use crate::db_accesses::{DbAccess, RelativeFileItemInDb};
 use glob::Pattern;
@@ -11,7 +11,6 @@ use serde::{Deserialize, Serialize};
 use std::io;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
-use dirs;
 
 #[derive(Deserialize, Serialize, Default, Debug)]
 pub struct Directory {
@@ -143,10 +142,13 @@ impl Directory {
     }
 
     /// When in active leaf mode, the local directory is absolute, the remote directory is relative.
-    /// The remote directory is always relative to the 'directories' dir in the user's home directory.
+    /// How to find the remote data directory?
+    ///
     pub fn normalize_active_leaf_sync(
         &mut self,
         _directories_dir: impl AsRef<Path>,
+        app_instance_id: &str,
+        remote_exec: &str,
     ) -> Result<(), failure::Error> {
         trace!("origin directory: {:?}", self);
         if self.local_dir.is_empty() {
@@ -163,7 +165,12 @@ impl Directory {
             self.remote_dir.set_slash(self.local_dir.get_last_name());
         }
 
-        let remote_path = SlashPath::new("./directories").join(self.remote_dir.get_slash());
+        let remote_path = SlashPath::new(remote_exec).parent().expect("remote_exec parent should exist")
+            .join("data")
+            .join(app_conf::RECEIVE_SERVERS_DATA)
+            .join(app_instance_id)
+            .join("directories")
+            .join(self.remote_dir.get_slash());
         self.remote_dir = remote_path;
         Ok(())
     }
@@ -172,24 +179,22 @@ impl Directory {
     /// The remote directory is always relative to the 'directories' dir in the user's home directory.
     pub fn normalize_receive_hub_sync(
         &mut self,
-        _directories_dir: impl AsRef<Path>,
+        directories_dir: impl AsRef<Path>,
     ) -> Result<(), failure::Error> {
+        let directories_dir = directories_dir.as_ref();
         trace!("origin directory: {:?}", self);
 
         if self.local_dir.is_empty() {
             bail!("when in push mode, local_dir cannot be empty.");
         }
 
-        // doesn't need to exists.
-        // if !self.local_dir.exists() {
-        //     bail!("local_dir does not exist: {}", &self.local_dir);
-        // }
-
         if self.remote_dir.is_empty() {
             self.remote_dir.set_slash(self.local_dir.get_last_name());
         }
 
-        let remote_path = SlashPath::new("./directories").join(self.remote_dir.get_slash());
+        let remote_path = SlashPath::from_path(directories_dir)
+            .expect("normalize_receive_hub_sync directories_dir to_str should succeed.")
+            .join(self.remote_dir.get_slash());
         self.remote_dir = remote_path;
         Ok(())
     }
@@ -215,7 +220,7 @@ impl Directory {
         }
 
         self.local_dir = SlashPath::from_path(directories_dir)
-            .expect("directories_dir to_str should succeed.")
+            .expect("normalize_pull_hub_sync directories_dir to_str should succeed.")
             .join_another(&self.local_dir);
 
         if !self.local_dir.exists() {
@@ -274,10 +279,7 @@ impl Directory {
         vec![]
     }
 
-    pub fn count_local_files(
-        &self,
-        app_role: &AppRole,
-    ) -> Result<u64, failure::Error> {
+    pub fn count_local_files(&self, app_role: &AppRole) -> Result<u64, failure::Error> {
         let dir_to_read = match app_role {
             AppRole::ReceiveHub => &self.remote_dir,
             _ => bail!(
@@ -285,17 +287,12 @@ impl Directory {
                 app_role
             ),
         };
-        let d = if let Some(hd) = dirs::home_dir() {
-            hd.join(dir_to_read.as_path())
-        } else {
-            dir_to_read.as_path().to_path_buf()
-        };
-        let file_num = WalkDir::new(&d)
-                .follow_links(false)
-                .into_iter()
-                .filter_map(|dir_entry| dir_entry.ok())
-                .filter(|dir_entry| dir_entry.file_type().is_file())
-                .count();
+        let file_num = WalkDir::new(dir_to_read.as_path())
+            .follow_links(false)
+            .into_iter()
+            .filter_map(|dir_entry| dir_entry.ok())
+            .filter(|dir_entry| dir_entry.file_type().is_file())
+            .count();
         Ok(file_num as u64)
     }
 

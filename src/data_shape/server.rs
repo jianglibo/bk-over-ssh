@@ -1,15 +1,15 @@
 use super::{
-    app_conf, rolling_files, AppRole, AuthMethod, Directory, FileItemDirectories,
-    FileItemMap, FileItemProcessResult, FileItemProcessResultStats, Indicator, MiniAppConf,
-    PbProperties, PrimaryFileItem, ProgressWriter, PruneStrategy, RelativeFileItem, ScheduleItem,
-    SlashPath, SyncType,
+    app_conf, rolling_files, AppRole, AuthMethod, Directory, FileItemDirectories, FileItemMap,
+    FileItemProcessResult, FileItemProcessResultStats, Indicator, MiniAppConf, PbProperties,
+    PrimaryFileItem, ProgressWriter, PruneStrategy, RelativeFileItem, ScheduleItem, SlashPath,
+    SyncType,
 };
 use crate::actions::{copy_a_file_item, copy_a_file_sftp, copy_file, ssh_util, SyncDirReport};
 use crate::db_accesses::{scheduler_util, DbAccess};
+use base64;
 use bzip2::write::BzEncoder;
 use bzip2::Compression;
 use chrono::Local;
-use dirs;
 use indicatif::ProgressStyle;
 use log::*;
 use r2d2;
@@ -104,10 +104,18 @@ pub fn push_a_file_item_sftp(
         file_item.get_local_path().as_str(),
         file_item.relative_item.get_len(),
     );
-
+    trace!(
+        "staring create remote file: {}.",
+        file_item.get_remote_path()
+    );
     match sftp.create(file_item.get_remote_path().as_path()) {
         Ok(mut file) => {
             let local_file_path = file_item.get_local_path();
+            trace!(
+                "coping {} to {}.",
+                local_file_path,
+                file_item.get_remote_path()
+            );
             match local_file_path.get_local_file_reader() {
                 Ok(mut local_reader) => {
                     match copy_file::copy_stream_with_pb(
@@ -139,6 +147,7 @@ pub fn push_a_file_item_sftp(
         Err(err) => {
             error!("sftp create failed: {:?}", err);
             if err.code() == 2 {
+                error!("sftp create failed return code 2.");
                 FileItemProcessResult::MayBeNoParentDir(file_item)
             } else {
                 FileItemProcessResult::SftpOpenFailed
@@ -227,10 +236,15 @@ where
                 })?;
             }
             AppRole::ActiveLeaf => {
+                let remote_home = server_yml.remote_exec.as_str();
                 server_yml.directories.iter_mut().try_for_each(|d| {
                     d.compile_patterns()
                         .expect("compile_patterns should succeeded.");
-                    d.normalize_active_leaf_sync(directories_dir.as_path())
+                    d.normalize_active_leaf_sync(
+                        directories_dir.as_path(),
+                        app_conf.app_instance_id.as_str(),
+                        remote_home,
+                    )
                 })?;
             }
             AppRole::PassiveLeaf => {
@@ -288,17 +302,7 @@ where
     }
     /// For app_role is ReceiveHub, remote exec is from user's home directory.
     pub fn get_remote_exec(&self) -> SlashPath {
-        let remote_exec_slash = SlashPath::new(&self.server_yml.remote_exec);
-        match self.app_conf.app_role {
-            AppRole::ReceiveHub => SlashPath::from_path(
-                dirs::home_dir()
-                    .expect("dir::home_dir should succeed")
-                    .as_path(),
-            )
-            .expect("home_dir to slash should succeed.")
-            .join(remote_exec_slash.get_last_name()),
-            _ => remote_exec_slash,
-        }
+        SlashPath::new(&self.server_yml.remote_exec)
     }
 
     pub fn count_remote_files(&self) -> Result<u64, failure::Error> {
@@ -346,7 +350,8 @@ where
             "/data/{}/{}.yml",
             conf_folder, self.app_conf.app_instance_id
         );
-        self.get_remote_exec().parent()
+        self.get_remote_exec()
+            .parent()
             .expect("the remote executable's parent directory should exist")
             .join(yml)
             .slash
@@ -360,7 +365,8 @@ where
             self.app_conf.app_instance_id,
             FILE_LIST_FILE_NAME,
         );
-        self.get_remote_exec().parent()
+        self.get_remote_exec()
+            .parent()
             .expect("the remote executable's parent directory should exist")
             .join(yml)
             .slash
@@ -750,8 +756,9 @@ where
 
     pub fn create_remote_dir(&self, dir: &str) -> Result<(), failure::Error> {
         let mut channel: ssh2::Channel = self.create_channel()?;
+        let dir = base64::encode(dir);
         let cmd = format!(
-            "{} {} {} mkdir '{}'",
+            "{} {} {} mkdir {}",
             self.get_remote_exec(),
             if self.app_conf.console_log {
                 "--console-log"
@@ -761,7 +768,7 @@ where
             if self.app_conf.verbose { "--vv" } else { "" },
             dir,
         );
-        info!("invoking remote command: {:?}", cmd);
+        info!("invoking remote command: {}", cmd);
         channel.exec(cmd.as_str())?;
         ssh_util::get_stdout_eprintln_stderr(&mut channel, self.app_conf.verbose);
         Ok(())
@@ -986,18 +993,20 @@ where
                     let push_result = push_a_file_item_sftp(&sftp, item, &mut buff, progress_bar);
                     progress_bar.tick_total_pb_style_1(self.get_host(), file_len);
                     if let FileItemProcessResult::MayBeNoParentDir(item) = push_result {
-                        if self
-                            .create_remote_dir(
-                                item.get_remote_path()
-                                    .parent()
-                                    .expect("slash path's parent directory should exist.")
-                                    .as_str(),
-                            )
-                            .is_ok()
-                        {
-                            push_a_file_item_sftp(&sftp, item, &mut buff, progress_bar)
-                        } else {
-                            FileItemProcessResult::SftpOpenFailed
+                        match self.create_remote_dir(
+                            item.get_remote_path()
+                                .parent()
+                                .expect("slash path's parent directory should exist.")
+                                .as_str(),
+                        ) {
+                            Ok(_) => {
+                                info!("push_a_file_item_sftp again.");
+                                push_a_file_item_sftp(&sftp, item, &mut buff, progress_bar)
+                            }
+                            Err(err) => {
+                                error!("create_remote_dir failed: {:?}", err);
+                                FileItemProcessResult::SftpOpenFailed
+                            }
                         }
                     } else {
                         push_result
@@ -1293,13 +1302,8 @@ mod tests {
     use bzip2::Compression;
     use glob::Pattern;
     use std::net::TcpStream;
-    // use indicatif::MultiProgress;
-    use dirs;
     use std::fs;
     use std::io::{self};
-    // use std::sync::Arc;
-    // use std::thread;
-    // use std::time::Duration;
 
     fn log() {
         log_util::setup_logger_detail(
@@ -1344,6 +1348,7 @@ mod tests {
         log();
         let mut app_conf = tutil::load_demo_app_conf_sqlite(None, AppRole::ActiveLeaf);
         app_conf.mini_app_conf.skip_cron = true;
+        app_conf.mini_app_conf.verbose = true;
 
         assert!(app_conf.mini_app_conf.app_role == AppRole::ActiveLeaf);
         let mut server = tutil::load_demo_server_sqlite(&app_conf, None);
@@ -1358,31 +1363,27 @@ mod tests {
         sqlite_db_access.create_database()?;
         server.set_db_access(sqlite_db_access);
 
-        let home_dir =
-            SlashPath::from_path(dirs::home_dir().expect("home dir should exist").as_path());
-        let directories_dir = home_dir
-            .as_ref()
+        let directories_dir = server.get_remote_exec().parent()
             .expect("home dir to_str should succeed.")
-            .join("directories");
+            .join("data");
+            
         if directories_dir.exists() {
             info!("directories path: {:?}", directories_dir.as_path());
             fs::remove_dir_all(directories_dir.as_path())?;
         }
 
-        let a_dir = home_dir
-            .expect("home dir to_str should succeed.")
-            .join_another(
-                &server
-                    .server_yml
-                    .directories
-                    .iter()
-                    .find(|d| d.remote_dir.ends_with("a-dir"))
-                    .expect("should have a directory who's remote_dir end with 'a-dir'")
-                    .remote_dir,
-            );
+        server.connect()?;
+        let cc = server.count_remote_files()?;
+        assert_eq!(cc, 5, "should have 5 files at server side.");
+        let a_dir = &server
+            .server_yml
+            .directories
+            .iter()
+            .find(|d| d.remote_dir.ends_with("a-dir"))
+            .expect("should have a directory who's remote_dir end with 'a-dir'")
+            .remote_dir;
 
         let mut indicator = Indicator::new(None);
-        server.connect()?;
         let stats = server.sync_push_dirs(&mut indicator)?;
         indicator.pb_finish();
         info!("result {:?}", stats);
@@ -1405,6 +1406,7 @@ mod tests {
         log();
         let mut app_conf = tutil::load_demo_app_conf_sqlite(None, AppRole::PullHub);
         app_conf.mini_app_conf.skip_cron = true;
+        app_conf.mini_app_conf.verbose = true;
 
         assert!(app_conf.mini_app_conf.app_role == AppRole::PullHub);
         let mut server = tutil::load_demo_server_sqlite(&app_conf, None);

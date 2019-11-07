@@ -38,10 +38,11 @@ use log::*;
 use mail::send_test_mail;
 use std::env;
 use std::sync::Arc;
-use std::time::{Instant};
+use std::time::Instant;
 use std::{fs, io, io::BufRead, io::Write};
 
-use actions::{SyncDirReport, ssh_util};
+use actions::{ssh_util, SyncDirReport};
+use base64;
 use data_shape::{AppConf, AppRole};
 use r2d2_sqlite::SqliteConnectionManager;
 
@@ -55,8 +56,11 @@ fn main() -> Result<(), failure::Error> {
 
     if let ("mkdir", Some(sub_matches)) = m.subcommand() {
         let dir = sub_matches.value_of("dir").unwrap();
+        let dir = base64::decode(dir).expect("decode dir name should succeed");
+        let dir = std::str::from_utf8(dir.as_slice()).expect("dir name from_utf8 should succeed");
         if let Err(err) = fs::create_dir_all(dir) {
             error!("mkdir failed: {:?}", err);
+            eprintln!("mkdir failed: {:?}", err);
             bail!("mkdir failed: {:?}", dir);
         } else {
             return Ok(());
@@ -91,7 +95,6 @@ fn main() -> Result<(), failure::Error> {
     app_conf.mini_app_conf.skip_sha1 = !m.is_present("enable-sha1");
     app_conf.mini_app_conf.as_service = m.is_present("as-service");
 
-
     if !m.is_present("no-pb") && !app_conf.mini_app_conf.as_service {
         app_conf
             .progress_bar
@@ -100,7 +103,6 @@ fn main() -> Result<(), failure::Error> {
     if let Some(buf_len) = m.value_of("buf-len") {
         app_conf.mini_app_conf.buf_len = Some(buf_len.parse()?);
     }
-
 
     let verbose = if m.is_present("vv") {
         "vv"
@@ -173,11 +175,7 @@ fn main_entry<'a>(
                 app_conf.progress_bar.take();
             }
             let force = sub_matches.is_present("force");
-            command::sync_push_dirs(
-                &app_conf,
-                server_yml, 
-                force,
-            )?;
+            command::sync_push_dirs(&app_conf, server_yml, force)?;
         }
         ("send-test-mail", Some(sub_matches)) => {
             let to = sub_matches.value_of("to").unwrap();
@@ -312,17 +310,17 @@ fn main_entry<'a>(
         }
         ("count-local-files", Some(sub_matches)) => {
             let (server, _indicator) = {
-                    let server_yml = sub_matches.value_of("server-yml").unwrap();
-                    command::load_server_yml_by_name(app_conf, server_yml, true)?
+                let server_yml = sub_matches.value_of("server-yml").unwrap();
+                command::load_server_yml_by_name(app_conf, server_yml, true)?
             };
-            ssh_util::print_scalar_value(format!("{}",server.count_local_files()));
+            ssh_util::print_scalar_value(format!("{}", server.count_local_files()));
         }
         ("count-remote-files", Some(sub_matches)) => {
             let (server, _indicator) = {
-                    let server_yml = sub_matches.value_of("server-yml").unwrap();
-                    command::load_server_yml_by_name(app_conf, server_yml, true)?
+                let server_yml = sub_matches.value_of("server-yml").unwrap();
+                command::load_server_yml_by_name(app_conf, server_yml, true)?
             };
-           server.count_remote_files()?;
+            server.count_remote_files()?;
         }
         ("list-local-files", Some(sub_matches)) => {
             let (mut server, _indicator) =

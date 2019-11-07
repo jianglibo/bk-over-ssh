@@ -124,7 +124,7 @@ where
         app_role_op.as_ref().cloned().unwrap_or(AppRole::PullHub),
     ) {
         Ok(cfg) => cfg,
-        Err(ReadAppConfException::SerdeDeserializeFailed(conf_file_path)) => {
+        Err(ReadAppConfException::SerdeDeserializeFailed(conf_file_path)) | Err(ReadAppConfException::AppConfFileNotExist(conf_file_path))=> {
             if !re_try {
                 let bytes = include_bytes!("../app_config_demo.yml");
                 let mut file = fs::OpenOptions::new()
