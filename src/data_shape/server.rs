@@ -1363,18 +1363,18 @@ mod tests {
         sqlite_db_access.create_database()?;
         server.set_db_access(sqlite_db_access);
 
-        let directories_dir = server.get_remote_exec().parent()
-            .expect("home dir to_str should succeed.")
-            .join("data");
-            
-        if directories_dir.exists() {
-            info!("directories path: {:?}", directories_dir.as_path());
-            fs::remove_dir_all(directories_dir.as_path())?;
-        }
+        // let directories_dir = server.get_remote_exec().parent()
+        //     .expect("home dir to_str should succeed.")
+        //     .join("data");
+
+        // if directories_dir.exists() {
+        //     info!("directories path: {:?}", directories_dir.as_path());
+        //     fs::remove_dir_all(directories_dir.as_path())?;
+        // }
 
         server.connect()?;
         let cc = server.count_remote_files()?;
-        assert_eq!(cc, 5, "should have 5 files at server side.");
+        assert_eq!(cc, 1, "should have 1 files at server side.");
         let a_dir = &server
             .server_yml
             .directories
@@ -1382,6 +1382,12 @@ mod tests {
             .find(|d| d.remote_dir.ends_with("a-dir"))
             .expect("should have a directory who's remote_dir end with 'a-dir'")
             .remote_dir;
+
+        if a_dir.exists() {
+            info!("directories path: {:?}", a_dir.as_path());
+            fs::remove_dir_all(a_dir.as_path())?;            
+        }
+        
 
         let mut indicator = Indicator::new(None);
         let stats = server.sync_push_dirs(&mut indicator)?;
