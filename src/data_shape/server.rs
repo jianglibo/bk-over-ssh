@@ -1256,7 +1256,10 @@ where
                 )?;
                 trace!("load_relative_item_to_sqlite done.");
                 for sql in self.server_yml.exclude_by_sql.iter() {
-                    db_access.exclude_by_sql(sql)?;
+                    if let Err(err) = db_access.exclude_by_sql(sql) {
+                        eprintln!("exclude_by_sql execution failed: {:?}", err);
+                        error!("exclude_by_sql execution failed: {:?}", err);
+                    }
                 }
                 trace!("exclude_by_sql done.");
                 db_access.iterate_files_by_directory_changed_or_unconfirmed(|fi_db_or_path| {
