@@ -212,19 +212,17 @@ where
             fs::create_dir_all(&my_dir).expect("my_dir should create.");
         }
 
-        if app_conf.app_role != AppRole::PassiveLeaf {
-            if !archives_dir.exists() {
-                fs::create_dir_all(&archives_dir).expect("archives_dir should create.");
-            }
-            if !reports_dir.exists() {
-                fs::create_dir_all(&reports_dir).expect("reports_dir should create.");
-            }
-            if !working_dir.exists() {
-                fs::create_dir_all(&working_dir).expect("working_dir should create.");
-            }
-            if !directories_dir.exists() {
-                fs::create_dir_all(&directories_dir).expect("directories_dir should create.");
-            }
+        if !archives_dir.exists() {
+            fs::create_dir_all(&archives_dir).expect("archives_dir should create.");
+        }
+        if !reports_dir.exists() {
+            fs::create_dir_all(&reports_dir).expect("reports_dir should create.");
+        }
+        if !working_dir.exists() {
+            fs::create_dir_all(&working_dir).expect("working_dir should create.");
+        }
+        if !directories_dir.exists() {
+            fs::create_dir_all(&directories_dir).expect("directories_dir should create.");
         }
 
         match app_conf.app_role {
@@ -1301,9 +1299,9 @@ mod tests {
     use bzip2::write::{BzDecoder, BzEncoder};
     use bzip2::Compression;
     use glob::Pattern;
-    use std::net::TcpStream;
     use std::fs;
     use std::io::{self};
+    use std::net::TcpStream;
 
     fn log() {
         log_util::setup_logger_detail(
@@ -1385,9 +1383,8 @@ mod tests {
 
         if a_dir.exists() {
             info!("directories path: {:?}", a_dir.as_path());
-            fs::remove_dir_all(a_dir.as_path())?;            
+            fs::remove_dir_all(a_dir.as_path())?;
         }
-        
 
         let mut indicator = Indicator::new(None);
         let stats = server.sync_push_dirs(&mut indicator)?;
