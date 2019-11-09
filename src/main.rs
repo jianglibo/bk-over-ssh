@@ -237,14 +237,12 @@ fn main_entry<'a>(
             );
         }
         ("demo-server-yml", Some(sub_matches)) => {
-            let bytes = include_bytes!("server_template.yaml");
-
             if let Some(out) = sub_matches.value_of("out") {
                 let mut f = fs::OpenOptions::new().create(true).write(true).open(out)?;
-                f.write_all(&bytes[..])?;
+                f.write_all(command::SERVER_TEMPLATE_BYTES)?;
                 println!("write demo server yml to file done. {}", out);
             } else {
-                io::stdout().write_all(&bytes[..])?;
+                io::stdout().write_all(command::SERVER_TEMPLATE_BYTES)?;
                 println!();
             }
         }

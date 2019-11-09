@@ -17,6 +17,10 @@ use r2d2_sqlite::SqliteConnectionManager;
 pub use archives::archive_local;
 pub use sync_dirs::{sync_pull_dirs, sync_push_dirs};
 
+
+pub const SERVER_TEMPLATE_BYTES: &[u8] = include_bytes!("../server_template.yaml");
+pub const APP_CONFIG_BYTES: &[u8] = include_bytes!("../app_config_demo.yml");
+
 pub fn wait_progress_bar_finish(jh: Option<thread::JoinHandle<()>>) {
     if let Some(t) = jh {
         t.join()
@@ -126,12 +130,11 @@ where
         Ok(cfg) => cfg,
         Err(ReadAppConfException::SerdeDeserializeFailed(conf_file_path)) | Err(ReadAppConfException::AppConfFileNotExist(conf_file_path))=> {
             if !re_try {
-                let bytes = include_bytes!("../app_config_demo.yml");
                 let mut file = fs::OpenOptions::new()
                     .write(true)
                     .create(true)
                     .open(conf_file_path.as_path())?;
-                file.write_all(bytes)?;
+                file.write_all(APP_CONFIG_BYTES)?;
                 return process_app_config(conf, app_role_op, true);
             } else {
                 bail!("deserialize app_conf failed again.");
