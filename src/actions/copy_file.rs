@@ -64,14 +64,14 @@ pub fn copy_stream_to_file_with_pb<T: AsRef<Path>>(
     buf: &mut [u8],
     progress_bar: &Indicator,
 ) -> Result<u64, failure::Error> {
-    let path = to_file.as_ref();
-    trace!("start copy_stream_to_file_with_cb: {:?}", path);
-    if let Some(pp) = path.parent() {
+    let to_file = to_file.as_ref();
+    trace!("start copy_stream_to_file_with_cb to_file: {:?}", to_file);
+    if let Some(pp) = to_file.parent() {
         if !pp.exists() {
             fs::create_dir_all(pp)?;
         }
     }
-    let mut wf = fs::OpenOptions::new().create(true).write(true).open(path)?;
+    let mut wf = fs::OpenOptions::new().create(true).write(true).open(to_file)?;
     copy_stream_with_pb(from, &mut wf, buf, progress_bar)
 }
 

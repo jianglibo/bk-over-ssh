@@ -214,7 +214,7 @@ fn prune_period(
     } else {
         keys.split_at(0).1
     };
-    if let Some((latest_key, other_keys)) = remain_keys.split_first() {
+    if let Some((_latest_key, other_keys)) = remain_keys.split_first() {
         for period_key in other_keys {
             // except latest year all others years keep the last file copy only.
             if let Some(file_copies) = file_group.get_mut(period_key) {
@@ -226,19 +226,19 @@ fn prune_period(
                 }
             }
         }
-        if sub_keep_num > 0 {
-            if let Some(file_copies) = file_group.get_mut(latest_key) {
-                if file_copies.len() > sub_keep_num {
-                    file_copies_to_delete.append(
-                        &mut file_copies
-                            .drain(0..file_copies.len() - sub_keep_num)
-                            .collect(),
-                    );
-                } else {
-                    warn!("file copy items can't be empty.");
-                }
-            }
-        }
+        // if sub_keep_num > 0 {
+        //     if let Some(file_copies) = file_group.get_mut(latest_key) {
+        //         if file_copies.len() > sub_keep_num {
+        //             file_copies_to_delete.append(
+        //                 &mut file_copies
+        //                     .drain(0..file_copies.len() - sub_keep_num)
+        //                     .collect(),
+        //             );
+        //         } else {
+        //             warn!("file copy items can't be empty.");
+        //         }
+        //     }
+        // }
     }
 
     (FileCopies { inner: file_group }, file_copies_to_delete)
