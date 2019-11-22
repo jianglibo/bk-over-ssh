@@ -54,6 +54,12 @@ fn main() -> Result<(), failure::Error> {
     let app1 = App::from_yaml(yml);
     let console_log = m.is_present("console-log");
 
+    if let ("cp", Some(_sub_matches)) = m.subcommand() {
+        let mut f = fs::OpenOptions::new().read(true).open("E:/ws/bk-over-ssh/fixtures/qrcode.png")?;
+        io::copy(&mut f, &mut io::stdout())?;
+        return Ok(());
+    }
+
     if let ("mkdir", Some(sub_matches)) = m.subcommand() {
         let dir = sub_matches.value_of("dir").unwrap();
         let dir = base64::decode(dir).expect("decode dir name should succeed");

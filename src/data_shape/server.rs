@@ -1303,8 +1303,9 @@ mod tests {
     use bzip2::Compression;
     use glob::Pattern;
     use std::fs;
-    use std::io::{self};
+    use std::io::{self, Write};
     use std::net::TcpStream;
+
 
     fn log() {
         log_util::setup_logger_detail(
@@ -1340,6 +1341,29 @@ mod tests {
         let mut server = tutil::load_demo_server_sqlite(&app_conf, None);
         info!("start connecting...");
         server.connect()?;
+        let sess = server.get_ssh_session();
+        let mut channel: ssh2::Channel = sess.channel_session().unwrap();
+        channel.exec("E:/ws/bk-over-ssh/target/debug/bk-over-ssh.exe cp abc").unwrap();
+        let mut buf = vec![0; 8192];
+        let mut ll = 0;
+        let of = PathBuf::from("data/tt.png");
+        let mut file = fs::OpenOptions::new().write(true).create(true).open(&of)?;
+        loop {
+            let readed = channel.read(&mut buf)?;
+            if readed == 0 {
+                break;
+            } else {
+                ll += readed;
+                file.write_all(&mut buf[..readed])?;
+            }
+        }
+        let mut s = String::new();
+        channel.stderr().read_to_string(&mut s)?;
+        eprintln!("{}", s);
+        let f = PathBuf::from("fixtures/qrcode.png").metadata()?.len();
+
+        assert_eq!(ll as u64, f);
+
         assert!(server.is_connected());
         Ok(())
     }
