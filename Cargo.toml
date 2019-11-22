@@ -52,6 +52,7 @@ time = "0.1"
 # dirs = "2.0.2"
 job_scheduler = "*"
 base64 = "0.11.0"
+bytes = "0.4.12"
 # zip = "0.5.3"
 # https://docs.rs/crate/rustsync/0.2.3
 [dependencies.clap]

@@ -1354,7 +1354,7 @@ mod tests {
                 break;
             } else {
                 ll += readed;
-                file.write_all(&mut buf[..readed])?;
+                file.write_all(&buf[..readed])?;
             }
         }
         let mut s = String::new();

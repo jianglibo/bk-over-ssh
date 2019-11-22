@@ -218,3 +218,45 @@ pub fn change_file_content(file_path: impl AsRef<Path>) -> Result<(), failure::E
     write!(f, "hello")?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::log_util;
+    use crate::develope::tutil;
+    use log::*;
+    use std::{fs};
+    use failure;
+    use std::io::{self, Read};
+    use std::sync::mpsc::channel;
+    use std::thread;
+    use bytes::{BytesMut, BufMut, Buf, Bytes};
+    use bytes::buf::IntoBuf;
+
+    #[test]
+    fn t_channel_io() -> Result<(), failure::Error> {
+        let mut stdin = io::stdin();
+        let mut stdout = io::stdout();
+
+        let mut array: [u8; 3] = [0; 3];
+
+        stdout.write_all(&array[..])?;
+
+        let mut buf = BytesMut::with_capacity(8);
+        assert_eq!(buf.len(), 0);
+
+
+        let a_u64: u64 = 2;
+        buf.put_u64_be(a_u64);
+        assert_eq!(buf.len(), 8);
+
+        let buf1 = Bytes::from(&buf[..]);
+        assert_eq!(buf1.into_buf().get_u64_be(), 2);
+
+        assert_eq!(buf[..].len(), 8);
+        println!("{:?}", buf);
+        assert_eq!(buf.freeze().into_buf().get_u64_be(), 2);
+        // println!("{:?}", buf);
+        Ok(())
+    }
+}
