@@ -24,6 +24,7 @@ mod develope;
 mod log_util;
 mod mail;
 mod rustsync;
+mod protocol;
 
 #[macro_use]
 extern crate rusqlite;
@@ -54,7 +55,16 @@ fn main() -> Result<(), failure::Error> {
     let app1 = App::from_yaml(yml);
     let console_log = m.is_present("console-log");
 
-    if let ("cp", Some(_sub_matches)) = m.subcommand() {
+    if let ("get-file", Some(_sub_matches)) = m.subcommand() {
+        let stdin = io::stdin();
+        let stdout = io::stdout();
+        let mut stdin_handler = stdin.lock();
+        let mut stdout_handler = stdout.lock();
+
+        loop {
+            
+        }
+        
         let mut f = fs::OpenOptions::new().read(true).open("E:/ws/bk-over-ssh/fixtures/qrcode.png")?;
         io::copy(&mut f, &mut io::stdout())?;
         return Ok(());

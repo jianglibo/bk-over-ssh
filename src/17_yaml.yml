@@ -163,11 +163,11 @@ subcommands:
                 long: server-yml
                 required: true
                 index: 1
-    - cp:
+    - get-file:
         about: cp a file.
         args:
-            - dir:
-                help: the dir to create.
+            - file:
+                help: the file to manual.
                 required: true
                 index: 1        
     - mkdir:

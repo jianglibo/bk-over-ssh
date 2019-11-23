@@ -1343,9 +1343,12 @@ mod tests {
         server.connect()?;
         let sess = server.get_ssh_session();
         let mut channel: ssh2::Channel = sess.channel_session().unwrap();
-        channel.exec("E:/ws/bk-over-ssh/target/debug/bk-over-ssh.exe cp abc").unwrap();
+        let cmd = format!("{} cp abc", server.get_remote_exec());
+        eprintln!("{}", cmd);
+        channel.exec(&cmd).unwrap();
         let mut buf = vec![0; 8192];
         let mut ll = 0;
+        channel.write_all(&buf[..5]).unwrap();
         let of = PathBuf::from("data/tt.png");
         let mut file = fs::OpenOptions::new().write(true).create(true).open(&of)?;
         loop {
