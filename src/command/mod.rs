@@ -3,6 +3,7 @@ pub mod db_cmd;
 pub mod misc;
 pub mod rsync;
 pub mod sync_dirs;
+pub mod client_loop;
 
 use crate::db_accesses::{DbAccess, SqliteDbAccess};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
@@ -16,6 +17,7 @@ use r2d2_sqlite::SqliteConnectionManager;
 
 pub use archives::archive_local;
 pub use sync_dirs::{sync_pull_dirs, sync_push_dirs};
+pub use client_loop::{client_loops};
 
 
 pub const SERVER_TEMPLATE_BYTES: &[u8] = include_bytes!("../server_template.yaml");
@@ -154,3 +156,49 @@ where
     Ok(app_conf)
 }
 
+
+pub type ServerAndIndicatorSqlite = (Server<SqliteConnectionManager, SqliteDbAccess>, Indicator);
+
+pub fn load_server_indicator_pairs(
+    app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
+    server_yml: Option<&str>,
+) -> Result<
+    (
+        Option<thread::JoinHandle<()>>,
+        Vec<ServerAndIndicatorSqlite>,
+    ),
+    failure::Error,
+> {
+    let mut server_indicator_pairs: Vec<ServerAndIndicatorSqlite> = Vec::new();
+    if let Some(server_yml) = server_yml {
+        let server = load_server_yml_by_name(app_conf, server_yml, true)?;
+        server_indicator_pairs.push(server);
+    } else {
+        server_indicator_pairs.append(&mut load_all_server_yml(app_conf, true));
+    }
+    // all progress bars already create from here on.
+    let progress_bar_join_handler = join_multi_bars(app_conf.progress_bar.clone());
+
+    if server_indicator_pairs.is_empty() {
+        println!("found no server yml!");
+    } else {
+        println!(
+            "found {} server yml files. start processing...",
+            server_indicator_pairs.len()
+        );
+    }
+    if !app_conf.mini_app_conf.as_service {
+        server_indicator_pairs
+            .iter_mut()
+            .filter_map(|s| {
+                if let Err(err) = s.0.connect() {
+                    eprintln!("{:?}", err);
+                    None
+                } else {
+                    Some(s)
+                }
+            })
+            .count();
+    }
+    Ok((progress_bar_join_handler, server_indicator_pairs))
+}

@@ -313,6 +313,16 @@ subcommands:
                 long: rsync-window
                 takes_value: true
                 required: false
+    - client-loop:
+        about: client side loop.
+        args:
+            - server-yml:
+                required: false
+                index: 1
+            - rsync-window:
+                long: rsync-window
+                takes_value: true
+                required: false
     - sync-push-dirs:
         about: sync directories in the configuration file. The configuration file is at fixed location.
         args:

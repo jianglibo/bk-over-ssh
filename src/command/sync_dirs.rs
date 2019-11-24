@@ -9,7 +9,7 @@ use log::*;
 
 use super::*;
 
-pub type ServerAndIndicatorSqlite = (Server<SqliteConnectionManager, SqliteDbAccess>, Indicator);
+// pub type ServerAndIndicatorSqlite = (Server<SqliteConnectionManager, SqliteDbAccess>, Indicator);
 
 /// When force parameter is true, the db file will be deleted and that means all file will be upload again.
 pub fn sync_push_dirs(
@@ -216,46 +216,46 @@ fn pull_by_spawn(
     Ok(())
 }
 
-fn load_server_indicator_pairs(
-    app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
-    server_yml: Option<&str>,
-) -> Result<
-    (
-        Option<thread::JoinHandle<()>>,
-        Vec<ServerAndIndicatorSqlite>,
-    ),
-    failure::Error,
-> {
-    let mut server_indicator_pairs: Vec<ServerAndIndicatorSqlite> = Vec::new();
-    if let Some(server_yml) = server_yml {
-        let server = load_server_yml_by_name(app_conf, server_yml, true)?;
-        server_indicator_pairs.push(server);
-    } else {
-        server_indicator_pairs.append(&mut load_all_server_yml(app_conf, true));
-    }
-    // all progress bars already create from here on.
-    let progress_bar_join_handler = join_multi_bars(app_conf.progress_bar.clone());
+// fn load_server_indicator_pairs(
+//     app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
+//     server_yml: Option<&str>,
+// ) -> Result<
+//     (
+//         Option<thread::JoinHandle<()>>,
+//         Vec<ServerAndIndicatorSqlite>,
+//     ),
+//     failure::Error,
+// > {
+//     let mut server_indicator_pairs: Vec<ServerAndIndicatorSqlite> = Vec::new();
+//     if let Some(server_yml) = server_yml {
+//         let server = load_server_yml_by_name(app_conf, server_yml, true)?;
+//         server_indicator_pairs.push(server);
+//     } else {
+//         server_indicator_pairs.append(&mut load_all_server_yml(app_conf, true));
+//     }
+//     // all progress bars already create from here on.
+//     let progress_bar_join_handler = join_multi_bars(app_conf.progress_bar.clone());
 
-    if server_indicator_pairs.is_empty() {
-        println!("found no server yml!");
-    } else {
-        println!(
-            "found {} server yml files. start processing...",
-            server_indicator_pairs.len()
-        );
-    }
-    if !app_conf.mini_app_conf.as_service {
-        server_indicator_pairs
-            .iter_mut()
-            .filter_map(|s| {
-                if let Err(err) = s.0.connect() {
-                    eprintln!("{:?}", err);
-                    None
-                } else {
-                    Some(s)
-                }
-            })
-            .count();
-    }
-    Ok((progress_bar_join_handler, server_indicator_pairs))
-}
+//     if server_indicator_pairs.is_empty() {
+//         println!("found no server yml!");
+//     } else {
+//         println!(
+//             "found {} server yml files. start processing...",
+//             server_indicator_pairs.len()
+//         );
+//     }
+//     if !app_conf.mini_app_conf.as_service {
+//         server_indicator_pairs
+//             .iter_mut()
+//             .filter_map(|s| {
+//                 if let Err(err) = s.0.connect() {
+//                     eprintln!("{:?}", err);
+//                     None
+//                 } else {
+//                     Some(s)
+//                 }
+//             })
+//             .count();
+//     }
+//     Ok((progress_bar_join_handler, server_indicator_pairs))
+// }

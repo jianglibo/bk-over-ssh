@@ -60,10 +60,6 @@ fn main() -> Result<(), failure::Error> {
         let stdout = io::stdout();
         let mut stdin_handler = stdin.lock();
         let mut stdout_handler = stdout.lock();
-
-        loop {
-            
-        }
         
         let mut f = fs::OpenOptions::new().read(true).open("E:/ws/bk-over-ssh/fixtures/qrcode.png")?;
         io::copy(&mut f, &mut io::stdout())?;
@@ -184,6 +180,13 @@ fn main_entry<'a>(
                 app_conf.progress_bar.take();
             }
             command::sync_pull_dirs(&app_conf, server_yml)?;
+        }
+        ("client-loop", Some(sub_matches)) => {
+            let server_yml = sub_matches.value_of("server-yml");
+            if server_yml.is_none() {
+                app_conf.progress_bar.take();
+            }
+            command::client_loops(&app_conf, server_yml)?;
         }
         ("sync-push-dirs", Some(sub_matches)) => {
             let server_yml = sub_matches.value_of("server-yml");

@@ -1,14 +1,17 @@
 use super::{HeaderParseError, ProtocolReader};
 use std::convert::TryInto;
+use std::fs;
 use std::io::{self, Read, StdinLock};
+use std::path::Path;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum TransferType {
     CopyIn,
     CopyOut,
     RsyncIn,
     RsyncOut,
     ListFiles,
+    ServerYml,
 }
 
 impl TransferType {
@@ -19,6 +22,7 @@ impl TransferType {
             3 => Ok(TransferType::RsyncIn),
             4 => Ok(TransferType::RsyncOut),
             5 => Ok(TransferType::ListFiles),
+            6 => Ok(TransferType::ServerYml),
             i => Err(HeaderParseError::InvalidTransferType(i)),
         }
     }
@@ -30,7 +34,61 @@ impl TransferType {
             TransferType::RsyncIn => 3,
             TransferType::RsyncOut => 4,
             TransferType::ListFiles => 5,
+            TransferType::ServerYml => 6,
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct ServerYmlHeader {
+    pub yml_string: String,
+}
+
+impl ServerYmlHeader {
+    pub fn new(yml_string: impl AsRef<str>) -> Self {
+        Self {
+            yml_string: yml_string.as_ref().to_owned(),
+        }
+    }
+
+    pub fn from_path(path: &Path) -> Self {
+        let mut f = fs::OpenOptions::new()
+            .read(true)
+            .open(path)
+            .expect("can open provided server yml path.");
+        let mut yml_string = String::new();
+        f.read_to_string(&mut yml_string)
+            .expect("should read server yml content");
+        Self { yml_string }
+    }
+
+    pub fn into_bytes(&mut self) -> Vec<u8> {
+        let mut v = Vec::new();
+        v.insert(0, TransferType::ServerYml.to_u8());
+        let bytes = self.yml_string.as_bytes();
+        let bytes_len: u64 = bytes.len().try_into().expect("usize convert to u64");
+        v.append(&mut bytes_len.to_be_bytes().to_vec());
+        v.append(&mut bytes.to_vec());
+        v
+    }
+
+    pub fn parse<T>(
+        protocol_reader: &mut ProtocolReader<T>,
+    ) -> Result<ServerYmlHeader, HeaderParseError>
+    where
+        T: Read,
+    {
+        let mut buf_u64 = [0; 8];
+        protocol_reader
+            .read_exact(&mut buf_u64)
+            .map_err(HeaderParseError::Io)?;
+        let yml_string_len: u64 = u64::from_be_bytes(buf_u64);
+
+        let mut buf = [0; 1024];
+        let yml_string_buf = protocol_reader.read_nbytes(&mut buf, yml_string_len)?;
+        let yml_string = String::from_utf8(yml_string_buf)
+            .map_err(|e| HeaderParseError::Utf8Error(e.utf8_error().valid_up_to()))?;
+        Ok(ServerYmlHeader { yml_string })
     }
 }
 
@@ -55,23 +113,22 @@ impl CopyOutHeader {
         v.insert(0, TransferType::CopyOut.to_u8());
         v.append(&mut self.content_len.to_be_bytes().to_vec());
         v.append(&mut self.offset.to_be_bytes().to_vec());
-        let file_name_len: u16 =  self.full_file_name.len().try_into().expect("file name length is in limit of u16");
+        let file_name_len: u16 = self
+            .full_file_name
+            .len()
+            .try_into()
+            .expect("file name length is in limit of u16");
         v.append(&mut file_name_len.to_be_bytes().to_vec());
         v.append(&mut self.full_file_name.as_bytes().to_vec());
         v
     }
-}
 
-#[allow(dead_code)]
-pub fn parse_copy_out_header<T>(
-    protocol_reader: &mut ProtocolReader<T>,
-) -> Result<CopyOutHeader, HeaderParseError> where T : Read {
-    let mut buf = [0; 1];
-    protocol_reader.read_exact(&mut buf).map_err(HeaderParseError::Io)?;
-    let type_num = *buf.get(0).expect("buf first byte.");
-    let transfer_type = TransferType::from_u8(type_num)?;
-
-    if let TransferType::CopyOut = transfer_type {
+    pub fn parse<T>(
+        protocol_reader: &mut ProtocolReader<T>,
+    ) -> Result<CopyOutHeader, HeaderParseError>
+    where
+        T: Read,
+    {
         let mut buf_u64 = [0; 8];
 
         protocol_reader
@@ -84,15 +141,15 @@ pub fn parse_copy_out_header<T>(
             .map_err(HeaderParseError::Io)?;
         let offset: u64 = u64::from_be_bytes(buf_u64);
 
-
         let mut buf_u16 = [0; 2];
         protocol_reader
             .read_exact(&mut buf_u16)
             .map_err(HeaderParseError::Io)?;
         let full_file_name_len = u16::from_be_bytes(buf_u16);
 
-        let mut buf = [0;1024];
-        let full_file_name_buf = protocol_reader.read_nbytes(&mut buf, full_file_name_len as u64)?;
+        let mut buf = [0; 1024];
+        let full_file_name_buf =
+            protocol_reader.read_nbytes(&mut buf, full_file_name_len as u64)?;
         let full_file_name = String::from_utf8(full_file_name_buf)
             .map_err(|e| HeaderParseError::Utf8Error(e.utf8_error().valid_up_to()))?;
         Ok(CopyOutHeader {
@@ -100,8 +157,6 @@ pub fn parse_copy_out_header<T>(
             offset,
             full_file_name,
         })
-    } else {
-        Err(HeaderParseError::InvalidTransferType(type_num))
     }
 }
 
@@ -109,15 +164,18 @@ pub fn parse_copy_out_header<T>(
 mod tests {
     use super::*;
     use failure;
-    use std::io::{self, Read, StdinLock, Cursor, Write};
+    use std::io::{self, Cursor, Read, StdinLock, Write};
 
     #[test]
-    fn t_parse_copy_out_header()  -> Result<(), failure::Error> {
+    fn t_parse_copy_out_header() -> Result<(), failure::Error> {
         let mut curor = Cursor::new(Vec::new());
         let content_len = 288_u64;
         let offset = 5_u64;
         let file_name = "hello.txt";
-        let file_name_len: u16 = file_name.len().try_into().expect("file name length is in limit of u16");
+        let file_name_len: u16 = file_name
+            .len()
+            .try_into()
+            .expect("file name length is in limit of u16");
         curor.write_all(&[TransferType::CopyOut.to_u8()])?;
         curor.write_all(&content_len.to_be_bytes())?;
         curor.write_all(&offset.to_be_bytes())?;
@@ -125,28 +183,56 @@ mod tests {
         curor.write_all(file_name.as_bytes())?;
 
         curor.set_position(0);
-        
+
         let mut pr = ProtocolReader::new(&mut curor);
+        match pr.read_type_byte()? {
+            TransferType::CopyOut => {
+                let hd = CopyOutHeader::parse(&mut pr)?;
 
-        let hd = parse_copy_out_header(&mut pr)?;
-
-        assert_eq!(hd.content_len, content_len);
-        assert_eq!(hd.offset, offset);
-        assert_eq!(hd.full_file_name, file_name);
-
+                assert_eq!(hd.content_len, content_len);
+                assert_eq!(hd.offset, offset);
+                assert_eq!(hd.full_file_name, file_name);
+            }
+            _ => panic!("unexpected transfer type"),
+        }
         Ok(())
     }
 
     #[test]
-    fn t_parse_copy_out_header_1()  -> Result<(), failure::Error> {
+    fn t_parse_copy_out_header_1() -> Result<(), failure::Error> {
         let mut curor = Cursor::new(CopyOutHeader::new(288, 5, "hello.txt").into_bytes());
         curor.set_position(0);
-        let mut pr = ProtocolReader::new(&mut curor);
-        let hd = parse_copy_out_header(&mut pr)?;
-        assert_eq!(hd.content_len, 288);
-        assert_eq!(hd.offset, 5);
-        assert_eq!(hd.full_file_name, "hello.txt");
 
+        let mut pr = ProtocolReader::new(&mut curor);
+        match pr.read_type_byte()? {
+            TransferType::CopyOut => {
+                let hd = CopyOutHeader::parse(&mut pr)?;
+                assert_eq!(hd.content_len, 288);
+                assert_eq!(hd.offset, 5);
+                assert_eq!(hd.full_file_name, "hello.txt");
+            }
+            _ => panic!("unexpected transfer type"),
+        }
+        Ok(())
+    }
+
+        #[test]
+    fn t_parse_server_yml() -> Result<(), failure::Error> {
+        let yml_string = r##"
+hello 
+world!
+"##;
+        let mut curor = Cursor::new(ServerYmlHeader::new(yml_string).into_bytes());
+        curor.set_position(0);
+
+        let mut pr = ProtocolReader::new(&mut curor);
+        match pr.read_type_byte()? {
+            TransferType::ServerYml => {
+                let syh = ServerYmlHeader::parse(&mut pr)?;
+                assert_eq!(syh.yml_string, yml_string);
+            }
+            _ => panic!("unexpected transfer type"),
+        }
         Ok(())
     }
 }
