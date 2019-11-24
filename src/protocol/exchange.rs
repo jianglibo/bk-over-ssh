@@ -12,6 +12,8 @@ pub enum TransferType {
     RsyncOut,
     ListFiles,
     ServerYml,
+    RepeatDone,
+    FileItem,
 }
 
 impl TransferType {
@@ -23,6 +25,8 @@ impl TransferType {
             4 => Ok(TransferType::RsyncOut),
             5 => Ok(TransferType::ListFiles),
             6 => Ok(TransferType::ServerYml),
+            7 => Ok(TransferType::RepeatDone),
+            8 => Ok(TransferType::FileItem),
             i => Err(HeaderParseError::InvalidTransferType(i)),
         }
     }
@@ -35,6 +39,8 @@ impl TransferType {
             TransferType::RsyncOut => 4,
             TransferType::ListFiles => 5,
             TransferType::ServerYml => 6,
+            TransferType::RepeatDone => 7,
+            TransferType::FileItem => 8,
         }
     }
 }

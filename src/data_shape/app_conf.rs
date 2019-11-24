@@ -470,6 +470,9 @@ where
         &self.inner.log_conf
     }
 
+    /// Why load_server_yml from app_conf?
+    /// Because there is a servers_conf_dir item here.
+    /// and my_dir is crucial.
     pub fn load_server_from_yml(
         &self,
         name: impl AsRef<str>,

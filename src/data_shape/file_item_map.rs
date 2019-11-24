@@ -84,7 +84,9 @@ impl AddAssign for FileItemProcessResultStats {
         *self = self.add_fields(other);
     }
 }
-
+/// FileItemMap hold a relative_file_item and local_base and remote_base.
+/// So to calculate the local dir by relative_item's path.
+/// it's been constructed by reading the stateful directory and fileitem lines.
 #[derive(Debug)]
 pub struct FileItemMap<'a> {
     pub relative_item: RelativeFileItem,

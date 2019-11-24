@@ -4,6 +4,7 @@ pub mod misc;
 pub mod rsync;
 pub mod sync_dirs;
 pub mod client_loop;
+pub mod server_loop;
 
 use crate::db_accesses::{DbAccess, SqliteDbAccess};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
@@ -17,7 +18,7 @@ use r2d2_sqlite::SqliteConnectionManager;
 
 pub use archives::archive_local;
 pub use sync_dirs::{sync_pull_dirs, sync_push_dirs};
-pub use client_loop::{client_loops};
+pub use client_loop::{client_push_loops};
 
 
 pub const SERVER_TEMPLATE_BYTES: &[u8] = include_bytes!("../server_template.yaml");

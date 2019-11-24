@@ -9,14 +9,14 @@ use log::*;
 
 use super::*;
 
-pub fn client_loops(
+pub fn client_push_loops(
     app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
     server_yml: Option<&str>,
 ) -> Result<(), failure::Error> {
-    client_loops_follow_archive(app_conf, server_yml, false)
+    client_push_loops_follow_archive(app_conf, server_yml, false)
 }
 
-pub fn client_loops_follow_archive(
+pub fn client_push_loops_follow_archive(
     app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
     server_yml: Option<&str>,
     follow_archive: bool,
@@ -27,7 +27,7 @@ pub fn client_loops_follow_archive(
     let (progress_bar_join_handler, server_indicator_pairs) =
         load_server_indicator_pairs(app_conf, server_yml)?;
 
-    client_loop_by_spawn(server_indicator_pairs, follow_archive)?;
+    client_push_loop_by_spawn(server_indicator_pairs, follow_archive)?;
 
     wait_progress_bar_finish(progress_bar_join_handler);
     Ok(())
@@ -36,13 +36,13 @@ pub fn client_loops_follow_archive(
 /// If invoking with parameter as-service, this branch will be called.
 /// Because it is a long running thread, We should choose to connect to server when schedule time is meet.
 /// and disconnect from server when task is done.
-fn client_loop_by_spawn(
+fn client_push_loop_by_spawn(
     server_indicator_pairs: Vec<ServerAndIndicatorSqlite>,
     follow_archive: bool,
 ) -> Result<(), failure::Error> {
     let handlers = server_indicator_pairs
         .into_iter()
-        .map(|pair| client_loop_by_spawn_do(pair, follow_archive))
+        .map(|pair| client_push_loop_by_spawn_do(pair, follow_archive))
         .collect::<Vec<thread::JoinHandle<_>>>();
 
     for child in handlers {
@@ -52,7 +52,7 @@ fn client_loop_by_spawn(
     Ok(())
 }
 
-fn client_loop_by_spawn_do(
+fn client_push_loop_by_spawn_do(
     pair: ServerAndIndicatorSqlite,
     follow_archive: bool,
 ) -> thread::JoinHandle<()> {
@@ -61,7 +61,7 @@ fn client_loop_by_spawn_do(
         if let Some(schedule_item) = server.find_cron_by_name(server::CRON_NAME_SYNC_PULL_DIRS) {
             let mut sched = JobScheduler::new();
             sched.add(Job::new(schedule_item.cron.parse().unwrap(), || {
-                match server.sync_pull_dirs(&mut indicator, true) {
+                match server.client_push_loop(&mut indicator, true) {
                     Ok(result) => {
                         indicator.pb_finish();
                         actions::write_dir_sync_result(&server, result.as_ref());

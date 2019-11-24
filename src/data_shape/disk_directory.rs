@@ -367,6 +367,10 @@ impl Directory {
         }
         Ok(())
     }
+
+    pub fn to_yml_string(&self) -> Result<String, failure::Error> {
+        Ok(serde_yaml::to_string(&self)?)
+    }
 }
 
 #[cfg(test)]

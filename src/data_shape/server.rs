@@ -6,6 +6,7 @@ use super::{
 };
 use crate::actions::{copy_a_file_item, copy_a_file_sftp, copy_file, ssh_util, SyncDirReport};
 use crate::db_accesses::{scheduler_util, DbAccess};
+use crate::protocol::{ProtocolReader, ServerYmlHeader, CopyOutHeader, TransferType};
 use base64;
 use bzip2::write::BzEncoder;
 use bzip2::Compression;
@@ -21,7 +22,7 @@ use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
-use std::{fs, io, io::Seek};
+use std::{fs, io, io::Seek, io::Write};
 use tar::Builder;
 
 pub const CRON_NAME_SYNC_PULL_DIRS: &str = "sync-pull-dirs";
@@ -948,7 +949,8 @@ where
             .map(|d| (d.local_dir.clone(), d.remote_dir.clone()))
             .collect()
     }
-
+    /// First list changed file to file_list_file.
+    /// Then for each line in file_list_file
     fn start_push_sync_working_file_list(
         &self,
         progress_bar: &mut Indicator,
@@ -1056,7 +1058,7 @@ where
             .map(|line| {
                 if line.starts_with('{') {
                     trace!("got item line {}", line);
-                    if let (Some(rd), Some(local_dir)) =
+                    if let (Some(remote_dir), Some(local_dir)) =
                         (current_remote_dir.as_ref(), current_local_dir)
                     {
                         match serde_json::from_str::<RelativeFileItem>(&line) {
@@ -1071,7 +1073,7 @@ where
                                 };
                                 let file_item_map = FileItemMap::new(
                                     local_dir,
-                                    rd.as_str(),
+                                    remote_dir.as_str(),
                                     remote_item,
                                     sync_type,
                                     true,
@@ -1237,6 +1239,35 @@ where
         } else {
             Ok(None)
         }
+    }
+
+    pub fn client_push_loop(
+        &mut self,
+        pb: &mut Indicator,
+        as_service: bool,
+    ) -> Result<Option<SyncDirReport>, failure::Error> {
+        let session = self.create_ssh_session()?;
+        let mut channel: ssh2::Channel = session.channel_session()?;
+        let cmd = "";
+        channel.exec(&cmd).unwrap();
+
+        let mut protocol_reader = ProtocolReader::new(&mut channel);
+        loop {
+            let mut server_yml = ServerYmlHeader::from_path(self.server_yml.yml_location.as_ref().expect("yml_location should exist.").as_path());
+            protocol_reader.get_inner().write_all(server_yml.into_bytes().as_slice())?;
+            // after sent server_yml, will receive file item repeatly, until receive a RepeatDone message.
+            loop {
+                match protocol_reader.read_type_byte()? {
+                    TransferType::FileItem => {
+
+                    },
+                    TransferType::RepeatDone => break,
+                    _ => panic!("unexpect transfer type."),
+                }
+            }
+        }
+
+        Ok(None)
     }
 
     /// When in the role of AppRole::ActiveLeaf, it list changed files in the local disk.

@@ -30,6 +30,10 @@ where
         TransferType::from_u8(self.read_one_byte()?)
     }
 
+    pub fn get_inner(&mut self) -> &mut T {
+        self.inner
+    }
+
     pub fn read_nbytes(
         &mut self,
         buf: &mut [u8],

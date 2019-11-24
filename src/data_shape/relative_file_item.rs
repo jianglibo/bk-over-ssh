@@ -241,35 +241,36 @@ mod tests {
         // let item: RelativeFileItem = serde_json::from_str(&s)?;
         // assert_eq!(item.get_len(), 5);
 
-        let s = r##"{"path":"qrcode.png","sha1":null,"len":6044,"created":1567834936,"modified":1567834936}"##;
+        let s = r##"{"path":"qrcode.png","sha1":null,"len":6044,"created":1567834936,"modified":1567834936, "changed": false, "confirmed": false}"##;
+
         let fi: RelativeFileItem = serde_json::from_str(s)?;
         assert_eq!(fi.get_len(), 6044);
 
-        let s = r##"{"path":"b b\b b.txt","sha1":null,"len":5,"created":1565607566,"modified":1565607566}"##;
+        let s = r##"{"path":"b b\b b.txt","sha1":null,"len":5,"created":1565607566,"modified":1565607566, "changed": false, "confirmed": false}"##;
         let fi_r = serde_json::from_str::<RelativeFileItem>(s);
         assert!(fi_r.is_ok());
 
-        let s = r##"{"path":"b b\\b b.txt","sha1":null,"len":5,"created":1565607566,"modified":1565607566}"##;
+        let s = r##"{"path":"b b\\b b.txt","sha1":null,"len":5,"created":1565607566,"modified":1565607566, "changed": false, "confirmed": false}"##;
         let fi_r = serde_json::from_str::<RelativeFileItem>(s);
         assert!(fi_r.is_ok());
 
-        let s = r##"{"path":"b b\\\b b.txt","sha1":null,"len":5,"created":1565607566,"modified":1565607566}"##;
+        let s = r##"{"path":"b b\\\b b.txt","sha1":null,"len":5,"created":1565607566,"modified":1565607566, "changed": false, "confirmed": false}"##;
         let fi_r = serde_json::from_str::<RelativeFileItem>(s);
         assert!(fi_r.is_ok());
 
-        let s = r##"{"path":"b b\\\\b b.txt","sha1":null,"len":5,"created":1565607566,"modified":1565607566}"##;
+        let s = r##"{"path":"b b\\\\b b.txt","sha1":null,"len":5,"created":1565607566,"modified":1565607566, "changed": false, "confirmed": false}"##;
         let fi_r = serde_json::from_str::<RelativeFileItem>(s);
         assert!(fi_r.is_ok());
 
-        let s = r##"{"path":"b b\\\\\\b b.txt","sha1":null,"len":5,"created":1565607566,"modified":1565607566}"##;
+        let s = r##"{"path":"b b\\\\\\b b.txt","sha1":null,"len":5,"created":1565607566,"modified":1565607566, "changed": false, "confirmed": false}"##;
         let fi_r = serde_json::from_str::<RelativeFileItem>(s);
         assert!(fi_r.is_ok());
 
-        let s = r##"{"path":"b b\\\\\\\\b b.txt","sha1":null,"len":5,"created":1565607566,"modified":1565607566}"##;
+        let s = r##"{"path":"b b\\\\\\\\b b.txt","sha1":null,"len":5,"created":1565607566,"modified":1565607566, "changed": false, "confirmed": false}"##;
         let fi_r = serde_json::from_str::<RelativeFileItem>(s);
         assert!(fi_r.is_ok());
 
-        let s = r##"{"path":"b b/b b.txt","sha1":null,"len":5,"created":1565607566,"modified":1565607566}"##;
+        let s = r##"{"path":"b b/b b.txt","sha1":null,"len":5,"created":1565607566,"modified":1565607566, "changed": false, "confirmed": false}"##;
         let fi = serde_json::from_str::<RelativeFileItem>(s)?;
         assert_eq!(fi.get_len(), 5);
 

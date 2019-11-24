@@ -313,12 +313,19 @@ subcommands:
                 long: rsync-window
                 takes_value: true
                 required: false
-    - client-loop:
+    - client-push-loop:
         about: client side loop.
         args:
             - server-yml:
                 required: false
                 index: 1
+            - rsync-window:
+                long: rsync-window
+                takes_value: true
+                required: false
+    - server-receive-loop:
+        about: server side receive loop.
+        args:
             - rsync-window:
                 long: rsync-window
                 takes_value: true

@@ -26,6 +26,7 @@ mod mail;
 mod rustsync;
 mod protocol;
 
+
 #[macro_use]
 extern crate rusqlite;
 
@@ -54,6 +55,11 @@ fn main() -> Result<(), failure::Error> {
     let m: ArgMatches = app.get_matches();
     let app1 = App::from_yaml(yml);
     let console_log = m.is_present("console-log");
+
+    if let ("server-receive-loop", Some(_sub_matches)) = m.subcommand() {
+        command::server_loop::server_receive_loop()?;
+        return Ok(());
+    }
 
     if let ("get-file", Some(_sub_matches)) = m.subcommand() {
         let stdin = io::stdin();
@@ -181,12 +187,12 @@ fn main_entry<'a>(
             }
             command::sync_pull_dirs(&app_conf, server_yml)?;
         }
-        ("client-loop", Some(sub_matches)) => {
+        ("client-push-loop", Some(sub_matches)) => {
             let server_yml = sub_matches.value_of("server-yml");
             if server_yml.is_none() {
                 app_conf.progress_bar.take();
             }
-            command::client_loops(&app_conf, server_yml)?;
+            command::client_push_loops(&app_conf, server_yml)?;
         }
         ("sync-push-dirs", Some(sub_matches)) => {
             let server_yml = sub_matches.value_of("server-yml");

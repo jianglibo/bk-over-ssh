@@ -10,6 +10,7 @@ pub mod server;
 pub mod sha1_reader;
 pub mod string_path;
 pub mod writer_with_progress;
+pub mod channel_wrapper;
 
 pub use app_conf::{
     demo_app_conf, AppConf, AppRole, MailConf, MiniAppConf, ReadAppConfException, CONF_FILE_NAME,
