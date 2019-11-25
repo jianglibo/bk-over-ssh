@@ -33,6 +33,7 @@ pub fn archive_local(
             servers.len()
         );
     }
+    #[allow(clippy::suspicious_map)]
     servers
         .into_par_iter()
         .map(|(server, mut indicator)| {

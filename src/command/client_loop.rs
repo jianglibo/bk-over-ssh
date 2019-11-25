@@ -1,11 +1,9 @@
 use crate::actions;
-use crate::data_shape::{server, AppConf, Indicator, Server};
-use crate::db_accesses::{SqliteDbAccess, CountItemParam};
+use crate::data_shape::{server, AppConf};
+use crate::db_accesses::{SqliteDbAccess};
 use job_scheduler::{Job, JobScheduler};
 use r2d2_sqlite::SqliteConnectionManager;
-use rayon::prelude::*;
 use std::time::Duration;
-use log::*;
 
 use super::*;
 
@@ -21,9 +19,10 @@ pub fn client_push_loops_follow_archive(
     server_yml: Option<&str>,
     follow_archive: bool,
 ) -> Result<(), failure::Error> {
-    if app_conf.mini_app_conf.app_role != AppRole::PullHub {
+    if app_conf.mini_app_conf.app_role != Some(AppRole::PullHub) {
         bail!("only when app-role is PullHub can call sync_pull_dirs");
     }
+
     let (progress_bar_join_handler, server_indicator_pairs) =
         load_server_indicator_pairs(app_conf, server_yml)?;
 

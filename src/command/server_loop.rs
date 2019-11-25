@@ -1,7 +1,7 @@
-use std::io::{self};
-use crate::protocol::{ProtocolReader, TransferType, ServerYmlHeader, CopyOutHeader};
-use crate::data_shape::{ServerYml};
+use crate::data_shape::ServerYml;
+use crate::protocol::{ProtocolReader, ServerYmlHeader, TransferType};
 use dirs;
+use std::io::{self};
 
 /// how to determine the directories? it's in the user's home directory.
 
@@ -24,9 +24,8 @@ pub fn server_receive_loop() -> Result<(), failure::Error> {
                 let yml_header = ServerYmlHeader::parse(&mut protocol_reader)?;
                 let server_yml = serde_json::from_str::<ServerYml>(&yml_header.yml_string)?;
                 server_yml_op.replace(server_yml);
-
-            },
-            _ => panic!("unimplement transfer type.")
+            }
+            _ => panic!("unimplement transfer type."),
         }
     }
 

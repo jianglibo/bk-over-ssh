@@ -17,7 +17,8 @@ pub fn sync_push_dirs(
     server_yml: Option<&str>,
     force: bool,
 ) -> Result<(), failure::Error> {
-    if app_conf.mini_app_conf.app_role != AppRole::ActiveLeaf {
+    if app_conf.mini_app_conf.app_role != Some(AppRole::ActiveLeaf) {
+
         bail!("only when app-role is ActiveLeaf can call sync_push_dirs");
     }
     let (progress_bar_join_handler, server_indicator_pairs) =
@@ -128,7 +129,7 @@ pub fn sync_pull_dirs_follow_archive(
     server_yml: Option<&str>,
     follow_archive: bool,
 ) -> Result<(), failure::Error> {
-    if app_conf.mini_app_conf.app_role != AppRole::PullHub {
+    if app_conf.mini_app_conf.app_role != Some(AppRole::PullHub) {
         bail!("only when app-role is PullHub can call sync_pull_dirs");
     }
     let (progress_bar_join_handler, server_indicator_pairs) =

@@ -1,7 +1,7 @@
 use super::{HeaderParseError, ProtocolReader};
 use std::convert::TryInto;
 use std::fs;
-use std::io::{self, Read, StdinLock};
+use std::io::{Read};
 use std::path::Path;
 
 #[derive(Debug, PartialEq)]
@@ -68,7 +68,7 @@ impl ServerYmlHeader {
         Self { yml_string }
     }
 
-    pub fn into_bytes(&mut self) -> Vec<u8> {
+    pub fn as_bytes(&mut self) -> Vec<u8> {
         let mut v = Vec::new();
         v.insert(0, TransferType::ServerYml.to_u8());
         let bytes = self.yml_string.as_bytes();
@@ -114,7 +114,7 @@ impl CopyOutHeader {
         }
     }
 
-    pub fn into_bytes(&mut self) -> Vec<u8> {
+    pub fn as_bytes(&mut self) -> Vec<u8> {
         let mut v = Vec::new();
         v.insert(0, TransferType::CopyOut.to_u8());
         v.append(&mut self.content_len.to_be_bytes().to_vec());
@@ -170,7 +170,7 @@ impl CopyOutHeader {
 mod tests {
     use super::*;
     use failure;
-    use std::io::{self, Cursor, Read, StdinLock, Write};
+    use std::io::{Cursor, Write};
 
     #[test]
     fn t_parse_copy_out_header() -> Result<(), failure::Error> {
@@ -206,7 +206,7 @@ mod tests {
 
     #[test]
     fn t_parse_copy_out_header_1() -> Result<(), failure::Error> {
-        let mut curor = Cursor::new(CopyOutHeader::new(288, 5, "hello.txt").into_bytes());
+        let mut curor = Cursor::new(CopyOutHeader::new(288, 5, "hello.txt").as_bytes());
         curor.set_position(0);
 
         let mut pr = ProtocolReader::new(&mut curor);
@@ -228,7 +228,7 @@ mod tests {
 hello 
 world!
 "##;
-        let mut curor = Cursor::new(ServerYmlHeader::new(yml_string).into_bytes());
+        let mut curor = Cursor::new(ServerYmlHeader::new(yml_string).as_bytes());
         curor.set_position(0);
 
         let mut pr = ProtocolReader::new(&mut curor);

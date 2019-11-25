@@ -571,7 +571,7 @@ mod tests {
                     vec![it]
                 }
             })
-            .flat_map(|its| its)
+            .flatten()
             .filter_map(|line| db_access.insert_or_update_relative_file_item(line, false))
             .count();
         eprintln!("elapsed: {}", now.elapsed().as_secs());
@@ -707,7 +707,7 @@ mod tests {
         let db_access = tutil::create_a_sqlite_file_db(&db_dir)?;
 
         // after load to db, result in changed 3 items.
-        dir.load_relative_item_to_sqlite(&AppRole::PassiveLeaf, &db_access, false, 50000, ".sig", ".delta")?;
+        dir.load_relative_item_to_sqlite(Some(&AppRole::PassiveLeaf), &db_access, false, 50000, ".sig", ".delta")?;
 
         assert_eq!(db_access.count_directory()?, 1);
         assert_eq!(
@@ -734,7 +734,7 @@ mod tests {
 
 
         // if invoke successly again. we cannot get the result from changed field alone.
-        dir.load_relative_item_to_sqlite(&AppRole::PassiveLeaf, &db_access, false, 50000, ".sig", ".delta")?;
+        dir.load_relative_item_to_sqlite(Some(&AppRole::PassiveLeaf), &db_access, false, 50000, ".sig", ".delta")?;
 
         let mut c = 0;
         db_access.iterate_files_by_directory_changed_or_unconfirmed(|(file, _)| {
@@ -777,7 +777,7 @@ mod tests {
             assert_eq!(buf.as_str(), "abc")
         }
 
-        dir.load_relative_item_to_sqlite(&AppRole::PassiveLeaf, &db_access, false, 50000, ".sig", ".delta")?;
+        dir.load_relative_item_to_sqlite(Some(&AppRole::PassiveLeaf), &db_access, false, 50000, ".sig", ".delta")?;
 
         assert_eq!(db_access.count_directory()?, 1);
         assert_eq!(
@@ -809,7 +809,7 @@ mod tests {
         let db_dir = tutil::TestDir::new();
         let db_access = tutil::create_a_sqlite_file_db(&db_dir)?;
 
-        dir.load_relative_item_to_sqlite(&AppRole::PassiveLeaf, &db_access, false, 50000, ".sig", ".delta")?;
+        dir.load_relative_item_to_sqlite(Some(&AppRole::PassiveLeaf), &db_access, false, 50000, ".sig", ".delta")?;
         assert_eq!(
             db_access.count_relative_file_item(CountItemParam::default())?,
             4,

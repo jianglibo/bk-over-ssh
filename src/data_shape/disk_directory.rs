@@ -283,7 +283,7 @@ impl Directory {
     /// when as AppRole::ActiveLeaf use local_dir.
     pub fn load_relative_item<O>(
         &self,
-        app_role: &AppRole,
+        app_role: Option<&AppRole>,
         out: &mut O,
         skip_sha1: bool,
     ) -> Result<(), failure::Error>
@@ -291,22 +291,18 @@ impl Directory {
         O: io::Write,
     {
         trace!("load_relative_item, skip_sha1: {}", skip_sha1);
-        let dir_to_read = match app_role {
-            AppRole::PassiveLeaf => &self.remote_dir,
-            AppRole::ActiveLeaf => &self.local_dir,
-            _ => bail!(
-                "when invoking load_relative_item, got unsupported app role. {:?}",
-                app_role
-            ),
+        let dir_to_read = if let Some(app_role) = app_role {
+            match app_role {
+                AppRole::PassiveLeaf => &self.remote_dir,
+                AppRole::ActiveLeaf => &self.local_dir,
+                _ => bail!(
+                    "when invoking load_relative_item, got unsupported app role. {:?}",
+                    app_role
+                ),
+            }
+        } else {
+            bail!("no app_role when load_relative_item");
         };
-        // WalkDir::new(dir_to_read.as_path())
-        //     .follow_links(false)
-        //     .into_iter()
-        //     .filter_map(|e| e.ok())
-        //     .filter(|dir_entry| dir_entry.file_type().is_file())
-        //     .filter_map(|dir_entry| dir_entry.path().canonicalize().ok())
-        //     .filter_map(|disk_file_path_buf| self.match_path(disk_file_path_buf))
-        //     .filter_map(|absolute_path_buf| RelativeFileItem::from_path(dir_to_read, absolute_path_buf, skip_sha1))
         self.relative_item_iter(dir_to_read.clone(), skip_sha1)
             .for_each(|rfi| match serde_json::to_string(&rfi) {
                 Ok(line) => {
@@ -343,7 +339,7 @@ impl Directory {
                 )
             })
             .filter_map(move |absolute_path_buf| {
-                RelativeFileItem::from_path(&dir_to_read, absolute_path_buf, skip_sha1.clone())
+                RelativeFileItem::from_path(&dir_to_read, absolute_path_buf, skip_sha1)
             })
     }
 
@@ -376,7 +372,7 @@ impl Directory {
                     &dir_to_read,
                     absolute_path_buf,
                     &app_instance_id,
-                    skip_sha1.clone(),
+                    skip_sha1,
                 )
             })
     }
@@ -387,13 +383,17 @@ impl Directory {
         vec![]
     }
 
-    pub fn count_local_files(&self, app_role: &AppRole) -> Result<u64, failure::Error> {
-        let dir_to_read = match app_role {
-            AppRole::ReceiveHub => &self.remote_dir,
-            _ => bail!(
-                "when invoking load_relative_item_to_sqlite, got unsupported app role. {:?}",
-                app_role
-            ),
+    pub fn count_local_files(&self, app_role: Option<&AppRole>) -> Result<u64, failure::Error> {
+        let dir_to_read = if let Some(app_role) = app_role {
+            match app_role {
+                AppRole::ReceiveHub => &self.remote_dir,
+                _ => bail!(
+                    "when invoking load_relative_item_to_sqlite, got unsupported app role. {:?}",
+                    app_role
+                ),
+            }
+        } else {
+            return Ok(0);
         };
         let file_num = WalkDir::new(dir_to_read.as_path())
             .follow_links(false)
@@ -413,7 +413,7 @@ impl Directory {
     /// This iteration doesn't pick out deleted items!!!
     pub fn load_relative_item_to_sqlite<M, D>(
         &self,
-        app_role: &AppRole,
+        app_role: Option<&AppRole>,
         db_access: &D,
         skip_sha1: bool,
         sql_batch_size: usize,
@@ -430,13 +430,17 @@ impl Directory {
             sql_batch_size
         );
 
-        let dir_to_read = match app_role {
-            AppRole::PassiveLeaf | AppRole::ReceiveHub => &self.remote_dir,
-            AppRole::ActiveLeaf => &self.local_dir,
-            _ => bail!(
-                "when invoking load_relative_item_to_sqlite, got unsupported app role. {:?}",
-                app_role
-            ),
+        let dir_to_read = if let Some(app_role) = app_role {
+            match app_role {
+                AppRole::PassiveLeaf | AppRole::ReceiveHub => &self.remote_dir,
+                AppRole::ActiveLeaf => &self.local_dir,
+                _ => bail!(
+                    "when invoking load_relative_item_to_sqlite, got unsupported app role. {:?}",
+                    app_role
+                ),
+            }
+        } else {
+            bail!("no app_role when load_relative_item_to_sqlite");
         };
 
         let base_path = dir_to_read.as_str();

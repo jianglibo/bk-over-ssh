@@ -222,14 +222,8 @@ pub fn change_file_content(file_path: impl AsRef<Path>) -> Result<(), failure::E
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::log_util;
-    use crate::develope::tutil;
-    use log::*;
-    use std::{fs};
     use failure;
-    use std::io::{self, Read};
-    use std::sync::mpsc::channel;
-    use std::thread;
+    use std::io::{self};
     use bytes::{BytesMut, BufMut, Buf, Bytes};
     use bytes::buf::IntoBuf;
 

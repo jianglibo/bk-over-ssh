@@ -6,7 +6,7 @@ use super::{
 };
 use crate::actions::{copy_a_file_item, copy_a_file_sftp, copy_file, ssh_util, SyncDirReport};
 use crate::db_accesses::{scheduler_util, DbAccess};
-use crate::protocol::{ProtocolReader, ServerYmlHeader, CopyOutHeader, TransferType};
+use crate::protocol::{ProtocolReader, ServerYmlHeader, TransferType};
 use base64;
 use bzip2::write::BzEncoder;
 use bzip2::Compression;
@@ -226,39 +226,35 @@ where
             fs::create_dir_all(&directories_dir).expect("directories_dir should create.");
         }
 
-        match app_conf.app_role {
-            AppRole::PullHub => {
-                server_yml.directories.iter_mut().try_for_each(|d| {
-                    d.compile_patterns()
-                        .expect("compile_patterns should succeeded.");
-                    d.normalize_pull_hub_sync(directories_dir.as_path())
-                })?;
-            }
-            AppRole::ActiveLeaf => {
-                let remote_home = server_yml.remote_exec.as_str();
-                server_yml.directories.iter_mut().try_for_each(|d| {
-                    d.compile_patterns()
-                        .expect("compile_patterns should succeeded.");
-                    d.normalize_active_leaf_sync(
-                        directories_dir.as_path(),
-                        app_conf.app_instance_id.as_str(),
-                        remote_home,
-                    )
-                })?;
-            }
-            AppRole::PassiveLeaf => {
-                // compiling patterns is enough.
-                server_yml
-                    .directories
-                    .iter_mut()
-                    .try_for_each(|d| d.compile_patterns())?;
-            }
-            AppRole::ReceiveHub => {
-                server_yml.directories.iter_mut().try_for_each(|d| {
-                    d.compile_patterns()
-                        .expect("compile_patterns should succeeded.");
-                    d.normalize_receive_hub_sync(directories_dir.as_path())
-                })?;
+        server_yml.directories.iter_mut().for_each(|d| {
+            d.compile_patterns()
+                .expect("compile_patterns should succeeded.")
+        });
+
+        if let Some(app_role) = app_conf.app_role.as_ref() {
+            match app_role {
+                AppRole::PullHub => {
+                    server_yml
+                        .directories
+                        .iter_mut()
+                        .try_for_each(|d| d.normalize_pull_hub_sync(directories_dir.as_path()))?;
+                }
+                AppRole::ActiveLeaf => {
+                    let remote_home = server_yml.remote_exec.as_str();
+                    server_yml.directories.iter_mut().try_for_each(|d| {
+                        d.normalize_active_leaf_sync(
+                            directories_dir.as_path(),
+                            app_conf.app_instance_id.as_str(),
+                            remote_home,
+                        )
+                    })?;
+                }
+                AppRole::ReceiveHub => {
+                    server_yml.directories.iter_mut().try_for_each(|d| {
+                        d.normalize_receive_hub_sync(directories_dir.as_path())
+                    })?;
+                }
+                _ => (),
             }
         }
 
@@ -296,7 +292,7 @@ where
         self.server_yml
             .directories
             .iter()
-            .filter_map(|dir| dir.count_local_files(&self.app_conf.app_role).ok())
+            .filter_map(|dir| dir.count_local_files(self.app_conf.app_role.as_ref()).ok())
             .count() as u64
     }
     /// For app_role is ReceiveHub, remote exec is from user's home directory.
@@ -305,12 +301,16 @@ where
     }
 
     pub fn count_remote_files(&self) -> Result<u64, failure::Error> {
-        let app_role = match self.app_conf.app_role {
-            AppRole::ActiveLeaf => AppRole::ReceiveHub,
-            _ => bail!(
-                "create_remote_files: unsupported app role. {:?}",
-                self.app_conf.app_role
-            ),
+        let app_role = if let Some(app_role) = self.app_conf.app_role.as_ref() {
+            match app_role {
+                AppRole::ActiveLeaf => AppRole::ReceiveHub,
+                _ => bail!(
+                    "create_remote_files: unsupported app role. {:?}",
+                    self.app_conf.app_role
+                ),
+            }
+        } else {
+            bail!("no app_role whne count_remote_files");
         };
         let mut channel: ssh2::Channel = self.create_channel()?;
         let cmd = format!(
@@ -337,13 +337,17 @@ where
     /// The passive leaf side of the application will try to find the configuration in the passive-leaf-conf folder which located in the same folder as the executable.
     /// The server yml file should located in the data/passive-leaf-conf/{self.app_conf.app_instance_id}.yml
     pub fn get_remote_server_yml(&self) -> String {
-        let conf_folder = match self.app_conf.app_role {
-            AppRole::PullHub => app_conf::PASSIVE_LEAF_CONF,
-            AppRole::ActiveLeaf => app_conf::RECEIVE_SERVERS_CONF,
-            _ => panic!(
-                "get_remote_server_yml got unsupported app role. {:?}",
-                self.app_conf.app_role
-            ),
+        let conf_folder = if let Some(app_role) = self.app_conf.app_role.as_ref() {
+            match app_role {
+                AppRole::PullHub => app_conf::PASSIVE_LEAF_CONF,
+                AppRole::ActiveLeaf => app_conf::RECEIVE_SERVERS_CONF,
+                _ => panic!(
+                    "get_remote_server_yml got unsupported app role. {:?}",
+                    self.app_conf.app_role
+                ),
+            }
+        } else {
+            panic!("no app_role when get_remote_server_yml");
         };
         let yml = format!(
             "/data/{}/{}.yml",
@@ -694,12 +698,16 @@ where
     /// We temporarily save file list file at 'file_list_file' property of server.yml.
     pub fn list_remote_file_sftp(&self) -> Result<PathBuf, failure::Error> {
         let mut channel: ssh2::Channel = self.create_channel()?;
-        let app_role = match self.app_conf.app_role {
-            AppRole::PullHub => AppRole::PassiveLeaf,
-            _ => bail!(
-                "list_remote_file_sftp: unsupported app role. {:?}",
-                self.app_conf.app_role
-            ),
+        let app_role = if let Some(app_role) = self.app_conf.app_role.as_ref() {
+            match app_role {
+                AppRole::PullHub => AppRole::PassiveLeaf,
+                _ => bail!(
+                    "list_remote_file_sftp: unsupported app role. {:?}",
+                    self.app_conf.app_role
+                ),
+            }
+        } else {
+            bail!("no app_role when list_remote_file_sftp");
         };
         let cmd = format!(
             "{} {} --app-instance-id {} --app-role {} list-local-files {} --out {}",
@@ -778,12 +786,16 @@ where
         db_type: impl AsRef<str>,
         force: bool,
     ) -> Result<(), failure::Error> {
-        let app_role = match self.app_conf.app_role {
-            AppRole::PullHub => AppRole::PassiveLeaf,
-            _ => bail!(
-                "create_remote_db: unsupported app role. {:?}",
-                self.app_conf.app_role
-            ),
+        let app_role = if let Some(app_role) = self.app_conf.app_role.as_ref() {
+            match app_role {
+                AppRole::PullHub => AppRole::PassiveLeaf,
+                _ => bail!(
+                    "create_remote_db: unsupported app role. {:?}",
+                    self.app_conf.app_role
+                ),
+            }
+        } else {
+            bail!("no app_role when create_remote_db");
         };
         let mut channel: ssh2::Channel = self.create_channel()?;
         let db_type = db_type.as_ref();
@@ -810,9 +822,13 @@ where
 
     pub fn confirm_remote_sync(&self) -> Result<(), failure::Error> {
         let mut channel: ssh2::Channel = self.create_channel()?;
-        let app_role = match self.app_conf.app_role {
-            AppRole::PullHub => AppRole::PassiveLeaf,
-            _ => bail!("there is no need to confirm remote sync."),
+        let app_role = if let Some(app_role) = self.app_conf.app_role.as_ref() {
+            match app_role {
+                AppRole::PullHub => AppRole::PassiveLeaf,
+                _ => bail!("there is no need to confirm remote sync."),
+            }
+        } else {
+            bail!("no app_role when confirm_remote_sync");
         };
         let cmd = format!(
             "{} --app-instance-id {} --app-role {} confirm-local-sync {}",
@@ -849,7 +865,11 @@ where
                 "--enable-sha1"
             },
             self.app_conf.app_instance_id,
-            self.app_conf.app_role.to_str(),
+            self.app_conf
+                .app_role
+                .as_ref()
+                .unwrap_or(&AppRole::PullHub)
+                .to_str(),
             if no_db { " --no-db" } else { "" },
             self.get_remote_server_yml(),
         );
@@ -1253,14 +1273,20 @@ where
 
         let mut protocol_reader = ProtocolReader::new(&mut channel);
         loop {
-            let mut server_yml = ServerYmlHeader::from_path(self.server_yml.yml_location.as_ref().expect("yml_location should exist.").as_path());
-            protocol_reader.get_inner().write_all(server_yml.into_bytes().as_slice())?;
+            let mut server_yml = ServerYmlHeader::from_path(
+                self.server_yml
+                    .yml_location
+                    .as_ref()
+                    .expect("yml_location should exist.")
+                    .as_path(),
+            );
+            protocol_reader
+                .get_inner()
+                .write_all(server_yml.as_bytes().as_slice())?;
             // after sent server_yml, will receive file item repeatly, until receive a RepeatDone message.
             loop {
                 match protocol_reader.read_type_byte()? {
-                    TransferType::FileItem => {
-
-                    },
+                    TransferType::FileItem => {}
                     TransferType::RepeatDone => break,
                     _ => panic!("unexpect transfer type."),
                 }
@@ -1278,7 +1304,7 @@ where
             for one_dir in self.server_yml.directories.iter() {
                 trace!("start load directory: {:?}", one_dir);
                 one_dir.load_relative_item_to_sqlite(
-                    &self.app_conf.app_role,
+                    self.app_conf.app_role.as_ref(),
                     db_access,
                     self.is_skip_sha1(),
                     self.server_yml.sql_batch_size,
@@ -1316,7 +1342,11 @@ where
             }
         } else {
             for one_dir in self.server_yml.directories.iter() {
-                one_dir.load_relative_item(&self.app_conf.app_role, out, self.is_skip_sha1())?;
+                one_dir.load_relative_item(
+                    self.app_conf.app_role.as_ref(),
+                    out,
+                    self.is_skip_sha1(),
+                )?;
             }
         }
         Ok(())
@@ -1336,7 +1366,6 @@ mod tests {
     use std::fs;
     use std::io::{self, Write};
     use std::net::TcpStream;
-
 
     fn log() {
         log_util::setup_logger_detail(
@@ -1409,7 +1438,7 @@ mod tests {
         app_conf.mini_app_conf.skip_cron = true;
         app_conf.mini_app_conf.verbose = true;
 
-        assert!(app_conf.mini_app_conf.app_role == AppRole::ActiveLeaf);
+        assert!(app_conf.mini_app_conf.app_role == Some(AppRole::ActiveLeaf));
         let mut server = tutil::load_demo_server_sqlite(&app_conf, None);
 
         let db_file = server.get_db_file();
@@ -1472,7 +1501,7 @@ mod tests {
         app_conf.mini_app_conf.skip_cron = true;
         app_conf.mini_app_conf.verbose = true;
 
-        assert!(app_conf.mini_app_conf.app_role == AppRole::PullHub);
+        assert!(app_conf.mini_app_conf.app_role == Some(AppRole::PullHub));
         let mut server = tutil::load_demo_server_sqlite(&app_conf, None);
 
         // it's useless. because the db file is from remote server's perspective.
@@ -1593,7 +1622,7 @@ mod tests {
         };
 
         one_dir.compile_patterns()?;
-        one_dir.load_relative_item(&AppRole::PassiveLeaf, &mut cur, true)?;
+        one_dir.load_relative_item(Some(&AppRole::PassiveLeaf), &mut cur, true)?;
         let num = tutil::count_cursor_lines(&mut cur);
         assert_eq!(num, 8);
         tutil::print_cursor_lines(&mut cur);
@@ -1607,7 +1636,7 @@ mod tests {
 
         one_dir.compile_patterns()?;
         assert!(one_dir.excludes_patterns.is_none());
-        one_dir.load_relative_item(&AppRole::PassiveLeaf, &mut cur, true)?;
+        one_dir.load_relative_item(Some(&AppRole::PassiveLeaf), &mut cur, true)?;
         let num = tutil::count_cursor_lines(&mut cur);
         assert_eq!(num, 2); // one dir line, one file line.
 
@@ -1620,7 +1649,7 @@ mod tests {
 
         one_dir.compile_patterns()?;
         assert!(one_dir.includes_patterns.is_none());
-        one_dir.load_relative_item(&AppRole::PassiveLeaf, &mut cur, true)?;
+        one_dir.load_relative_item(Some(&AppRole::PassiveLeaf), &mut cur, true)?;
         let num = tutil::count_cursor_lines(&mut cur);
         assert_eq!(num, 7, "if exclude 1 file there should 7 left.");
 
@@ -1633,7 +1662,7 @@ mod tests {
 
         one_dir.compile_patterns()?;
         assert!(one_dir.includes_patterns.is_none());
-        one_dir.load_relative_item(&AppRole::PassiveLeaf, &mut cur, true)?;
+        one_dir.load_relative_item(Some(&AppRole::PassiveLeaf), &mut cur, true)?;
         let num = tutil::count_cursor_lines(&mut cur);
         assert_eq!(num, 7, "if exclude logs file there should 7 left.");
 

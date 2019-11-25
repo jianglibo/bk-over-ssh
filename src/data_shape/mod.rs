@@ -10,7 +10,6 @@ pub mod server;
 pub mod sha1_reader;
 pub mod string_path;
 pub mod writer_with_progress;
-pub mod channel_wrapper;
 pub mod push_file_item_directory;
 
 pub use app_conf::{

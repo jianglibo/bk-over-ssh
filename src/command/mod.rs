@@ -117,7 +117,7 @@ pub fn load_server_yml_by_name(
 
 pub fn process_app_config<M, D>(
     conf: Option<&str>,
-    app_role_op: Option<AppRole>,
+    app_role_op: Option<&AppRole>,
     re_try: bool,
 ) -> Result<AppConf<M, D>, failure::Error>
 where
@@ -128,7 +128,7 @@ where
     message_pb.enable_steady_tick(200);
     let app_conf = match AppConf::guess_conf_file(
         conf,
-        app_role_op.as_ref().cloned().unwrap_or(AppRole::PullHub),
+        app_role_op,
     ) {
         Ok(cfg) => cfg,
         Err(ReadAppConfException::SerdeDeserializeFailed(conf_file_path)) | Err(ReadAppConfException::AppConfFileNotExist(conf_file_path))=> {

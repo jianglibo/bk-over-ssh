@@ -76,10 +76,7 @@ impl PushPrimaryFileItem {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::develope::tutil;
     use crate::log_util;
-    use std::fs;
-    use std::path::Path;
     use crate::data_shape::{Directory};
 
     fn log() {
@@ -95,6 +92,7 @@ mod tests {
 
     #[test]
     fn t_push_file_directories() -> Result<(), failure::Error> {
+        log();
         let yml = r##"
 remote_dir: ~
 local_dir: E:/ws/bk-over-ssh/fixtures/a-dir
@@ -112,7 +110,7 @@ excludes:
         assert!(d.includes_patterns.is_none());
         assert!(d.excludes_patterns.is_none());
 
-        d.compile_patterns();
+        d.compile_patterns()?;
 
         assert!(d.includes_patterns.is_some());
         assert!(d.excludes_patterns.is_some());

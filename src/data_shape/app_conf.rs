@@ -141,7 +141,7 @@ pub struct MiniAppConf {
     pub skip_sha1: bool,
     pub archive_cmd: Vec<String>,
     pub app_instance_id: String,
-    pub app_role: AppRole,
+    pub app_role: Option<AppRole>,
     pub verbose: bool,
     pub console_log: bool,
     pub as_service: bool,
@@ -207,7 +207,7 @@ where
             skip_cron: false,
             buf_len: None,
             archive_cmd: Vec::new(),
-            app_role,
+            app_role: Some(app_role),
             verbose: false,
             console_log: false,
             as_service: false,
@@ -247,9 +247,11 @@ where
     }
 
     /// If parse app configuration file failed, move the failed configuration file to bak. recreate a fresh new one.
+    /// full_data_dir is default to ./data, servers_conf_dir is default to full_data_dir/(app_role). This means app_role is a must to find server configuration file.
+    /// If we can fall back to find configuration file under full_data_dir then app_rols will bacame optional.
     fn read_app_conf(
         file: impl AsRef<Path>,
-        app_role: AppRole,
+        app_role: Option<&AppRole>,
     ) -> Result<AppConf<M, D>, ReadAppConfException> {
         let file = file.as_ref();
         if !file.exists() {
@@ -286,19 +288,23 @@ where
 
                         let log_full_path = Path::new(&log_full_path).to_path_buf();
 
-                        let servers_conf_dir = match app_role {
-                            AppRole::PullHub => {
-                                data_dir_full_path.as_path().join(PULL_SERVERS_CONF)
+                        let servers_conf_dir = if let Some(app_role) = app_role {
+                            match app_role {
+                                AppRole::PullHub => {
+                                    data_dir_full_path.as_path().join(PULL_SERVERS_CONF)
+                                }
+                                AppRole::ActiveLeaf => {
+                                    data_dir_full_path.as_path().join(ACTIVE_LEAF_CONF)
+                                }
+                                AppRole::PassiveLeaf => {
+                                    data_dir_full_path.as_path().join(PASSIVE_LEAF_CONF)
+                                }
+                                AppRole::ReceiveHub => {
+                                    data_dir_full_path.as_path().join(RECEIVE_SERVERS_CONF)
+                                }
                             }
-                            AppRole::ActiveLeaf => {
-                                data_dir_full_path.as_path().join(ACTIVE_LEAF_CONF)
-                            }
-                            AppRole::PassiveLeaf => {
-                                data_dir_full_path.as_path().join(PASSIVE_LEAF_CONF)
-                            }
-                            AppRole::ReceiveHub => {
-                                data_dir_full_path.as_path().join(RECEIVE_SERVERS_CONF)
-                            }
+                        } else {
+                            data_dir_full_path.clone()
                         };
 
                         if !servers_conf_dir.exists() {
@@ -330,7 +336,7 @@ where
                                 skip_cron: false,
                                 buf_len: None,
                                 archive_cmd,
-                                app_role,
+                                app_role: app_role.cloned(),
                                 verbose: false,
                                 console_log: false,
                                 as_service: false,
@@ -375,7 +381,7 @@ where
     /// the app role must be known at this point.
     pub fn guess_conf_file(
         app_conf_file: Option<&str>,
-        app_role: AppRole,
+        app_role: Option<&AppRole>,
     ) -> Result<AppConf<M, D>, ReadAppConfException> {
         let app_conf_file = if let Some(app_conf_file) = app_conf_file {
             if Path::new(app_conf_file).exists() {
@@ -512,11 +518,15 @@ where
 
         let data_dir = self.data_dir_full_path.as_path();
 
-        let servers_data_dir = match self.mini_app_conf.app_role {
-            AppRole::PullHub => data_dir.join(PULL_SERVERS_DATA),
-            AppRole::ActiveLeaf => data_dir.join(ACTIVE_LEAF_DATA),
-            AppRole::PassiveLeaf => data_dir.join(PASSIVE_LEAF_DATA),
-            AppRole::ReceiveHub => data_dir.join(RECEIVE_SERVERS_DATA),
+        let servers_data_dir = if let Some(app_role) = self.mini_app_conf.app_role.as_ref() {
+            match app_role {
+                AppRole::PullHub => data_dir.join(PULL_SERVERS_DATA),
+                AppRole::ActiveLeaf => data_dir.join(ACTIVE_LEAF_DATA),
+                AppRole::PassiveLeaf => data_dir.join(PASSIVE_LEAF_DATA),
+                AppRole::ReceiveHub => data_dir.join(RECEIVE_SERVERS_DATA),
+            }
+        } else {
+            data_dir.to_path_buf()
         };
 
         if !servers_data_dir.exists() {
@@ -527,9 +537,15 @@ where
         // But for passive_leaf which host name it is?
         // We must use command line app_instance_id to override the value in the app_conf_yml,
         // Then use app_instance_id as my_dir.
-        let my_dir = match self.mini_app_conf.app_role {
-            AppRole::PassiveLeaf | AppRole::ReceiveHub => servers_data_dir.join(self.inner.app_instance_id.as_str()),
-            _ => servers_data_dir.join(&server_yml.host),
+        let my_dir = if let Some(app_role) = self.mini_app_conf.app_role.as_ref() {
+            match app_role {
+                AppRole::PassiveLeaf | AppRole::ReceiveHub => {
+                    servers_data_dir.join(self.inner.app_instance_id.as_str())
+                }
+                _ => servers_data_dir.join(&server_yml.host),
+            }
+        } else {
+            servers_data_dir.join(&server_yml.host)
         };
 
         let mut server = Server::new(self.mini_app_conf.clone(), my_dir, server_yml)?;

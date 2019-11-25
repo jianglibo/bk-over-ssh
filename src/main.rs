@@ -23,9 +23,8 @@ mod db_accesses;
 mod develope;
 mod log_util;
 mod mail;
-mod rustsync;
 mod protocol;
-
+mod rustsync;
 
 #[macro_use]
 extern crate rusqlite;
@@ -66,8 +65,10 @@ fn main() -> Result<(), failure::Error> {
         let stdout = io::stdout();
         let mut stdin_handler = stdin.lock();
         let mut stdout_handler = stdout.lock();
-        
-        let mut f = fs::OpenOptions::new().read(true).open("E:/ws/bk-over-ssh/fixtures/qrcode.png")?;
+
+        let mut f = fs::OpenOptions::new()
+            .read(true)
+            .open("E:/ws/bk-over-ssh/fixtures/qrcode.png")?;
         io::copy(&mut f, &mut io::stdout())?;
         return Ok(());
     }
@@ -87,15 +88,13 @@ fn main() -> Result<(), failure::Error> {
 
     let app_role = m
         .value_of("app-role")
-        .expect("app-role is a must.")
-        .parse::<AppRole>()
-        .map_err(failure::err_msg)?;
+        .map(|rn| rn.parse::<AppRole>().expect("app-role is valid."));
 
     let conf = m.value_of("conf");
     // we always open db connection unless no-db parameter provided.
     let mut app_conf = match command::process_app_config::<SqliteConnectionManager, SqliteDbAccess>(
         conf,
-        Some(app_role),
+        app_role.as_ref(),
         false,
     ) {
         Ok(app_conf) => app_conf,
