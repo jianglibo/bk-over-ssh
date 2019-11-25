@@ -5,7 +5,7 @@ use std::io::prelude::{BufRead, Read};
 use std::iter::Iterator;
 use std::sync::{Arc, Mutex};
 
-/// Represents a file item.
+/// Like a disk directory, but it contains PrimaryFileItem.
 #[derive(Debug)]
 pub struct PrimaryFileItem {
     pub local_dir: Arc<SlashPath>,

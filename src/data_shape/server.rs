@@ -97,36 +97,36 @@ fn accumulate_file_process(
 
 pub fn push_a_file_item_sftp(
     sftp: &ssh2::Sftp,
-    file_item: PrimaryFileItem,
+    file_item_primary: PrimaryFileItem,
     buf: &mut [u8],
     progress_bar: &mut Indicator,
 ) -> FileItemProcessResult {
     progress_bar.init_item_pb_style_1(
-        file_item.get_local_path().as_str(),
-        file_item.relative_item.get_len(),
+        file_item_primary.get_local_path().as_str(),
+        file_item_primary.relative_item.get_len(),
     );
     trace!(
         "staring create remote file: {}.",
-        file_item.get_remote_path()
+        file_item_primary.get_remote_path()
     );
-    match sftp.create(file_item.get_remote_path().as_path()) {
-        Ok(mut file) => {
-            let local_file_path = file_item.get_local_path();
+    match sftp.create(file_item_primary.get_remote_path().as_path()) {
+        Ok(mut ssh_file) => {
+            let local_file_path = file_item_primary.get_local_path();
             trace!(
                 "coping {} to {}.",
                 local_file_path,
-                file_item.get_remote_path()
+                file_item_primary.get_remote_path()
             );
             match local_file_path.get_local_file_reader() {
                 Ok(mut local_reader) => {
                     match copy_file::copy_stream_with_pb(
                         &mut local_reader,
-                        &mut file,
+                        &mut ssh_file,
                         buf,
                         progress_bar,
                     ) {
                         Ok(length) => {
-                            if length != file_item.get_relative_item().get_len() {
+                            if length != file_item_primary.get_relative_item().get_len() {
                                 FileItemProcessResult::LengthNotMatch(local_file_path.get_slash())
                             } else {
                                 FileItemProcessResult::Succeeded(
@@ -149,7 +149,7 @@ pub fn push_a_file_item_sftp(
             error!("sftp create failed: {:?}", err);
             if err.code() == 2 {
                 error!("sftp create failed return code 2.");
-                FileItemProcessResult::MayBeNoParentDir(file_item)
+                FileItemProcessResult::MayBeNoParentDir(file_item_primary)
             } else {
                 FileItemProcessResult::SftpOpenFailed
             }
