@@ -11,6 +11,7 @@ pub mod sha1_reader;
 pub mod string_path;
 pub mod writer_with_progress;
 pub mod channel_wrapper;
+pub mod push_file_item_directory;
 
 pub use app_conf::{
     demo_app_conf, AppConf, AppRole, MailConf, MiniAppConf, ReadAppConfException, CONF_FILE_NAME,
@@ -21,6 +22,7 @@ pub use file_item_map::{FileItemMap, FileItemProcessResult, FileItemProcessResul
 pub use file_item_directory::{FileItemDirectory, FileItemDirectories, PrimaryFileItem};
 pub use indicator::{Indicator, PbProperties};
 pub use relative_file_item::{RelativeFileItem};
+pub use push_file_item_directory::{PushPrimaryFileItem};
 pub use server::{Server, ServerYml};
 pub use sha1_reader::Sha1Reader;
 pub use string_path::SlashPath;

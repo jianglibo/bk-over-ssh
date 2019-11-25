@@ -1,6 +1,7 @@
 use super::{
+    app_conf,
     string_path::{self, SlashPath},
-    AppRole, RelativeFileItem,app_conf,
+    AppRole, PushPrimaryFileItem, RelativeFileItem,
 };
 use crate::db_accesses::{DbAccess, RelativeFileItemInDb};
 use glob::Pattern;
@@ -11,6 +12,45 @@ use serde::{Deserialize, Serialize};
 use std::io;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
+
+/// if has includes get includes first.
+/// if has excludes exclude files.
+fn match_path(
+    path: PathBuf,
+    includes_patterns: Option<&Vec<Pattern>>,
+    excludes_patterns: Option<&Vec<Pattern>>,
+) -> Option<PathBuf> {
+    let has_includes = includes_patterns.is_some();
+    let keep_file = if has_includes {
+        includes_patterns
+            .unwrap()
+            .iter()
+            .any(|ptn| ptn.matches_path(&path))
+    } else {
+        true
+    };
+
+    if !keep_file {
+        return None;
+    }
+
+    let has_excludes = excludes_patterns.is_some();
+
+    let keep_file = if has_excludes {
+        !excludes_patterns
+            .unwrap()
+            .iter()
+            .any(|p| p.matches_path(&path))
+    } else {
+        true
+    };
+
+    if keep_file {
+        Some(path)
+    } else {
+        None
+    }
+}
 
 #[derive(Deserialize, Serialize, Default, Debug)]
 pub struct Directory {
@@ -50,39 +90,44 @@ impl Directory {
     /// if has includes get includes first.
     /// if has excludes exclude files.
     pub fn match_path(&self, path: PathBuf) -> Option<PathBuf> {
-        let has_includes = self.includes_patterns.is_some();
-        let keep_file = if has_includes {
-            self.includes_patterns
-                .as_ref()
-                .unwrap()
-                .iter()
-                .any(|ptn| ptn.matches_path(&path))
-        } else {
-            true
-        };
+        match_path(
+            path,
+            self.includes_patterns.as_ref(),
+            self.excludes_patterns.as_ref(),
+        )
+        // let has_includes = self.includes_patterns.is_some();
+        // let keep_file = if has_includes {
+        //     self.includes_patterns
+        //         .as_ref()
+        //         .unwrap()
+        //         .iter()
+        //         .any(|ptn| ptn.matches_path(&path))
+        // } else {
+        //     true
+        // };
 
-        if !keep_file {
-            return None;
-        }
+        // if !keep_file {
+        //     return None;
+        // }
 
-        let has_excludes = self.excludes_patterns.is_some();
+        // let has_excludes = self.excludes_patterns.is_some();
 
-        let keep_file = if has_excludes {
-            !self
-                .excludes_patterns
-                .as_ref()
-                .unwrap()
-                .iter()
-                .any(|p| p.matches_path(&path))
-        } else {
-            true
-        };
+        // let keep_file = if has_excludes {
+        //     !self
+        //         .excludes_patterns
+        //         .as_ref()
+        //         .unwrap()
+        //         .iter()
+        //         .any(|p| p.matches_path(&path))
+        // } else {
+        //     true
+        // };
 
-        if keep_file {
-            Some(path)
-        } else {
-            None
-        }
+        // if keep_file {
+        //     Some(path)
+        // } else {
+        //     None
+        // }
     }
     /// When includes is empty, includes_patterns will be None, excludes is the same.
     pub fn compile_patterns(&mut self) -> Result<(), failure::Error> {
@@ -165,7 +210,9 @@ impl Directory {
             self.remote_dir.set_slash(self.local_dir.get_last_name());
         }
 
-        let remote_path = SlashPath::new(remote_exec).parent().expect("remote_exec parent should exist")
+        let remote_path = SlashPath::new(remote_exec)
+            .parent()
+            .expect("remote_exec parent should exist")
             .join("data")
             .join(app_conf::RECEIVE_SERVERS_DATA)
             .join(app_instance_id)
@@ -252,14 +299,15 @@ impl Directory {
                 app_role
             ),
         };
-        WalkDir::new(dir_to_read.as_path())
-            .follow_links(false)
-            .into_iter()
-            .filter_map(|e| e.ok())
-            .filter(|dir_entry| dir_entry.file_type().is_file())
-            .filter_map(|dir_entry| dir_entry.path().canonicalize().ok())
-            .filter_map(|path_buf| self.match_path(path_buf))
-            .filter_map(|path_buf| RelativeFileItem::from_path(dir_to_read, path_buf, skip_sha1))
+        // WalkDir::new(dir_to_read.as_path())
+        //     .follow_links(false)
+        //     .into_iter()
+        //     .filter_map(|e| e.ok())
+        //     .filter(|dir_entry| dir_entry.file_type().is_file())
+        //     .filter_map(|dir_entry| dir_entry.path().canonicalize().ok())
+        //     .filter_map(|disk_file_path_buf| self.match_path(disk_file_path_buf))
+        //     .filter_map(|absolute_path_buf| RelativeFileItem::from_path(dir_to_read, absolute_path_buf, skip_sha1))
+        self.relative_item_iter(dir_to_read.clone(), skip_sha1)
             .for_each(|rfi| match serde_json::to_string(&rfi) {
                 Ok(line) => {
                     if let Err(err) = writeln!(out, "{}", line) {
@@ -271,6 +319,66 @@ impl Directory {
                 }
             });
         Ok(())
+    }
+
+    pub fn relative_item_iter(
+        &self,
+        dir_to_read: SlashPath,
+        skip_sha1: bool,
+    ) -> impl Iterator<Item = RelativeFileItem> + '_ {
+        let includes_patterns = self.includes_patterns.clone();
+        let excludes_patterns = self.excludes_patterns.clone();
+
+        WalkDir::new(dir_to_read.as_path())
+            .follow_links(false)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|dir_entry| dir_entry.file_type().is_file())
+            .filter_map(|dir_entry| dir_entry.path().canonicalize().ok())
+            .filter_map(move |disk_file_path_buf| {
+                match_path(
+                    disk_file_path_buf,
+                    includes_patterns.as_ref(),
+                    excludes_patterns.as_ref(),
+                )
+            })
+            .filter_map(move |absolute_path_buf| {
+                RelativeFileItem::from_path(&dir_to_read, absolute_path_buf, skip_sha1.clone())
+            })
+    }
+
+    pub fn push_file_item_iter(
+        &self,
+        app_instance_id: impl AsRef<str>,
+        dir_to_read: &SlashPath,
+        skip_sha1: bool,
+    ) -> impl Iterator<Item = PushPrimaryFileItem> + '_ {
+        let includes_patterns = self.includes_patterns.clone();
+        let excludes_patterns = self.excludes_patterns.clone();
+        let app_instance_id = app_instance_id.as_ref().to_string();
+        let dir_to_read = dir_to_read.clone();
+
+        WalkDir::new(dir_to_read.as_path())
+            .follow_links(false)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|dir_entry| dir_entry.file_type().is_file())
+            .filter_map(|dir_entry| dir_entry.path().canonicalize().ok())
+            .filter_map(move |disk_file_path_buf| {
+                match_path(
+                    disk_file_path_buf,
+                    includes_patterns.as_ref(),
+                    excludes_patterns.as_ref(),
+                )
+            })
+            .filter_map(move |absolute_path_buf| {
+                PushPrimaryFileItem::from_path(
+                    &dir_to_read,
+                    absolute_path_buf,
+                    &app_instance_id,
+                    skip_sha1.clone(),
+                )
+            })
     }
 
     /// get all leaf directories under this directory.

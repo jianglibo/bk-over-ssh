@@ -19,17 +19,17 @@ pub struct RelativeFileItem {
 }
 
 impl RelativeFileItem {
-    pub fn from_path(base_path: &SlashPath, path: PathBuf, skip_sha1: bool) -> Option<Self> {
-        let metadata_r = path.metadata();
+    pub fn from_path(base_path: &SlashPath, absolute_path_buf_in_base_path: PathBuf, skip_sha1: bool) -> Option<Self> {
+        let metadata_r = absolute_path_buf_in_base_path.metadata();
         match metadata_r {
             Ok(metadata) => {
                 let sha1 = if !skip_sha1 {
-                    hash_file_sha1(&path)
+                    hash_file_sha1(&absolute_path_buf_in_base_path)
                 } else {
                     Option::<String>::None
                 };
 
-                if let Some(bp) = base_path.strip_prefix(path.as_path()) {
+                if let Some(bp) = base_path.strip_prefix(absolute_path_buf_in_base_path.as_path()) {
                 Some(Self {
                     path: bp,
                     sha1,
@@ -52,7 +52,7 @@ impl RelativeFileItem {
                 }
             }
             Err(err) => {
-                error!("RelativeFileItem from_path failed: {:?}, {:?}", path, err);
+                error!("RelativeFileItem from_path failed: {:?}, {:?}", absolute_path_buf_in_base_path, err);
                 None
             }
         }

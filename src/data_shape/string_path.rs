@@ -67,6 +67,7 @@ impl SlashPath {
         self.slash.as_str()
     }
 
+    /// relativelize the path.
     pub fn strip_prefix(&self, full_path: impl AsRef<Path>) -> Option<String> {
         let full = SlashPath::from_path(full_path.as_ref());
         full.map(|f|f.as_str().split_at(self.as_str().len() + 1).1.to_owned())
