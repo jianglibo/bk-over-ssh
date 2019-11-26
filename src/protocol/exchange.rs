@@ -68,7 +68,7 @@ impl ServerYmlHeader {
         Self { yml_string }
     }
 
-    pub fn as_bytes(&mut self) -> Vec<u8> {
+    pub fn as_sent_bytes(&self) -> Vec<u8> {
         let mut v = Vec::new();
         v.insert(0, TransferType::ServerYml.to_u8());
         let bytes = self.yml_string.as_bytes();
@@ -228,7 +228,7 @@ mod tests {
 hello 
 world!
 "##;
-        let mut curor = Cursor::new(ServerYmlHeader::new(yml_string).as_bytes());
+        let mut curor = Cursor::new(ServerYmlHeader::new(yml_string).as_sent_bytes());
         curor.set_position(0);
 
         let mut pr = ProtocolReader::new(&mut curor);

@@ -1268,30 +1268,35 @@ where
     ) -> Result<Option<SyncDirReport>, failure::Error> {
         let session = self.create_ssh_session()?;
         let mut channel: ssh2::Channel = session.channel_session()?;
-        let cmd = "";
-        channel.exec(&cmd).unwrap();
+        let cmd = format!("{} --server-loop", self.server_yml.remote_exec);
+        channel.exec(&cmd).expect("start remote server-loop");
 
         let mut protocol_reader = ProtocolReader::new(&mut channel);
-        loop {
-            let mut server_yml = ServerYmlHeader::from_path(
-                self.server_yml
-                    .yml_location
-                    .as_ref()
-                    .expect("yml_location should exist.")
-                    .as_path(),
+
+        let server_yml = ServerYmlHeader::from_path(
+            self.server_yml
+                .yml_location
+                .as_ref()
+                .expect("yml_location should exist.")
+                .as_path(),
+        );
+        protocol_reader
+            .get_inner()
+            .write_all(server_yml.as_sent_bytes().as_slice())?;
+        // after sent server_yml, will send push_primary_file_item repeatly, when finish sending follow a RepeatDone message.
+        for dir in self.server_yml.directories.iter() {
+            let push_file_items = dir.push_file_item_iter(
+                &self.app_conf.app_instance_id,
+                &dir.local_dir,
+                self.app_conf.skip_sha1,
             );
-            protocol_reader
-                .get_inner()
-                .write_all(server_yml.as_bytes().as_slice())?;
-            // after sent server_yml, will receive file item repeatly, until receive a RepeatDone message.
-            loop {
-                match protocol_reader.read_type_byte()? {
-                    TransferType::FileItem => {}
-                    TransferType::RepeatDone => break,
-                    _ => panic!("unexpect transfer type."),
-                }
+            for fi in push_file_items {
+                protocol_reader.get_inner().write_all(&fi.as_sent_bytes())?;
             }
         }
+        protocol_reader
+            .get_inner()
+            .write_all(&[TransferType::RepeatDone.to_u8()])?;
 
         Ok(None)
     }

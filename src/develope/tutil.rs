@@ -225,7 +225,7 @@ mod tests {
     use failure;
     use std::io::{self};
     use bytes::{BytesMut, BufMut, Buf, Bytes};
-    use bytes::buf::IntoBuf;
+
 
     #[test]
     fn t_channel_io() -> Result<(), failure::Error> {
@@ -241,15 +241,17 @@ mod tests {
 
 
         let a_u64: u64 = 2;
-        buf.put_u64_be(a_u64);
+        buf.put_u64(a_u64);
         assert_eq!(buf.len(), 8);
-
-        let buf1 = Bytes::from(&buf[..]);
-        assert_eq!(buf1.into_buf().get_u64_be(), 2);
+        {
+            let b1 = buf.clone().to_vec();
+            let mut buf1 = Bytes::from(b1);
+            assert_eq!(buf1.get_u64(), 2);
+        }
 
         assert_eq!(buf[..].len(), 8);
         println!("{:?}", buf);
-        assert_eq!(buf.freeze().into_buf().get_u64_be(), 2);
+        assert_eq!(buf.freeze().get_u64(), 2);
         // println!("{:?}", buf);
         Ok(())
     }

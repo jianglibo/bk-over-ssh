@@ -1,14 +1,20 @@
 use super::SlashPath;
+use super::string_path;
 use crate::actions::hash_file_sha1;
 use log::*;
 use std::path::PathBuf;
 use std::time::SystemTime;
+use serde::{Deserialize, Serialize};
+use crate::protocol::{TransferType};
+use std::convert::TryInto;
 
 /// Like a disk directory, but it contains PushPrimaryFileItem.
 /// No local_dir and remote_dir, but absolute local_path and remote_path.
-#[derive(Debug)]
+#[derive(Deserialize, Serialize, Debug)]
 pub struct PushPrimaryFileItem {
+    #[serde(deserialize_with = "string_path::deserialize_slash_path_from_str")]
     pub local_path: SlashPath,
+    #[serde(deserialize_with = "string_path::deserialize_slash_path_from_str")]
     pub remote_path: SlashPath,
     pub sha1: Option<String>,
     pub len: u64,
@@ -71,6 +77,17 @@ impl PushPrimaryFileItem {
             }
         }
     }
+
+    pub fn as_sent_bytes(&self) -> Vec<u8> {
+        let mut v = Vec::new();
+        v.insert(0, TransferType::FileItem.to_u8());
+        let json_str = serde_json::to_string(&self).expect("PushPrimaryFileItem to serialize to string.");
+        let bytes = json_str.as_bytes();
+        let bytes_len: u64 = bytes.len().try_into().expect("usize convert to u64");
+        v.append(&mut bytes_len.to_be_bytes().to_vec());
+        v.append(&mut bytes.to_vec());
+        v
+    }
 }
 
 #[cfg(test)]
@@ -121,7 +138,7 @@ excludes:
         }).collect::<Vec<PushPrimaryFileItem>>();
 
         assert_eq!(files.len(), 5);
-        assert!(files.get(0).unwrap().remote_path.slash.starts_with("fixtures/"), "should starts_with fixtures/");
+        assert!(files.get(0).unwrap().remote_path.slash.starts_with("abc/a-dir"), "should starts_with fixtures/");
 
         Ok(())
     }
