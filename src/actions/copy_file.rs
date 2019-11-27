@@ -757,7 +757,7 @@ mod tests {
             true,
         );
         let sftp = server.get_ssh_session().sftp()?;
-        let mut buf = vec![0; 8192];
+        let mut buf = [0; 8192];
         let app_conf = tutil::load_demo_app_conf_sqlite(None, AppRole::PullHub);
         let mut another_server = tutil::load_demo_server_sqlite(&app_conf, None);
         another_server.connect()?;
@@ -900,7 +900,7 @@ mod tests {
 
         let start = std::time::Instant::now();
         (0..1000).for_each(|_i| {
-            let mut u8_buf = vec![0_u8; 8192];
+            let mut u8_buf = [0_u8; 8192];
             u8_buf.last_mut().replace(&mut 1);
         });
 

@@ -117,7 +117,10 @@ pub struct U64Message {
 }
 
 impl U64Message {
-    pub fn as_bytes(&mut self) -> Vec<u8> {
+    pub fn new(value: u64) -> U64Message {
+        U64Message { value }
+    }
+    pub fn as_start_send_bytes(&self) -> Vec<u8> {
         let mut v = Vec::new();
         v.insert(0, TransferType::StartSend.to_u8());
         v.append(&mut self.value.to_be_bytes().to_vec());
@@ -155,7 +158,7 @@ impl CopyOutHeader {
         }
     }
 
-    pub fn as_bytes(&mut self) -> Vec<u8> {
+    pub fn as_bytes(&self) -> Vec<u8> {
         let mut v = Vec::new();
         v.insert(0, TransferType::CopyOut.to_u8());
         v.append(&mut self.content_len.to_be_bytes().to_vec());

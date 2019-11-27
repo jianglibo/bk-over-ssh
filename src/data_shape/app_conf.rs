@@ -557,6 +557,7 @@ where
         }
 
         let ab = server_yml_path.canonicalize()?;
+        trace!("server_yml_path: {:?}", server_yml_path);
         server.yml_location.replace(ab);
 
         trace!(

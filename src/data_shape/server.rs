@@ -6,7 +6,7 @@ use super::{
 };
 use crate::actions::{copy_a_file_item, copy_a_file_sftp, copy_file, ssh_util, SyncDirReport};
 use crate::db_accesses::{scheduler_util, DbAccess};
-use crate::protocol::{ProtocolReader, StringMessage, TransferType};
+use crate::protocol::{ProtocolReader, StringMessage, TransferType, U64Message};
 use base64;
 use bzip2::write::BzEncoder;
 use bzip2::Compression;
@@ -66,8 +66,8 @@ pub struct ServerYml {
     pub sql_batch_size: usize,
     pub schedules: Vec<ScheduleItem>,
     pub exclude_by_sql: Vec<String>,
-    #[serde(skip)]
-    pub yml_location: Option<PathBuf>,
+    // #[serde(skip)]
+    // pub yml_location: Option<PathBuf>,
 }
 
 fn accumulate_file_process(
@@ -1262,20 +1262,20 @@ where
     }
 
     pub fn client_push_loop(
-        &mut self,
+        &self,
         pb: &mut Indicator,
         as_service: bool,
     ) -> Result<Option<SyncDirReport>, failure::Error> {
         let session = self.create_ssh_session()?;
         let mut channel: ssh2::Channel = session.channel_session()?;
-        let cmd = format!("{} --server-loop", self.server_yml.remote_exec);
+        let cmd = format!("{} server-receive-loop", self.server_yml.remote_exec);
+        trace!("invoke remote: {}", cmd);
         channel.exec(&cmd).expect("start remote server-loop");
 
         let mut protocol_reader = ProtocolReader::new(&mut channel);
 
         let server_yml = StringMessage::from_path(
-            self.server_yml
-                .yml_location
+            self.yml_location
                 .as_ref()
                 .expect("yml_location should exist.")
                 .as_path(),
@@ -1292,6 +1292,27 @@ where
             );
             for fi in push_file_items {
                 protocol_reader.get_inner().write_all(&fi.as_sent_bytes())?;
+                match protocol_reader.read_type_byte()? {
+                    TransferType::FileItemChanged => {
+                        let file_len = fi.local_path.as_path().metadata()?.len();
+                        let u64_message = U64Message::new(file_len);
+                        protocol_reader.get_inner().write_all(&u64_message.as_start_send_bytes())?;
+                        let mut buf = [0;8192];
+                        let mut file = fs::OpenOptions::new().read(true).open(fi.local_path.as_path())?;
+                        loop {
+                            let readed = file.read(&mut buf)?;
+                            if readed == 0 {
+                                break;
+                            } else {
+                                protocol_reader.get_inner().write_all(&buf[..readed])?;
+                            }
+                        }
+                    },
+                    TransferType::FileItemUnchanged => {
+                        info!("unchanged file.");
+                    },
+                    i => error!("got unexpected transfer type {:?}", i),
+                }
             }
         }
         protocol_reader
@@ -1437,6 +1458,44 @@ mod tests {
     }
 
     #[test]
+    fn t_client_loop() -> Result<(), failure::Error> {
+        log();
+        let mut app_conf = tutil::load_demo_app_conf_sqlite(None, AppRole::ActiveLeaf);
+        app_conf.mini_app_conf.skip_cron = true;
+        app_conf.mini_app_conf.verbose = true;
+
+        assert!(app_conf.mini_app_conf.app_role == Some(AppRole::ActiveLeaf));
+        let server = tutil::load_demo_server_sqlite(&app_conf, Some("localhost_2.yml"));
+
+        let a_dir = &server
+            .server_yml
+            .directories
+            .iter()
+            .find(|d| d.remote_dir.ends_with("a-dir"))
+            .expect("should have a directory who's remote_dir end with 'a-dir'")
+            .remote_dir;
+
+        if a_dir.exists() {
+            info!("directories path: {:?}", a_dir.as_path());
+            fs::remove_dir_all(a_dir.as_path())?;
+        }
+
+        let mut indicator = Indicator::new(None);
+
+        server.client_push_loop(&mut indicator, false)?;
+
+        info!("a_dir is {:?}", a_dir);
+        let cc_txt = a_dir.join("b").join("c c").join("c c .txt");
+        info!("cc_txt is {:?}", cc_txt);
+        assert!(cc_txt.exists());
+        assert!(a_dir.join("b").join("b.txt").exists());
+        assert!(a_dir.join("b b").join("b b.txt").exists());
+        assert!(a_dir.join("a.txt").exists());
+        assert!(a_dir.join("qrcode.png").exists());
+        Ok(())
+    }
+
+    #[test]
     fn t_sync_push_dirs() -> Result<(), failure::Error> {
         log();
         let mut app_conf = tutil::load_demo_app_conf_sqlite(None, AppRole::ActiveLeaf);
@@ -1455,15 +1514,6 @@ mod tests {
         let sqlite_db_access = SqliteDbAccess::new(db_file);
         sqlite_db_access.create_database()?;
         server.set_db_access(sqlite_db_access);
-
-        // let directories_dir = server.get_remote_exec().parent()
-        //     .expect("home dir to_str should succeed.")
-        //     .join("data");
-
-        // if directories_dir.exists() {
-        //     info!("directories path: {:?}", directories_dir.as_path());
-        //     fs::remove_dir_all(directories_dir.as_path())?;
-        // }
 
         server.connect()?;
         let cc = server.count_remote_files()?;
