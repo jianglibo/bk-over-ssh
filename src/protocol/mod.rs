@@ -4,4 +4,4 @@ pub mod reader;
 
 pub use error::{HeaderParseError};
 pub use reader::ProtocolReader;
-pub use exchange::{TransferType, ServerYmlHeader, CopyOutHeader};
+pub use exchange::{TransferType, StringMessage, CopyOutHeader, U64Message};

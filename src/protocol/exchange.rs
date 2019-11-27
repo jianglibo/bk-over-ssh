@@ -6,6 +6,7 @@ use std::path::Path;
 
 #[derive(Debug, PartialEq)]
 pub enum TransferType {
+    Eof,
     CopyIn,
     CopyOut,
     RsyncIn,
@@ -14,11 +15,15 @@ pub enum TransferType {
     ServerYml,
     RepeatDone,
     FileItem,
+    FileItemChanged,
+    FileItemUnchanged,
+    StartSend,
 }
 
 impl TransferType {
     pub fn from_u8(u8_value: u8) -> Result<TransferType, HeaderParseError> {
         match u8_value {
+            0 => Ok(TransferType::Eof),
             1 => Ok(TransferType::CopyIn),
             2 => Ok(TransferType::CopyOut),
             3 => Ok(TransferType::RsyncIn),
@@ -27,12 +32,16 @@ impl TransferType {
             6 => Ok(TransferType::ServerYml),
             7 => Ok(TransferType::RepeatDone),
             8 => Ok(TransferType::FileItem),
+            9 => Ok(TransferType::FileItemChanged),
+            10 => Ok(TransferType::FileItemUnchanged),
+            11 => Ok(TransferType::StartSend),
             i => Err(HeaderParseError::InvalidTransferType(i)),
         }
     }
 
     pub fn to_u8(&self) -> u8 {
         match self {
+            TransferType::Eof => 0,
             TransferType::CopyIn => 1,
             TransferType::CopyOut => 2,
             TransferType::RsyncIn => 3,
@@ -41,19 +50,22 @@ impl TransferType {
             TransferType::ServerYml => 6,
             TransferType::RepeatDone => 7,
             TransferType::FileItem => 8,
+            TransferType::FileItemChanged => 9,
+            TransferType::FileItemUnchanged => 10,
+            TransferType::StartSend => 11,
         }
     }
 }
 
 #[derive(Debug)]
-pub struct ServerYmlHeader {
-    pub yml_string: String,
+pub struct StringMessage {
+    pub content: String,
 }
 
-impl ServerYmlHeader {
-    pub fn new(yml_string: impl AsRef<str>) -> Self {
-        Self {
-            yml_string: yml_string.as_ref().to_owned(),
+impl StringMessage {
+    pub fn new(content: impl AsRef<str>) -> Self {
+        StringMessage {
+            content: content.as_ref().to_owned(),
         }
     }
 
@@ -62,16 +74,16 @@ impl ServerYmlHeader {
             .read(true)
             .open(path)
             .expect("can open provided server yml path.");
-        let mut yml_string = String::new();
-        f.read_to_string(&mut yml_string)
+        let mut content = String::new();
+        f.read_to_string(&mut content)
             .expect("should read server yml content");
-        Self { yml_string }
+        StringMessage { content }
     }
 
     pub fn as_sent_bytes(&self) -> Vec<u8> {
         let mut v = Vec::new();
         v.insert(0, TransferType::ServerYml.to_u8());
-        let bytes = self.yml_string.as_bytes();
+        let bytes = self.content.as_bytes();
         let bytes_len: u64 = bytes.len().try_into().expect("usize convert to u64");
         v.append(&mut bytes_len.to_be_bytes().to_vec());
         v.append(&mut bytes.to_vec());
@@ -80,7 +92,7 @@ impl ServerYmlHeader {
 
     pub fn parse<T>(
         protocol_reader: &mut ProtocolReader<T>,
-    ) -> Result<ServerYmlHeader, HeaderParseError>
+    ) -> Result<StringMessage, HeaderParseError>
     where
         T: Read,
     {
@@ -91,10 +103,39 @@ impl ServerYmlHeader {
         let yml_string_len: u64 = u64::from_be_bytes(buf_u64);
 
         let mut buf = [0; 1024];
-        let yml_string_buf = protocol_reader.read_nbytes(&mut buf, yml_string_len)?;
-        let yml_string = String::from_utf8(yml_string_buf)
+        let content_buf = protocol_reader.read_nbytes(&mut buf, yml_string_len)?;
+        let content = String::from_utf8(content_buf)
             .map_err(|e| HeaderParseError::Utf8Error(e.utf8_error().valid_up_to()))?;
-        Ok(ServerYmlHeader { yml_string })
+        Ok(StringMessage { content })
+    }
+}
+
+
+#[derive(Debug)]
+pub struct U64Message {
+    pub value: u64,
+}
+
+impl U64Message {
+    pub fn as_bytes(&mut self) -> Vec<u8> {
+        let mut v = Vec::new();
+        v.insert(0, TransferType::StartSend.to_u8());
+        v.append(&mut self.value.to_be_bytes().to_vec());
+        v
+    }
+
+    pub fn parse<T>(
+        protocol_reader: &mut ProtocolReader<T>,
+    ) -> Result<U64Message, HeaderParseError>
+    where
+        T: Read,
+    {
+        let mut buf_u64 = [0; 8];
+        protocol_reader
+            .read_exact(&mut buf_u64)
+            .map_err(HeaderParseError::Io)?;
+        let value: u64 = u64::from_be_bytes(buf_u64);
+        Ok(U64Message { value })
     }
 }
 
@@ -228,14 +269,14 @@ mod tests {
 hello 
 world!
 "##;
-        let mut curor = Cursor::new(ServerYmlHeader::new(yml_string).as_sent_bytes());
+        let mut curor = Cursor::new(StringMessage::new(yml_string).as_sent_bytes());
         curor.set_position(0);
 
         let mut pr = ProtocolReader::new(&mut curor);
         match pr.read_type_byte()? {
             TransferType::ServerYml => {
-                let syh = ServerYmlHeader::parse(&mut pr)?;
-                assert_eq!(syh.yml_string, yml_string);
+                let syh = StringMessage::parse(&mut pr)?;
+                assert_eq!(syh.content, yml_string);
             }
             _ => panic!("unexpected transfer type"),
         }

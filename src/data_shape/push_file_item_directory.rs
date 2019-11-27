@@ -1,12 +1,14 @@
-use super::SlashPath;
 use super::string_path;
+use super::SlashPath;
 use crate::actions::hash_file_sha1;
+use crate::data_shape::data_shape_util;
+use crate::protocol::TransferType;
 use log::*;
+use serde::{Deserialize, Serialize};
+use std::convert::TryInto;
+use std::path::Path;
 use std::path::PathBuf;
 use std::time::SystemTime;
-use serde::{Deserialize, Serialize};
-use crate::protocol::{TransferType};
-use std::convert::TryInto;
 
 /// Like a disk directory, but it contains PushPrimaryFileItem.
 /// No local_dir and remote_dir, but absolute local_path and remote_path.
@@ -77,11 +79,19 @@ impl PushPrimaryFileItem {
             }
         }
     }
+    pub fn changed(&self, file_path: impl AsRef<Path>) -> bool {
+        if let Some(fmeta) = data_shape_util::get_file_meta(file_path, self.sha1.is_none()) {
+            fmeta.len != self.len || fmeta.modified != self.modified || fmeta.sha1 != self.sha1
+        } else {
+            true
+        }
+    }
 
     pub fn as_sent_bytes(&self) -> Vec<u8> {
         let mut v = Vec::new();
         v.insert(0, TransferType::FileItem.to_u8());
-        let json_str = serde_json::to_string(&self).expect("PushPrimaryFileItem to serialize to string.");
+        let json_str =
+            serde_json::to_string(&self).expect("PushPrimaryFileItem to serialize to string.");
         let bytes = json_str.as_bytes();
         let bytes_len: u64 = bytes.len().try_into().expect("usize convert to u64");
         v.append(&mut bytes_len.to_be_bytes().to_vec());
@@ -93,8 +103,8 @@ impl PushPrimaryFileItem {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::data_shape::Directory;
     use crate::log_util;
-    use crate::data_shape::{Directory};
 
     fn log() {
         log_util::setup_logger_detail(
@@ -132,13 +142,24 @@ excludes:
         assert!(d.includes_patterns.is_some());
         assert!(d.excludes_patterns.is_some());
 
-        let files =  d.push_file_item_iter("abc", &d.local_dir, false).map(|it|{
-            println!("remote_path: {:?}", it.remote_path.slash);
-            it
-        }).collect::<Vec<PushPrimaryFileItem>>();
+        let files = d
+            .push_file_item_iter("abc", &d.local_dir, false)
+            .map(|it| {
+                println!("remote_path: {:?}", it.remote_path.slash);
+                it
+            })
+            .collect::<Vec<PushPrimaryFileItem>>();
 
         assert_eq!(files.len(), 5);
-        assert!(files.get(0).unwrap().remote_path.slash.starts_with("abc/a-dir"), "should starts_with fixtures/");
+        assert!(
+            files
+                .get(0)
+                .unwrap()
+                .remote_path
+                .slash
+                .starts_with("abc/a-dir"),
+            "should starts_with fixtures/"
+        );
 
         Ok(())
     }

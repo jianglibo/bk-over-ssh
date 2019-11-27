@@ -6,7 +6,7 @@ use super::{
 };
 use crate::actions::{copy_a_file_item, copy_a_file_sftp, copy_file, ssh_util, SyncDirReport};
 use crate::db_accesses::{scheduler_util, DbAccess};
-use crate::protocol::{ProtocolReader, ServerYmlHeader, TransferType};
+use crate::protocol::{ProtocolReader, StringMessage, TransferType};
 use base64;
 use bzip2::write::BzEncoder;
 use bzip2::Compression;
@@ -1273,7 +1273,7 @@ where
 
         let mut protocol_reader = ProtocolReader::new(&mut channel);
 
-        let server_yml = ServerYmlHeader::from_path(
+        let server_yml = StringMessage::from_path(
             self.server_yml
                 .yml_location
                 .as_ref()

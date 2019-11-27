@@ -1,6 +1,8 @@
 use super::{HeaderParseError, TransferType};
 use std::convert::TryInto;
-use std::io::{self, Read};
+use std::fs;
+use std::io::{self, Read, Write};
+use std::path::Path;
 
 pub struct ProtocolReader<'a, T>
 where
@@ -23,8 +25,11 @@ where
 
     pub fn read_one_byte(&mut self) -> Result<u8, HeaderParseError> {
         let mut buf = [0; 1];
-        self.read_exact(&mut buf).map_err(HeaderParseError::Io)?;
-        Ok(buf[0])
+        match self.read_exact(&mut buf) {
+            Err(err) if err.kind() == io::ErrorKind::UnexpectedEof => Ok(0),
+            Err(err) => Err(HeaderParseError::Io(err)),
+            Ok(_) => Ok(buf[0]),
+        }
     }
     pub fn read_type_byte(&mut self) -> Result<TransferType, HeaderParseError> {
         TransferType::from_u8(self.read_one_byte()?)
@@ -71,6 +76,36 @@ where
         } else {
             Ok(result)
         }
+    }
+
+    pub fn copy_to_file(
+        &mut self,
+        buf: &mut [u8],
+        len: u64,
+        file_path: impl AsRef<Path>,
+    ) -> Result<(), failure::Error> {
+        let mut count = len;
+        let mut f = fs::OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(file_path.as_ref())?;
+        loop {
+            let readed = self.read(buf)?;
+            if readed == 0 {
+                break;
+            }
+            if count >= readed as u64 {
+                f.write_all(&buf[..readed])?;
+            } else {
+                let mut remains = (&buf[count as usize..readed]).to_vec();
+                self.remains.append(&mut remains);
+                f.write_all(&buf[..count as usize])?;
+                break;
+            }
+            count -= readed as u64;
+        }
+        Ok(())
     }
 }
 
