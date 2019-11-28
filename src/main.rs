@@ -40,7 +40,7 @@ use mail::send_test_mail;
 use std::env;
 use std::sync::Arc;
 use std::time::Instant;
-use std::{fs, io, io::BufRead, io::Write};
+use std::{fs, io, io::BufRead, io::Write, io::Read};
 
 use actions::{ssh_util, SyncDirReport};
 use base64;
@@ -54,9 +54,35 @@ fn main() -> Result<(), failure::Error> {
     let m: ArgMatches = app.get_matches();
     let app1 = App::from_yaml(yml);
     let console_log = m.is_present("console-log");
+    let verbose = if m.is_present("vv") {
+        "vv"
+    } else if m.is_present("v") {
+        "v"
+    } else {
+        ""
+    };
+
+    if let ("pong", Some(_sub_matches)) = m.subcommand() {
+        let mut stdin = io::stdin();
+        let mut stdout = io::stdout();
+        let mut buf = [0;8];
+        stdin.read_exact(&mut buf)?;
+        let len = u64::from_be_bytes(buf);
+        info!("got ping: {}", len);
+        stdout.write_all(&buf)?;
+        return Ok(());
+    }
 
     if let ("server-receive-loop", Some(_sub_matches)) = m.subcommand() {
-        command::server_loop::server_receive_loop()?;
+        log_util::setup_logger_for_this_app(
+            console_log,
+            "data/server-receive-loop.log",
+            Vec::<String>::new(),
+            verbose,
+        )?;
+        if let Err(err) = command::server_loop::server_receive_loop() {
+            error!("server-receive-loop caught error: {:?}", err);
+        }
         return Ok(());
     }
 
@@ -120,14 +146,6 @@ fn main() -> Result<(), failure::Error> {
     if let Some(buf_len) = m.value_of("buf-len") {
         app_conf.mini_app_conf.buf_len = Some(buf_len.parse()?);
     }
-
-    let verbose = if m.is_present("vv") {
-        "vv"
-    } else if m.is_present("v") {
-        "v"
-    } else {
-        ""
-    };
 
     app_conf.mini_app_conf.console_log = console_log;
     app_conf.mini_app_conf.verbose = !verbose.is_empty();

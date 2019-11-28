@@ -66,8 +66,6 @@ pub struct ServerYml {
     pub sql_batch_size: usize,
     pub schedules: Vec<ScheduleItem>,
     pub exclude_by_sql: Vec<String>,
-    // #[serde(skip)]
-    // pub yml_location: Option<PathBuf>,
 }
 
 fn accumulate_file_process(
@@ -1268,7 +1266,11 @@ where
     ) -> Result<Option<SyncDirReport>, failure::Error> {
         let session = self.create_ssh_session()?;
         let mut channel: ssh2::Channel = session.channel_session()?;
-        let cmd = format!("{} server-receive-loop", self.server_yml.remote_exec);
+        let cmd = format!(
+            "{}{} server-receive-loop",
+            self.server_yml.remote_exec,
+            if self.app_conf.verbose { " --vv" } else { "" }
+        );
         trace!("invoke remote: {}", cmd);
         channel.exec(&cmd).expect("start remote server-loop");
 
@@ -1282,9 +1284,12 @@ where
         );
         protocol_reader
             .get_inner()
-            .write_all(server_yml.as_sent_bytes().as_slice())?;
+            .write_all(server_yml.as_server_yml_sent_bytes().as_slice())?;
+        protocol_reader.get_inner().flush()?;
+
         // after sent server_yml, will send push_primary_file_item repeatly, when finish sending follow a RepeatDone message.
         for dir in self.server_yml.directories.iter() {
+            trace!("start iterate {:?}", dir);
             let push_file_items = dir.push_file_item_iter(
                 &self.app_conf.app_instance_id,
                 &dir.local_dir,
@@ -1292,25 +1297,40 @@ where
             );
             for fi in push_file_items {
                 protocol_reader.get_inner().write_all(&fi.as_sent_bytes())?;
-                match protocol_reader.read_type_byte()? {
+                protocol_reader.get_inner().flush()?;
+                match protocol_reader.read_type_byte().expect("read type byte.") {
                     TransferType::FileItemChanged => {
+                        trace!("changed file.");
                         let file_len = fi.local_path.as_path().metadata()?.len();
                         let u64_message = U64Message::new(file_len);
-                        protocol_reader.get_inner().write_all(&u64_message.as_start_send_bytes())?;
-                        let mut buf = [0;8192];
-                        let mut file = fs::OpenOptions::new().read(true).open(fi.local_path.as_path())?;
+                        protocol_reader
+                            .get_inner()
+                            .write_all(&u64_message.as_start_send_bytes())?;
+                        protocol_reader.get_inner().flush()?;
+                        trace!("start send header sent.");
+                        let mut buf = [0; 8192];
+                        let mut file = fs::OpenOptions::new()
+                            .read(true)
+                            .open(fi.local_path.as_path())?;
+                        trace!("start send file content.");
                         loop {
                             let readed = file.read(&mut buf)?;
                             if readed == 0 {
+                                protocol_reader.get_inner().flush()?;
                                 break;
                             } else {
                                 protocol_reader.get_inner().write_all(&buf[..readed])?;
                             }
                         }
-                    },
+                        trace!("send file content done.");
+                    }
                     TransferType::FileItemUnchanged => {
-                        info!("unchanged file.");
-                    },
+                        trace!("unchanged file.");
+                    }
+                    TransferType::StringError => {
+                        let ss = StringMessage::parse(&mut protocol_reader)?;
+                        error!("string error: {:?}", ss.content);
+                    }
                     i => error!("got unexpected transfer type {:?}", i),
                 }
             }
@@ -1318,6 +1338,7 @@ where
         protocol_reader
             .get_inner()
             .write_all(&[TransferType::RepeatDone.to_u8()])?;
+        protocol_reader.get_inner().flush()?;
 
         Ok(None)
     }
@@ -1463,6 +1484,7 @@ mod tests {
         let mut app_conf = tutil::load_demo_app_conf_sqlite(None, AppRole::ActiveLeaf);
         app_conf.mini_app_conf.skip_cron = true;
         app_conf.mini_app_conf.verbose = true;
+        app_conf.mini_app_conf.console_log = true;
 
         assert!(app_conf.mini_app_conf.app_role == Some(AppRole::ActiveLeaf));
         let server = tutil::load_demo_server_sqlite(&app_conf, Some("localhost_2.yml"));
@@ -1481,6 +1503,26 @@ mod tests {
         }
 
         let mut indicator = Indicator::new(None);
+
+        // let session = server.create_ssh_session()?;
+        // let mut channel: ssh2::Channel = session.channel_session()?;
+        // let cmd = format!(
+        //     "{} pong", server.server_yml.remote_exec);
+        // trace!("invoke remote: {}", cmd);
+        // channel.exec(&cmd).expect("start ping");
+
+        // let len = 55_u64;
+        // let buf = len.to_be_bytes();
+        // trace!("before send.");
+        // let write_win = channel.write_window();
+        // trace!("write window: {}, {}", write_win.remaining, write_win.window_size_initial);
+        // channel.write_all(&buf)?;
+        // trace!("after send. start receive.");
+        // let mut buf = [0;8];
+        // channel.read_exact(&mut buf)?;
+        // let len = u64::from_be_bytes(buf);
+        // assert_eq!(len, 55);
+        // info!("got pong: {}", len);
 
         server.client_push_loop(&mut indicator, false)?;
 

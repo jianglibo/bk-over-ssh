@@ -3,6 +3,7 @@ use std::convert::TryInto;
 use std::fs;
 use std::io::{Read};
 use std::path::Path;
+use log::*;
 
 #[derive(Debug, PartialEq)]
 pub enum TransferType {
@@ -18,6 +19,7 @@ pub enum TransferType {
     FileItemChanged,
     FileItemUnchanged,
     StartSend,
+    StringError,
 }
 
 impl TransferType {
@@ -35,7 +37,11 @@ impl TransferType {
             9 => Ok(TransferType::FileItemChanged),
             10 => Ok(TransferType::FileItemUnchanged),
             11 => Ok(TransferType::StartSend),
-            i => Err(HeaderParseError::InvalidTransferType(i)),
+            14 => Ok(TransferType::StringError),
+            i => {
+                error!("from_u8 unexpected transfer type: {:?}", i);
+                Err(HeaderParseError::InvalidTransferType(i))
+            },
         }
     }
 
@@ -53,6 +59,7 @@ impl TransferType {
             TransferType::FileItemChanged => 9,
             TransferType::FileItemUnchanged => 10,
             TransferType::StartSend => 11,
+            TransferType::StringError => 14,
         }
     }
 }
@@ -80,9 +87,19 @@ impl StringMessage {
         StringMessage { content }
     }
 
-    pub fn as_sent_bytes(&self) -> Vec<u8> {
+    pub fn as_server_yml_sent_bytes(&self) -> Vec<u8> {
         let mut v = Vec::new();
         v.insert(0, TransferType::ServerYml.to_u8());
+        let bytes = self.content.as_bytes();
+        let bytes_len: u64 = bytes.len().try_into().expect("usize convert to u64");
+        v.append(&mut bytes_len.to_be_bytes().to_vec());
+        v.append(&mut bytes.to_vec());
+        v
+    }
+
+    pub fn as_string_error_sent_bytes(&self) -> Vec<u8> {
+        let mut v = Vec::new();
+        v.insert(0, TransferType::StringError.to_u8());
         let bytes = self.content.as_bytes();
         let bytes_len: u64 = bytes.len().try_into().expect("usize convert to u64");
         v.append(&mut bytes_len.to_be_bytes().to_vec());
@@ -272,7 +289,7 @@ mod tests {
 hello 
 world!
 "##;
-        let mut curor = Cursor::new(StringMessage::new(yml_string).as_sent_bytes());
+        let mut curor = Cursor::new(StringMessage::new(yml_string).as_server_yml_sent_bytes());
         curor.set_position(0);
 
         let mut pr = ProtocolReader::new(&mut curor);

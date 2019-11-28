@@ -3,6 +3,7 @@ use std::convert::TryInto;
 use std::fs;
 use std::io::{self, Read, Write};
 use std::path::Path;
+use log::*;
 
 pub struct ProtocolReader<'a, T>
 where
@@ -26,13 +27,25 @@ where
     pub fn read_one_byte(&mut self) -> Result<u8, HeaderParseError> {
         let mut buf = [0; 1];
         match self.read_exact(&mut buf) {
-            Err(err) if err.kind() == io::ErrorKind::UnexpectedEof => Ok(0),
+            Err(err) if err.kind() == io::ErrorKind::UnexpectedEof => {
+                error!("{:?}", err);
+                Ok(0)
+            },
             Err(err) => Err(HeaderParseError::Io(err)),
             Ok(_) => Ok(buf[0]),
         }
     }
     pub fn read_type_byte(&mut self) -> Result<TransferType, HeaderParseError> {
-        TransferType::from_u8(self.read_one_byte()?)
+        trace!("start read_type_byte");
+        let v = match self.read_one_byte() {
+            Ok(b) => Ok(TransferType::from_u8(b)?),
+            Err(err) => {
+                error!("{:?}", err);
+                Err(err)
+            }
+        };
+        trace!("end read_type_byte {:?}.",v);
+        v
     }
 
     pub fn get_inner(&mut self) -> &mut T {
@@ -85,11 +98,16 @@ where
         file_path: impl AsRef<Path>,
     ) -> Result<(), failure::Error> {
         let mut count = len;
+        let file_path = file_path.as_ref();
+        let parent = file_path.parent().expect("copy_to_file should has a parent.");
+        if !parent.exists() {
+            fs::create_dir_all(&parent)?;
+        }
         let mut f = fs::OpenOptions::new()
             .create(true)
             .truncate(true)
             .write(true)
-            .open(file_path.as_ref())?;
+            .open(file_path)?;
         loop {
             let readed = self.read(buf)?;
             if readed == 0 {
