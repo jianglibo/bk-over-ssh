@@ -293,6 +293,14 @@ where
             .filter_map(|dir| dir.count_local_files(self.app_conf.app_role.as_ref()).ok())
             .count() as u64
     }
+
+    pub fn count_local_dir_files(&self) -> u64 {
+        self.server_yml
+            .directories
+            .iter()
+            .map(|dir| dir.count_local_dir_files())
+            .sum()
+    }
     /// For app_role is ReceiveHub, remote exec is from user's home directory.
     pub fn get_remote_exec(&self) -> SlashPath {
         SlashPath::new(&self.server_yml.remote_exec)
@@ -1259,11 +1267,22 @@ where
         }
     }
 
+    pub fn write_channel(
+        &self,
+        protocol_reader: &mut ProtocolReader<ssh2::Channel>,
+        bytes: &[u8],
+    ) -> Result<(), failure::Error> {
+        protocol_reader.get_inner().write_all(bytes)?;
+        protocol_reader.get_inner().flush()?;
+        Ok(())
+    }
+
     pub fn client_push_loop(
         &self,
         pb: &mut Indicator,
         as_service: bool,
     ) -> Result<Option<SyncDirReport>, failure::Error> {
+        let file_count = self.count_local_dir_files();
         let session = self.create_ssh_session()?;
         let mut channel: ssh2::Channel = session.channel_session()?;
         let cmd = format!(
@@ -1282,11 +1301,13 @@ where
                 .expect("yml_location should exist.")
                 .as_path(),
         );
-        protocol_reader
-            .get_inner()
-            .write_all(server_yml.as_server_yml_sent_bytes().as_slice())?;
-        protocol_reader.get_inner().flush()?;
-
+        self.write_channel(
+            &mut protocol_reader,
+            server_yml.as_server_yml_sent_bytes().as_slice(),
+        )?;
+        let mut changed = 0_u64;
+        let mut unchanged = 0_u64;
+        let mut has_errror = 0_u64;
         // after sent server_yml, will send push_primary_file_item repeatly, when finish sending follow a RepeatDone message.
         for dir in self.server_yml.directories.iter() {
             trace!("start iterate {:?}", dir);
@@ -1296,17 +1317,16 @@ where
                 self.app_conf.skip_sha1,
             );
             for fi in push_file_items {
-                protocol_reader.get_inner().write_all(&fi.as_sent_bytes())?;
-                protocol_reader.get_inner().flush()?;
+                self.write_channel(&mut protocol_reader, &fi.as_sent_bytes())?;
                 match protocol_reader.read_type_byte().expect("read type byte.") {
                     TransferType::FileItemChanged => {
                         trace!("changed file.");
                         let file_len = fi.local_path.as_path().metadata()?.len();
                         let u64_message = U64Message::new(file_len);
-                        protocol_reader
-                            .get_inner()
-                            .write_all(&u64_message.as_start_send_bytes())?;
-                        protocol_reader.get_inner().flush()?;
+                        self.write_channel(
+                            &mut protocol_reader,
+                            &u64_message.as_start_send_bytes(),
+                        )?;
                         trace!("start send header sent.");
                         let mut buf = [0; 8192];
                         let mut file = fs::OpenOptions::new()
@@ -1319,12 +1339,14 @@ where
                                 protocol_reader.get_inner().flush()?;
                                 break;
                             } else {
-                                protocol_reader.get_inner().write_all(&buf[..readed])?;
+                                self.write_channel(&mut protocol_reader, &buf[..readed])?;
                             }
                         }
+                        changed += 1;
                         trace!("send file content done.");
                     }
                     TransferType::FileItemUnchanged => {
+                        unchanged += 1;
                         trace!("unchanged file.");
                     }
                     TransferType::StringError => {
@@ -1339,7 +1361,7 @@ where
             .get_inner()
             .write_all(&[TransferType::RepeatDone.to_u8()])?;
         protocol_reader.get_inner().flush()?;
-
+        info!("changed: {}, unchanged: {}", changed, unchanged);
         Ok(None)
     }
 
@@ -1489,40 +1511,17 @@ mod tests {
         assert!(app_conf.mini_app_conf.app_role == Some(AppRole::ActiveLeaf));
         let server = tutil::load_demo_server_sqlite(&app_conf, Some("localhost_2.yml"));
 
-        let a_dir = &server
-            .server_yml
-            .directories
-            .iter()
-            .find(|d| d.remote_dir.ends_with("a-dir"))
-            .expect("should have a directory who's remote_dir end with 'a-dir'")
-            .remote_dir;
-
-        if a_dir.exists() {
-            info!("directories path: {:?}", a_dir.as_path());
-            fs::remove_dir_all(a_dir.as_path())?;
-        }
+        let a_dir = SlashPath::from_path(
+            dirs::home_dir()
+                .expect("get home_dir")
+                .join("directories")
+                .join(&app_conf.mini_app_conf.app_instance_id)
+                .join("a-dir")
+                .as_path(),
+        )
+        .expect("get slash path from home_dir");
 
         let mut indicator = Indicator::new(None);
-
-        // let session = server.create_ssh_session()?;
-        // let mut channel: ssh2::Channel = session.channel_session()?;
-        // let cmd = format!(
-        //     "{} pong", server.server_yml.remote_exec);
-        // trace!("invoke remote: {}", cmd);
-        // channel.exec(&cmd).expect("start ping");
-
-        // let len = 55_u64;
-        // let buf = len.to_be_bytes();
-        // trace!("before send.");
-        // let write_win = channel.write_window();
-        // trace!("write window: {}, {}", write_win.remaining, write_win.window_size_initial);
-        // channel.write_all(&buf)?;
-        // trace!("after send. start receive.");
-        // let mut buf = [0;8];
-        // channel.read_exact(&mut buf)?;
-        // let len = u64::from_be_bytes(buf);
-        // assert_eq!(len, 55);
-        // info!("got pong: {}", len);
 
         server.client_push_loop(&mut indicator, false)?;
 

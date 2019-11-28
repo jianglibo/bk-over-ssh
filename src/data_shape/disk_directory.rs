@@ -404,6 +404,15 @@ impl Directory {
         Ok(file_num as u64)
     }
 
+    pub fn count_local_dir_files(&self) -> u64 {
+        WalkDir::new(self.local_dir.as_path())
+            .follow_links(false)
+            .into_iter()
+            .filter_map(|dir_entry| dir_entry.ok())
+            .filter(|dir_entry| dir_entry.file_type().is_file())
+            .count() as u64
+    }
+
     /// this function will walk over the directory, for every file checking it's metadata and compare to corepsonding item in the db.
     /// for new and changed items mark changed field to true.
     /// for unchanged items, if the status in db is changed chang to unchanged.

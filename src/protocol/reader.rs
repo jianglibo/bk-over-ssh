@@ -5,6 +5,10 @@ use std::io::{self, Read, Write};
 use std::path::Path;
 use log::*;
 
+pub trait ProtocolWriter: Write {
+
+}
+
 pub struct ProtocolReader<'a, T>
 where
     T: io::Read,
@@ -150,6 +154,8 @@ where
         }
     }
 }
+
+
 
 #[cfg(test)]
 mod tests {
