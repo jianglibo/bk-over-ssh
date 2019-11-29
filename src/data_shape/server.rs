@@ -22,7 +22,7 @@ use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
-use std::{fs, io, io::Seek};
+use std::{fs, io, io::Seek, io::Write};
 use tar::Builder;
 
 pub const CRON_NAME_SYNC_PULL_DIRS: &str = "sync-pull-dirs";
@@ -1320,10 +1320,10 @@ where
                         loop {
                             let readed = file.read(&mut buf)?;
                             if readed == 0 {
-                                message_hub.write_and_flush(&[])?;
+                                message_hub.flush()?;
                                 break;
                             } else {
-                                message_hub.write_and_flush(&buf[..readed])?;
+                                message_hub.write(&buf[..readed])?;
                             }
                         }
                         changed += 1;
