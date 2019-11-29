@@ -1,13 +1,11 @@
-use super::{HeaderParseError, TransferType};
+use super::{HeaderParseError, TransferType, MessageHub};
 use std::convert::TryInto;
 use std::fs;
 use std::io::{self, Read, Write};
 use std::path::Path;
 use log::*;
+use ssh2;
 
-pub trait ProtocolWriter: Write {
-
-}
 
 pub struct ProtocolReader<'a, T>
 where
@@ -16,6 +14,8 @@ where
     inner: &'a mut T,
     pub remains: Vec<u8>,
 }
+
+
 
 impl<'a, T> ProtocolReader<'a, T>
 where
