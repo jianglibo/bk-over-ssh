@@ -24,7 +24,7 @@ pub use file_item_map::{FileItemMap, FileItemProcessResult, FileItemProcessResul
 pub use file_item_directory::{FileItemDirectory, FileItemDirectories, PrimaryFileItem};
 pub use indicator::{Indicator, PbProperties};
 pub use relative_file_item::{RelativeFileItem};
-pub use push_file_item_directory::{PushPrimaryFileItem};
+pub use push_file_item_directory::{PushPrimaryFileItem, FileChanged};
 pub use server::{Server, ServerYml};
 pub use sha1_reader::Sha1Reader;
 pub use string_path::SlashPath;

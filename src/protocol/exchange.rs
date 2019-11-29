@@ -1,9 +1,9 @@
-use super::{HeaderParseError, ProtocolReader};
+use super::{HeaderParseError, MessageHub};
+use log::*;
 use std::convert::TryInto;
 use std::fs;
-use std::io::{Read};
+use std::io::{Read, Write};
 use std::path::Path;
-use log::*;
 
 #[derive(Debug, PartialEq)]
 pub enum TransferType {
@@ -41,7 +41,7 @@ impl TransferType {
             i => {
                 error!("from_u8 unexpected transfer type: {:?}", i);
                 Err(HeaderParseError::InvalidTransferType(i))
-            },
+            }
         }
     }
 
@@ -88,18 +88,16 @@ impl StringMessage {
     }
 
     pub fn as_server_yml_sent_bytes(&self) -> Vec<u8> {
-        let mut v = Vec::new();
-        v.insert(0, TransferType::ServerYml.to_u8());
-        let bytes = self.content.as_bytes();
-        let bytes_len: u64 = bytes.len().try_into().expect("usize convert to u64");
-        v.append(&mut bytes_len.to_be_bytes().to_vec());
-        v.append(&mut bytes.to_vec());
-        v
+        self.as_string_sent_bytes_with_header(TransferType::ServerYml)
     }
 
     pub fn as_string_error_sent_bytes(&self) -> Vec<u8> {
+        self.as_string_sent_bytes_with_header(TransferType::StringError)
+    }
+
+    pub fn as_string_sent_bytes_with_header(&self, transfer_type: TransferType) -> Vec<u8> {
         let mut v = Vec::new();
-        v.insert(0, TransferType::StringError.to_u8());
+        v.insert(0, transfer_type.to_u8());
         let bytes = self.content.as_bytes();
         let bytes_len: u64 = bytes.len().try_into().expect("usize convert to u64");
         v.append(&mut bytes_len.to_be_bytes().to_vec());
@@ -107,26 +105,23 @@ impl StringMessage {
         v
     }
 
-    pub fn parse<T>(
-        protocol_reader: &mut ProtocolReader<T>,
-    ) -> Result<StringMessage, HeaderParseError>
+    pub fn parse<T>(message_hub: &mut T) -> Result<StringMessage, HeaderParseError>
     where
-        T: Read,
+        T: MessageHub,
     {
         let mut buf_u64 = [0; 8];
-        protocol_reader
+        message_hub
             .read_exact(&mut buf_u64)
             .map_err(HeaderParseError::Io)?;
-        let yml_string_len: u64 = u64::from_be_bytes(buf_u64);
+        let string_len: u64 = u64::from_be_bytes(buf_u64);
 
         let mut buf = [0; 1024];
-        let content_buf = protocol_reader.read_nbytes(&mut buf, yml_string_len)?;
+        let content_buf = message_hub.read_nbytes(&mut buf, string_len)?;
         let content = String::from_utf8(content_buf)
             .map_err(|e| HeaderParseError::Utf8Error(e.utf8_error().valid_up_to()))?;
         Ok(StringMessage { content })
     }
 }
-
 
 #[derive(Debug)]
 pub struct U64Message {
@@ -144,14 +139,12 @@ impl U64Message {
         v
     }
 
-    pub fn parse<T>(
-        protocol_reader: &mut ProtocolReader<T>,
-    ) -> Result<U64Message, HeaderParseError>
+    pub fn parse<T>(message_hub: &mut T) -> Result<U64Message, HeaderParseError>
     where
-        T: Read,
+        T: MessageHub,
     {
         let mut buf_u64 = [0; 8];
-        protocol_reader
+        message_hub
             .read_exact(&mut buf_u64)
             .map_err(HeaderParseError::Io)?;
         let value: u64 = u64::from_be_bytes(buf_u64);
@@ -190,33 +183,30 @@ impl CopyOutHeader {
         v
     }
 
-    pub fn parse<T>(
-        protocol_reader: &mut ProtocolReader<T>,
-    ) -> Result<CopyOutHeader, HeaderParseError>
+    pub fn parse<T>(message_hub: &mut T) -> Result<CopyOutHeader, HeaderParseError>
     where
-        T: Read,
+        T: MessageHub,
     {
         let mut buf_u64 = [0; 8];
 
-        protocol_reader
+        message_hub
             .read_exact(&mut buf_u64)
             .map_err(HeaderParseError::Io)?;
         let content_len: u64 = u64::from_be_bytes(buf_u64);
 
-        protocol_reader
+        message_hub
             .read_exact(&mut buf_u64)
             .map_err(HeaderParseError::Io)?;
         let offset: u64 = u64::from_be_bytes(buf_u64);
 
         let mut buf_u16 = [0; 2];
-        protocol_reader
+        message_hub
             .read_exact(&mut buf_u16)
             .map_err(HeaderParseError::Io)?;
         let full_file_name_len = u16::from_be_bytes(buf_u16);
 
         let mut buf = [0; 1024];
-        let full_file_name_buf =
-            protocol_reader.read_nbytes(&mut buf, full_file_name_len as u64)?;
+        let full_file_name_buf = message_hub.read_nbytes(&mut buf, full_file_name_len as u64)?;
         let full_file_name = String::from_utf8(full_file_name_buf)
             .map_err(|e| HeaderParseError::Utf8Error(e.utf8_error().valid_up_to()))?;
         Ok(CopyOutHeader {
@@ -230,6 +220,7 @@ impl CopyOutHeader {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::protocol::CursorMessageHub;
     use failure;
     use std::io::{Cursor, Write};
 
@@ -251,7 +242,7 @@ mod tests {
 
         curor.set_position(0);
 
-        let mut pr = ProtocolReader::new(&mut curor);
+        let mut pr = CursorMessageHub::new(&mut curor);
         match pr.read_type_byte()? {
             TransferType::CopyOut => {
                 let hd = CopyOutHeader::parse(&mut pr)?;
@@ -270,7 +261,7 @@ mod tests {
         let mut curor = Cursor::new(CopyOutHeader::new(288, 5, "hello.txt").as_bytes());
         curor.set_position(0);
 
-        let mut pr = ProtocolReader::new(&mut curor);
+        let mut pr = CursorMessageHub::new(&mut curor);
         match pr.read_type_byte()? {
             TransferType::CopyOut => {
                 let hd = CopyOutHeader::parse(&mut pr)?;
@@ -283,7 +274,7 @@ mod tests {
         Ok(())
     }
 
-        #[test]
+    #[test]
     fn t_parse_server_yml() -> Result<(), failure::Error> {
         let yml_string = r##"
 hello 
@@ -292,7 +283,7 @@ world!
         let mut curor = Cursor::new(StringMessage::new(yml_string).as_server_yml_sent_bytes());
         curor.set_position(0);
 
-        let mut pr = ProtocolReader::new(&mut curor);
+        let mut pr = CursorMessageHub::new(&mut curor);
         match pr.read_type_byte()? {
             TransferType::ServerYml => {
                 let syh = StringMessage::parse(&mut pr)?;

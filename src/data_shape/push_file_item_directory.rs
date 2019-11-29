@@ -10,6 +10,14 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
+#[derive(Debug)]
+pub enum FileChanged {
+    Len(u64, u64),
+    Modified(Option<u64>, Option<u64>),
+    Sha1(Option<String>, Option<String>),
+    NoChange,
+}
+
 /// Like a disk directory, but it contains PushPrimaryFileItem.
 /// No local_dir and remote_dir, but absolute local_path and remote_path.
 #[derive(Deserialize, Serialize, Debug)]
@@ -79,11 +87,19 @@ impl PushPrimaryFileItem {
             }
         }
     }
-    pub fn changed(&self, file_path: impl AsRef<Path>) -> bool {
+    pub fn changed(&self, file_path: impl AsRef<Path>) -> FileChanged {
         if let Some(fmeta) = data_shape_util::get_file_meta(file_path, self.sha1.is_none()) {
-            fmeta.len != self.len || fmeta.modified != self.modified || fmeta.sha1 != self.sha1
+            if fmeta.len != self.len {
+                FileChanged::Len(fmeta.len, self.len)
+            } else if fmeta.modified != self.modified {
+                FileChanged::Modified(fmeta.modified, self.modified)
+            } else if &fmeta.sha1 != &self.sha1{
+                FileChanged::Sha1(fmeta.sha1, self.sha1.as_ref().cloned())
+            } else {
+                FileChanged::NoChange
+            }
         } else {
-            true
+            FileChanged::NoChange
         }
     }
 

@@ -1,28 +1,9 @@
-use crate::data_shape::{PushPrimaryFileItem, ServerYml, SlashPath};
-use crate::protocol::{ProtocolReader, StringMessage, TransferType, U64Message};
+use crate::data_shape::{FileChanged, PushPrimaryFileItem, ServerYml, SlashPath};
+use crate::protocol::{MessageHub, StdInOutMessageHub, StringMessage, TransferType, U64Message};
 use dirs;
 use filetime;
 use log::*;
 use std::io::{self, StdoutLock, Write};
-
-pub fn write_error_message(
-    stdout_handler: &mut StdoutLock,
-    message: impl AsRef<str>,
-) -> Result<(), failure::Error> {
-    let string_message = StringMessage::new(message);
-    stdout_handler.write_all(&string_message.as_string_error_sent_bytes())?;
-    stdout_handler.flush()?;
-    Ok(())
-}
-
-pub fn write_transfer_type_only(
-    stdout_handler: &mut StdoutLock,
-    transfer_type: TransferType,
-) -> Result<(), failure::Error> {
-    stdout_handler.write_all(&[transfer_type.to_u8()])?;
-    stdout_handler.flush()?;
-    Ok(())
-}
 
 /// how to determine the directories? it's in the user's home directory.
 pub fn server_receive_loop() -> Result<(), failure::Error> {
@@ -43,12 +24,12 @@ pub fn server_receive_loop() -> Result<(), failure::Error> {
 
     let mut server_yml_op: Option<ServerYml> = None;
 
-    let mut protocol_reader = ProtocolReader::new(&mut stdin_handler);
+    let mut message_hub = StdInOutMessageHub::new(stdin_handler, stdout_handler);
     trace!("protocol reader ready.");
 
-    match protocol_reader.read_type_byte()? {
+    match message_hub.read_type_byte()? {
         TransferType::ServerYml => {
-            let string_message = StringMessage::parse(&mut protocol_reader)?;
+            let string_message = StringMessage::parse(&mut message_hub)?;
             trace!("got server_yml content: {}", string_message.content);
             match serde_yaml::from_str::<ServerYml>(&string_message.content) {
                 Ok(server_yml) => {
@@ -71,53 +52,55 @@ pub fn server_receive_loop() -> Result<(), failure::Error> {
     let mut last_file_item: Option<PushPrimaryFileItem> = None;
     let mut buf = vec![0; 8192];
     loop {
-        match protocol_reader.read_type_byte()? {
+        match message_hub.read_type_byte()? {
             TransferType::FileItem => {
-                let string_message = StringMessage::parse(&mut protocol_reader)?;
+                let string_message = StringMessage::parse(&mut message_hub)?;
                 trace!("got file item: {}", string_message.content);
                 match serde_json::from_str::<PushPrimaryFileItem>(&string_message.content) {
                     Ok(file_item) => {
                         let df = home_dir.join_another(&file_item.remote_path);
-                        if file_item.changed(df.as_path()) {
-                            write_transfer_type_only(
-                                &mut stdout_handler,
-                                TransferType::FileItemChanged,
-                            )?;
-                            last_df.replace(df);
-                            last_file_item.replace(file_item);
-                        } else {
-                            write_transfer_type_only(
-                                &mut stdout_handler,
-                                TransferType::FileItemUnchanged,
-                            )?;
+                        match file_item.changed(df.as_path()) {
+                            FileChanged::NoChange => {
+                                message_hub
+                                    .write_transfer_type_only(TransferType::FileItemUnchanged)?;
+                            }
+                            fc => {
+                                let string_message = StringMessage::new(format!("{:?}", fc));
+                                message_hub.write_and_flush(
+                                    &string_message.as_string_sent_bytes_with_header(
+                                        TransferType::FileItemChanged,
+                                    ),
+                                )?;
+                                last_df.replace(df);
+                                last_file_item.replace(file_item);
+                            }
                         }
                     }
                     Err(err) => {
-                        write_error_message(&mut stdout_handler, format!("{:?}", err))?;
+                        message_hub.write_error_message(format!("{:?}", err))?;
                     }
                 };
             }
             TransferType::StartSend => {
-                let content_len = U64Message::parse(&mut protocol_reader)?;
+                let content_len = U64Message::parse(&mut message_hub)?;
                 if let Some(df) = last_df.take() {
                     trace!("copy to file: {:?}", df.as_path());
                     if let Err(err) =
-                        protocol_reader.copy_to_file(&mut buf, content_len.value, df.as_path())
+                        message_hub.copy_to_file(&mut buf, content_len.value, df.as_path())
                     {
-                        write_error_message(&mut stdout_handler, format!("{:?}", err))?;
+                        message_hub.write_error_message(format!("{:?}", err))?;
                     } else {
                         if let Some(lfi) = last_file_item.as_ref() {
                             if let Some(md) = lfi.modified {
                                 let ft = filetime::FileTime::from_unix_time(md as i64, 0);
                                 filetime::set_file_mtime(df.as_path(), ft)?;
                             } else {
-                                write_error_message(
-                                    &mut stdout_handler,
+                                message_hub.write_error_message(
                                     "push_primary_file_item has no modified value.",
                                 )?;
                             }
                         } else {
-                            write_error_message(&mut stdout_handler, "last_file_item is empty.")?;
+                            message_hub.write_error_message("last_file_item is empty.")?;
                         }
                     }
                 } else {

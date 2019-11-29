@@ -6,7 +6,7 @@ use super::{
 };
 use crate::actions::{copy_a_file_item, copy_a_file_sftp, copy_file, ssh_util, SyncDirReport};
 use crate::db_accesses::{scheduler_util, DbAccess};
-use crate::protocol::{ProtocolReader, StringMessage, TransferType, U64Message};
+use crate::protocol::{MessageHub, SshChannelMessageHub, StringMessage, TransferType, U64Message};
 use base64;
 use bzip2::write::BzEncoder;
 use bzip2::Compression;
@@ -22,7 +22,7 @@ use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
-use std::{fs, io, io::Seek, io::Write};
+use std::{fs, io, io::Seek};
 use tar::Builder;
 
 pub const CRON_NAME_SYNC_PULL_DIRS: &str = "sync-pull-dirs";
@@ -1267,16 +1267,6 @@ where
         }
     }
 
-    pub fn write_channel(
-        &self,
-        protocol_reader: &mut ProtocolReader<ssh2::Channel>,
-        bytes: &[u8],
-    ) -> Result<(), failure::Error> {
-        protocol_reader.get_inner().write_all(bytes)?;
-        protocol_reader.get_inner().flush()?;
-        Ok(())
-    }
-
     pub fn client_push_loop(
         &self,
         pb: &mut Indicator,
@@ -1293,7 +1283,7 @@ where
         trace!("invoke remote: {}", cmd);
         channel.exec(&cmd).expect("start remote server-loop");
 
-        let mut protocol_reader = ProtocolReader::new(&mut channel);
+        let mut message_hub = SshChannelMessageHub::new(channel);
 
         let server_yml = StringMessage::from_path(
             self.yml_location
@@ -1301,32 +1291,26 @@ where
                 .expect("yml_location should exist.")
                 .as_path(),
         );
-        self.write_channel(
-            &mut protocol_reader,
-            server_yml.as_server_yml_sent_bytes().as_slice(),
-        )?;
+        message_hub.write_and_flush(server_yml.as_server_yml_sent_bytes().as_slice())?;
         let mut changed = 0_u64;
         let mut unchanged = 0_u64;
         let mut has_errror = 0_u64;
         // after sent server_yml, will send push_primary_file_item repeatly, when finish sending follow a RepeatDone message.
         for dir in self.server_yml.directories.iter() {
-            trace!("start iterate {:?}", dir);
             let push_file_items = dir.push_file_item_iter(
                 &self.app_conf.app_instance_id,
                 &dir.local_dir,
                 self.app_conf.skip_sha1,
             );
             for fi in push_file_items {
-                self.write_channel(&mut protocol_reader, &fi.as_sent_bytes())?;
-                match protocol_reader.read_type_byte().expect("read type byte.") {
+                message_hub.write_and_flush(&fi.as_sent_bytes())?;
+                match message_hub.read_type_byte().expect("read type byte.") {
                     TransferType::FileItemChanged => {
-                        trace!("changed file.");
+                        let change_message = StringMessage::parse(&mut message_hub)?;
+                        trace!("changed file: {}.", change_message.content);
                         let file_len = fi.local_path.as_path().metadata()?.len();
                         let u64_message = U64Message::new(file_len);
-                        self.write_channel(
-                            &mut protocol_reader,
-                            &u64_message.as_start_send_bytes(),
-                        )?;
+                        message_hub.write_and_flush(&u64_message.as_start_send_bytes())?;
                         trace!("start send header sent.");
                         let mut buf = [0; 8192];
                         let mut file = fs::OpenOptions::new()
@@ -1336,10 +1320,10 @@ where
                         loop {
                             let readed = file.read(&mut buf)?;
                             if readed == 0 {
-                                protocol_reader.get_inner().flush()?;
+                                message_hub.write_and_flush(&[])?;
                                 break;
                             } else {
-                                self.write_channel(&mut protocol_reader, &buf[..readed])?;
+                                message_hub.write_and_flush(&buf[..readed])?;
                             }
                         }
                         changed += 1;
@@ -1350,17 +1334,14 @@ where
                         trace!("unchanged file.");
                     }
                     TransferType::StringError => {
-                        let ss = StringMessage::parse(&mut protocol_reader)?;
+                        let ss = StringMessage::parse(&mut message_hub)?;
                         error!("string error: {:?}", ss.content);
                     }
                     i => error!("got unexpected transfer type {:?}", i),
                 }
             }
         }
-        protocol_reader
-            .get_inner()
-            .write_all(&[TransferType::RepeatDone.to_u8()])?;
-        protocol_reader.get_inner().flush()?;
+        message_hub.write_and_flush(&[TransferType::RepeatDone.to_u8()])?;
         info!("changed: {}, unchanged: {}", changed, unchanged);
         Ok(None)
     }
@@ -1443,6 +1424,7 @@ mod tests {
             vec![
                 "data_shape::server",
                 "data_shape::app_conf",
+                "protocol",
                 "action::copy_file",
             ],
             Some(vec!["ssh2"]),
