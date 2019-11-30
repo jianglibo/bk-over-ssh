@@ -1,16 +1,17 @@
 use super::{
-    app_conf, rolling_files, AppRole, AuthMethod, Directory, FileItemDirectories, FileItemMap,
-    FileItemProcessResult, FileItemProcessResultStats, Indicator, MiniAppConf, PbProperties,
-    PrimaryFileItem, ProgressWriter, PruneStrategy, RelativeFileItem, ScheduleItem, SlashPath,
-    SyncType, ClientPushProgressBar,
+    app_conf, rolling_files, AppRole, AuthMethod, ClientPushProgressBar, Directory,
+    FileItemDirectories, FileItemMap, FileItemProcessResult, FileItemProcessResultStats, Indicator,
+    MiniAppConf, PbProperties, PrimaryFileItem, ProgressWriter, PruneStrategy, RelativeFileItem,
+    ScheduleItem, SlashPath, SyncType,
 };
 use crate::actions::{copy_a_file_item, copy_a_file_sftp, copy_file, ssh_util, SyncDirReport};
-use crate::db_accesses::{scheduler_util, DbAccess};
+use crate::db_accesses::DbAccess;
 use crate::protocol::{MessageHub, SshChannelMessageHub, StringMessage, TransferType, U64Message};
 use base64;
 use bzip2::write::BzEncoder;
 use bzip2::Compression;
 use chrono::Local;
+use indicatif::ProgressStyle;
 use log::*;
 use r2d2;
 use serde::{Deserialize, Serialize};
@@ -23,7 +24,6 @@ use std::process::Command;
 use std::time::Instant;
 use std::{fs, io, io::Seek, io::Write};
 use tar::Builder;
-use indicatif::{ProgressStyle};
 
 pub const CRON_NAME_SYNC_PULL_DIRS: &str = "sync-pull-dirs";
 pub const CRON_NAME_SYNC_PUSH_DIRS: &str = "sync-push-dirs";
@@ -1188,51 +1188,51 @@ where
             .cloned()
     }
 
-    fn check_skip_cron(&self, cron_name: &str) -> bool {
-        self.app_conf.skip_cron
-            || if let Some(si) = self.find_cron_by_name(cron_name) {
-                match scheduler_util::need_execute(
-                    self.db_access.as_ref(),
-                    self.yml_location.as_ref().unwrap().to_str().unwrap(),
-                    &si.name,
-                    &si.cron,
-                ) {
-                    (true, None) => true,
-                    (false, Some(dt)) => {
-                        eprintln!(
-                            "cron time didn't meet yet. next execution scheduled at: {:?}",
-                            dt
-                        );
-                        false
-                    }
-                    (_, _) => false,
-                }
-            } else {
-                error!("Can't find cron item with name: {}", cron_name);
-                false
-            }
-    }
+    // fn check_skip_cron(&self, cron_name: &str) -> bool {
+    //     self.app_conf.skip_cron
+    //         || if let Some(si) = self.find_cron_by_name(cron_name) {
+    //             match scheduler_util::need_execute(
+    //                 self.db_access.as_ref(),
+    //                 self.yml_location.as_ref().unwrap().to_str().unwrap(),
+    //                 &si.name,
+    //                 &si.cron,
+    //             ) {
+    //                 (true, None) => true,
+    //                 (false, Some(dt)) => {
+    //                     eprintln!(
+    //                         "cron time didn't meet yet. next execution scheduled at: {:?}",
+    //                         dt
+    //                     );
+    //                     false
+    //                 }
+    //                 (_, _) => false,
+    //             }
+    //         } else {
+    //             error!("Can't find cron item with name: {}", cron_name);
+    //             false
+    //         }
+    // }
 
     /// We can push files to multiple destinations simultaneously.
     pub fn sync_push_dirs(
         &self,
         progress_bar: &mut Indicator,
     ) -> Result<Option<SyncDirReport>, failure::Error> {
-        if self.check_skip_cron("sync-push-dirs") {
-            info!(
-                "start sync_push_dirs on server: {} at: {}",
-                self.get_host(),
-                Local::now()
-            );
-            let start = Instant::now();
-            let started_at = Local::now();
+        // if self.check_skip_cron("sync-push-dirs") {
+        info!(
+            "start sync_push_dirs on server: {} at: {}",
+            self.get_host(),
+            Local::now()
+        );
+        let start = Instant::now();
+        let started_at = Local::now();
 
-            let rs = self.start_push_sync_working_file_list(progress_bar)?;
-            self.confirm_local_sync()?;
-            Ok(Some(SyncDirReport::new(start.elapsed(), started_at, rs)))
-        } else {
-            Ok(None)
-        }
+        let rs = self.start_push_sync_working_file_list(progress_bar)?;
+        self.confirm_local_sync()?;
+        Ok(Some(SyncDirReport::new(start.elapsed(), started_at, rs)))
+        // } else {
+        //     Ok(None)
+        // }
     }
     /// If as_service is true, one must connect to server first, and then after executing task close the connection.
     pub fn sync_pull_dirs(
@@ -1240,39 +1240,34 @@ where
         pb: &mut Indicator,
         as_service: bool,
     ) -> Result<Option<SyncDirReport>, failure::Error> {
-        if as_service || self.check_skip_cron(CRON_NAME_SYNC_PULL_DIRS) {
-            info!(
-                "start sync_pull_dirs on server: {} at: {}",
-                self.get_host(),
-                Local::now()
-            );
-            if as_service {
-                self.session.take();
-                self.connect()?;
-            }
-            let start = Instant::now();
-            let started_at = Local::now();
-            let rs = self.start_pull_sync_working_file_list(pb)?;
-            self.remove_working_file_list_file();
-            self.confirm_remote_sync()?;
-            if as_service {
-                if let Some(sess) = self.session.as_mut() {
-                    sess.disconnect(None, "", None).ok();
-                }
-                self.session.take();
-            }
-            Ok(Some(SyncDirReport::new(start.elapsed(), started_at, rs)))
-        } else {
-            Ok(None)
+        // if as_service || self.check_skip_cron(CRON_NAME_SYNC_PULL_DIRS) {
+        info!(
+            "start sync_pull_dirs on server: {} at: {}",
+            self.get_host(),
+            Local::now()
+        );
+        if as_service {
+            self.session.take();
+            self.connect()?;
         }
+        let start = Instant::now();
+        let started_at = Local::now();
+        let rs = self.start_pull_sync_working_file_list(pb)?;
+        self.remove_working_file_list_file();
+        self.confirm_remote_sync()?;
+        if as_service {
+            if let Some(sess) = self.session.as_mut() {
+                sess.disconnect(None, "", None).ok();
+            }
+            self.session.take();
+        }
+        Ok(Some(SyncDirReport::new(start.elapsed(), started_at, rs)))
+        // } else {
+        //     Ok(None)
+        // }
     }
 
-    pub fn client_push_loop(
-        &self,
-        pb: &mut Indicator,
-        as_service: bool,
-    ) -> Result<Option<SyncDirReport>, failure::Error> {
-
+    pub fn client_push_loop(&self) -> Result<Option<SyncDirReport>, failure::Error> {
         let session = self.create_ssh_session()?;
         let mut channel: ssh2::Channel = session.channel_session()?;
         let cmd = format!(
@@ -1295,7 +1290,6 @@ where
         message_hub.write_and_flush(server_yml.as_server_yml_sent_bytes().as_slice())?;
         let mut changed = 0_u64;
         let mut unchanged = 0_u64;
-        let mut has_errror = 0_u64;
         // after sent server_yml, will send push_primary_file_item repeatly, when finish sending follow a RepeatDone message.
         for dir in self.server_yml.directories.iter() {
             let push_file_items = dir.push_file_item_iter(
@@ -1418,10 +1412,10 @@ mod tests {
     use bzip2::write::{BzDecoder, BzEncoder};
     use bzip2::Compression;
     use glob::Pattern;
+    use indicatif::{ProgressBar, ProgressStyle};
     use std::fs;
     use std::io::{self, Write};
     use std::net::TcpStream;
-    use indicatif::{ProgressBar, ProgressStyle};
 
     fn log() {
         log_util::setup_logger_detail(
@@ -1492,7 +1486,7 @@ mod tests {
     fn t_client_loop() -> Result<(), failure::Error> {
         log();
         let mut app_conf = tutil::load_demo_app_conf_sqlite(None, AppRole::ActiveLeaf);
-        app_conf.mini_app_conf.skip_cron = true;
+        // app_conf.mini_app_conf.skip_cron = true;
         app_conf.mini_app_conf.verbose = true;
         app_conf.mini_app_conf.console_log = true;
 
@@ -1509,9 +1503,7 @@ mod tests {
         )
         .expect("get slash path from home_dir");
 
-        let mut indicator = Indicator::new(None);
-
-        server.client_push_loop(&mut indicator, false)?;
+        server.client_push_loop()?;
 
         info!("a_dir is {:?}", a_dir);
         let cc_txt = a_dir.join("b").join("c c").join("c c .txt");
@@ -1528,7 +1520,7 @@ mod tests {
     fn t_sync_push_dirs() -> Result<(), failure::Error> {
         log();
         let mut app_conf = tutil::load_demo_app_conf_sqlite(None, AppRole::ActiveLeaf);
-        app_conf.mini_app_conf.skip_cron = true;
+        // app_conf.mini_app_conf.skip_cron = true;
         app_conf.mini_app_conf.verbose = true;
 
         assert!(app_conf.mini_app_conf.app_role == Some(AppRole::ActiveLeaf));
@@ -1582,7 +1574,7 @@ mod tests {
     fn t_sync_pull_dirs() -> Result<(), failure::Error> {
         log();
         let mut app_conf = tutil::load_demo_app_conf_sqlite(None, AppRole::PullHub);
-        app_conf.mini_app_conf.skip_cron = true;
+        // app_conf.mini_app_conf.skip_cron = true;
         app_conf.mini_app_conf.verbose = true;
 
         assert!(app_conf.mini_app_conf.app_role == Some(AppRole::PullHub));
@@ -1767,26 +1759,26 @@ mod tests {
 
     #[test]
     fn t_pb_in_action() -> Result<(), failure::Error> {
-        let bar = ProgressBar::new(1000);
-        bar.set_style(
+        let progress_bar = ProgressBar::new(1000);
+        progress_bar.set_style(
             ProgressStyle::default_bar()
                 .template("{prefix}[{elapsed_precise}] {bar:40.cyan/blue} {bytes:>7}/{total_bytes:7} {bytes_per_sec} {msg}")
                 .progress_chars("##-"),
         );
         let three = std::time::Duration::from_millis(10);
-        bar.set_message("a");
+        progress_bar.set_message("a");
         for _ in 0..1000 {
-            bar.inc(1);
+            progress_bar.inc(1);
             std::thread::sleep(three);
         }
-        bar.reset();
-        bar.set_length(2000);
-        bar.set_message("hello b");
+        progress_bar.reset();
+        progress_bar.set_length(2000);
+        progress_bar.set_message("hello b");
         for _ in 0..2000 {
-            bar.inc(1);
+            progress_bar.inc(1);
             std::thread::sleep(three);
-        }        
-        bar.finish();
+        }
+        progress_bar.finish();
         Ok(())
     }
 }

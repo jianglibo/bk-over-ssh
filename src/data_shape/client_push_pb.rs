@@ -23,7 +23,7 @@ impl ClientPushProgressBar {
     }
 
     pub fn push_one(&mut self, file_len: u64, file_name: impl AsRef<str>) {
-        self.consumed_files -= 1;
+        self.consumed_files += 1;
         self.pb.reset();
         self.pb.set_length(file_len);
         self.pb.set_message(file_name.as_ref());
@@ -39,7 +39,7 @@ impl ClientPushProgressBar {
     }
 
     pub fn skip_one(&mut self) {
-        self.consumed_files -= 1;
+        self.consumed_files += 1;
         self.pb.reset();
         self.pb.set_length(!0);
         self.pb.set_message("skipping");

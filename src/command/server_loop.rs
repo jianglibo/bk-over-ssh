@@ -3,14 +3,14 @@ use crate::protocol::{MessageHub, StdInOutMessageHub, StringMessage, TransferTyp
 use dirs;
 use filetime;
 use log::*;
-use std::io::{self, StdoutLock, Write};
+use std::io::{self};
 
 /// how to determine the directories? it's in the user's home directory.
 pub fn server_receive_loop() -> Result<(), failure::Error> {
     let stdin = io::stdin();
     let stdout = io::stdout();
-    let mut stdin_handler = stdin.lock();
-    let mut stdout_handler = stdout.lock();
+    let stdin_handler = stdin.lock();
+    let stdout_handler = stdout.lock();
 
     // home_dir joins app_instance_id.
     let home_dir = SlashPath::from_path(
@@ -89,19 +89,17 @@ pub fn server_receive_loop() -> Result<(), failure::Error> {
                         message_hub.copy_to_file(&mut buf, content_len.value, df.as_path())
                     {
                         message_hub.write_error_message(format!("{:?}", err))?;
-                    } else {
-                        if let Some(lfi) = last_file_item.as_ref() {
-                            if let Some(md) = lfi.modified {
-                                let ft = filetime::FileTime::from_unix_time(md as i64, 0);
-                                filetime::set_file_mtime(df.as_path(), ft)?;
-                            } else {
-                                message_hub.write_error_message(
-                                    "push_primary_file_item has no modified value.",
-                                )?;
-                            }
+                    } else if let Some(lfi) = last_file_item.as_ref() {
+                        if let Some(md) = lfi.modified {
+                            let ft = filetime::FileTime::from_unix_time(md as i64, 0);
+                            filetime::set_file_mtime(df.as_path(), ft)?;
                         } else {
-                            message_hub.write_error_message("last_file_item is empty.")?;
+                            message_hub.write_error_message(
+                                "push_primary_file_item has no modified value.",
+                            )?;
                         }
+                    } else {
+                        message_hub.write_error_message("last_file_item is empty.")?;
                     }
                 } else {
                     error!("empty last_df.");

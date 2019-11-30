@@ -137,7 +137,7 @@ fn guess_data_dir(data_dir: impl AsRef<str>) -> Result<PathBuf, failure::Error> 
 #[derive(Debug, Serialize, Clone)]
 pub struct MiniAppConf {
     pub buf_len: Option<usize>,
-    pub skip_cron: bool,
+    // pub skip_cron: bool,
     pub skip_sha1: bool,
     pub archive_cmd: Vec<String>,
     pub app_instance_id: String,
@@ -204,7 +204,7 @@ where
         mini_app_conf: MiniAppConf {
             app_instance_id: "demo-app-instance-id".to_string(),
             skip_sha1: true,
-            skip_cron: false,
+            // skip_cron: false,
             buf_len: None,
             archive_cmd: Vec::new(),
             app_role: Some(app_role),
@@ -333,7 +333,7 @@ where
                             mini_app_conf: MiniAppConf {
                                 app_instance_id,
                                 skip_sha1: true,
-                                skip_cron: false,
+                                // skip_cron: false,
                                 buf_len: None,
                                 archive_cmd,
                                 app_role: app_role.cloned(),

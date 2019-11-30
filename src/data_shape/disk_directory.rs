@@ -405,11 +405,22 @@ impl Directory {
     }
 
     pub fn count_local_dir_files(&self) -> u64 {
+        let includes_patterns = self.includes_patterns.clone();
+        let excludes_patterns = self.excludes_patterns.clone();
+
         WalkDir::new(self.local_dir.as_path())
             .follow_links(false)
             .into_iter()
             .filter_map(|dir_entry| dir_entry.ok())
             .filter(|dir_entry| dir_entry.file_type().is_file())
+            .map(|dir_entry| dir_entry.path().to_path_buf())
+            .filter_map(move |disk_file_path_buf| {
+                match_path(
+                    disk_file_path_buf,
+                    includes_patterns.as_ref(),
+                    excludes_patterns.as_ref(),
+                )
+            })
             .count() as u64
     }
 
@@ -487,10 +498,6 @@ impl Directory {
                 .count();
         }
         Ok(())
-    }
-
-    pub fn to_yml_string(&self) -> Result<String, failure::Error> {
-        Ok(serde_yaml::to_string(&self)?)
     }
 }
 

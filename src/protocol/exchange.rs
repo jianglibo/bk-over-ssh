@@ -2,7 +2,7 @@ use super::{HeaderParseError, MessageHub};
 use log::*;
 use std::convert::TryInto;
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{Read};
 use std::path::Path;
 
 #[derive(Debug, PartialEq)]
@@ -152,127 +152,127 @@ impl U64Message {
     }
 }
 
-#[derive(Debug)]
-pub struct CopyOutHeader {
-    pub content_len: u64,
-    pub offset: u64,
-    pub full_file_name: String,
-}
+// #[derive(Debug)]
+// pub struct CopyOutHeader {
+//     pub content_len: u64,
+//     pub offset: u64,
+//     pub full_file_name: String,
+// }
 
-impl CopyOutHeader {
-    pub fn new(content_len: u64, offset: u64, full_file_name: impl AsRef<str>) -> Self {
-        Self {
-            content_len,
-            offset,
-            full_file_name: full_file_name.as_ref().to_owned(),
-        }
-    }
+// impl CopyOutHeader {
+//     pub fn new(content_len: u64, offset: u64, full_file_name: impl AsRef<str>) -> Self {
+//         Self {
+//             content_len,
+//             offset,
+//             full_file_name: full_file_name.as_ref().to_owned(),
+//         }
+//     }
 
-    pub fn as_bytes(&self) -> Vec<u8> {
-        let mut v = Vec::new();
-        v.insert(0, TransferType::CopyOut.to_u8());
-        v.append(&mut self.content_len.to_be_bytes().to_vec());
-        v.append(&mut self.offset.to_be_bytes().to_vec());
-        let file_name_len: u16 = self
-            .full_file_name
-            .len()
-            .try_into()
-            .expect("file name length is in limit of u16");
-        v.append(&mut file_name_len.to_be_bytes().to_vec());
-        v.append(&mut self.full_file_name.as_bytes().to_vec());
-        v
-    }
+//     pub fn as_bytes(&self) -> Vec<u8> {
+//         let mut v = Vec::new();
+//         v.insert(0, TransferType::CopyOut.to_u8());
+//         v.append(&mut self.content_len.to_be_bytes().to_vec());
+//         v.append(&mut self.offset.to_be_bytes().to_vec());
+//         let file_name_len: u16 = self
+//             .full_file_name
+//             .len()
+//             .try_into()
+//             .expect("file name length is in limit of u16");
+//         v.append(&mut file_name_len.to_be_bytes().to_vec());
+//         v.append(&mut self.full_file_name.as_bytes().to_vec());
+//         v
+//     }
 
-    pub fn parse<T>(message_hub: &mut T) -> Result<CopyOutHeader, HeaderParseError>
-    where
-        T: MessageHub,
-    {
-        let mut buf_u64 = [0; 8];
+//     pub fn parse<T>(message_hub: &mut T) -> Result<CopyOutHeader, HeaderParseError>
+//     where
+//         T: MessageHub,
+//     {
+//         let mut buf_u64 = [0; 8];
 
-        message_hub
-            .read_exact(&mut buf_u64)
-            .map_err(HeaderParseError::Io)?;
-        let content_len: u64 = u64::from_be_bytes(buf_u64);
+//         message_hub
+//             .read_exact(&mut buf_u64)
+//             .map_err(HeaderParseError::Io)?;
+//         let content_len: u64 = u64::from_be_bytes(buf_u64);
 
-        message_hub
-            .read_exact(&mut buf_u64)
-            .map_err(HeaderParseError::Io)?;
-        let offset: u64 = u64::from_be_bytes(buf_u64);
+//         message_hub
+//             .read_exact(&mut buf_u64)
+//             .map_err(HeaderParseError::Io)?;
+//         let offset: u64 = u64::from_be_bytes(buf_u64);
 
-        let mut buf_u16 = [0; 2];
-        message_hub
-            .read_exact(&mut buf_u16)
-            .map_err(HeaderParseError::Io)?;
-        let full_file_name_len = u16::from_be_bytes(buf_u16);
+//         let mut buf_u16 = [0; 2];
+//         message_hub
+//             .read_exact(&mut buf_u16)
+//             .map_err(HeaderParseError::Io)?;
+//         let full_file_name_len = u16::from_be_bytes(buf_u16);
 
-        let mut buf = [0; 1024];
-        let full_file_name_buf = message_hub.read_nbytes(&mut buf, full_file_name_len as u64)?;
-        let full_file_name = String::from_utf8(full_file_name_buf)
-            .map_err(|e| HeaderParseError::Utf8Error(e.utf8_error().valid_up_to()))?;
-        Ok(CopyOutHeader {
-            content_len,
-            offset,
-            full_file_name,
-        })
-    }
-}
+//         let mut buf = [0; 1024];
+//         let full_file_name_buf = message_hub.read_nbytes(&mut buf, full_file_name_len as u64)?;
+//         let full_file_name = String::from_utf8(full_file_name_buf)
+//             .map_err(|e| HeaderParseError::Utf8Error(e.utf8_error().valid_up_to()))?;
+//         Ok(CopyOutHeader {
+//             content_len,
+//             offset,
+//             full_file_name,
+//         })
+//     }
+// }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::protocol::CursorMessageHub;
     use failure;
-    use std::io::{Cursor, Write};
+    use std::io::{Cursor};
 
-    #[test]
-    fn t_parse_copy_out_header() -> Result<(), failure::Error> {
-        let mut curor = Cursor::new(Vec::new());
-        let content_len = 288_u64;
-        let offset = 5_u64;
-        let file_name = "hello.txt";
-        let file_name_len: u16 = file_name
-            .len()
-            .try_into()
-            .expect("file name length is in limit of u16");
-        curor.write_all(&[TransferType::CopyOut.to_u8()])?;
-        curor.write_all(&content_len.to_be_bytes())?;
-        curor.write_all(&offset.to_be_bytes())?;
-        curor.write_all(&file_name_len.to_be_bytes())?;
-        curor.write_all(file_name.as_bytes())?;
+    // #[test]
+    // fn t_parse_copy_out_header() -> Result<(), failure::Error> {
+    //     let mut curor = Cursor::new(Vec::new());
+    //     let content_len = 288_u64;
+    //     let offset = 5_u64;
+    //     let file_name = "hello.txt";
+    //     let file_name_len: u16 = file_name
+    //         .len()
+    //         .try_into()
+    //         .expect("file name length is in limit of u16");
+    //     curor.write_all(&[TransferType::CopyOut.to_u8()])?;
+    //     curor.write_all(&content_len.to_be_bytes())?;
+    //     curor.write_all(&offset.to_be_bytes())?;
+    //     curor.write_all(&file_name_len.to_be_bytes())?;
+    //     curor.write_all(file_name.as_bytes())?;
 
-        curor.set_position(0);
+    //     curor.set_position(0);
 
-        let mut pr = CursorMessageHub::new(&mut curor);
-        match pr.read_type_byte()? {
-            TransferType::CopyOut => {
-                let hd = CopyOutHeader::parse(&mut pr)?;
+    //     let mut pr = CursorMessageHub::new(&mut curor);
+    //     match pr.read_type_byte()? {
+    //         TransferType::CopyOut => {
+    //             let hd = CopyOutHeader::parse(&mut pr)?;
 
-                assert_eq!(hd.content_len, content_len);
-                assert_eq!(hd.offset, offset);
-                assert_eq!(hd.full_file_name, file_name);
-            }
-            _ => panic!("unexpected transfer type"),
-        }
-        Ok(())
-    }
+    //             assert_eq!(hd.content_len, content_len);
+    //             assert_eq!(hd.offset, offset);
+    //             assert_eq!(hd.full_file_name, file_name);
+    //         }
+    //         _ => panic!("unexpected transfer type"),
+    //     }
+    //     Ok(())
+    // }
 
-    #[test]
-    fn t_parse_copy_out_header_1() -> Result<(), failure::Error> {
-        let mut curor = Cursor::new(CopyOutHeader::new(288, 5, "hello.txt").as_bytes());
-        curor.set_position(0);
+    // #[test]
+    // fn t_parse_copy_out_header_1() -> Result<(), failure::Error> {
+    //     let mut curor = Cursor::new(CopyOutHeader::new(288, 5, "hello.txt").as_bytes());
+    //     curor.set_position(0);
 
-        let mut pr = CursorMessageHub::new(&mut curor);
-        match pr.read_type_byte()? {
-            TransferType::CopyOut => {
-                let hd = CopyOutHeader::parse(&mut pr)?;
-                assert_eq!(hd.content_len, 288);
-                assert_eq!(hd.offset, 5);
-                assert_eq!(hd.full_file_name, "hello.txt");
-            }
-            _ => panic!("unexpected transfer type"),
-        }
-        Ok(())
-    }
+    //     let mut pr = CursorMessageHub::new(&mut curor);
+    //     match pr.read_type_byte()? {
+    //         TransferType::CopyOut => {
+    //             let hd = CopyOutHeader::parse(&mut pr)?;
+    //             assert_eq!(hd.content_len, 288);
+    //             assert_eq!(hd.offset, 5);
+    //             assert_eq!(hd.full_file_name, "hello.txt");
+    //         }
+    //         _ => panic!("unexpected transfer type"),
+    //     }
+    //     Ok(())
+    // }
 
     #[test]
     fn t_parse_server_yml() -> Result<(), failure::Error> {

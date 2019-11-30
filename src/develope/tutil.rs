@@ -229,10 +229,9 @@ mod tests {
 
     #[test]
     fn t_channel_io() -> Result<(), failure::Error> {
-        let mut stdin = io::stdin();
         let mut stdout = io::stdout();
 
-        let mut array: [u8; 3] = [0; 3];
+        let array: [u8; 3] = [0; 3];
 
         stdout.write_all(&array[..])?;
 

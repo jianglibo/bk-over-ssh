@@ -1,11 +1,11 @@
 use crate::actions;
 use crate::data_shape::{server, AppConf, Indicator, Server};
-use crate::db_accesses::{SqliteDbAccess, CountItemParam};
+use crate::db_accesses::{CountItemParam, SqliteDbAccess};
 use job_scheduler::{Job, JobScheduler};
+use log::*;
 use r2d2_sqlite::SqliteConnectionManager;
 use rayon::prelude::*;
 use std::time::Duration;
-use log::*;
 
 use super::*;
 
@@ -18,7 +18,6 @@ pub fn sync_push_dirs(
     force: bool,
 ) -> Result<(), failure::Error> {
     if app_conf.mini_app_conf.app_role != Some(AppRole::ActiveLeaf) {
-
         bail!("only when app-role is ActiveLeaf can call sync_push_dirs");
     }
     let (progress_bar_join_handler, server_indicator_pairs) =
@@ -33,7 +32,6 @@ pub fn sync_push_dirs(
     wait_progress_bar_finish(progress_bar_join_handler);
     Ok(())
 }
-
 
 fn push_one_server(
     server: &mut Server<SqliteConnectionManager, SqliteDbAccess>,

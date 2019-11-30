@@ -2,7 +2,7 @@ pub mod error;
 pub mod exchange;
 
 pub use error::HeaderParseError;
-pub use exchange::{CopyOutHeader, StringMessage, TransferType, U64Message};
+pub use exchange::{StringMessage, TransferType, U64Message};
 use log::*;
 use ssh2;
 use std::convert::TryInto;

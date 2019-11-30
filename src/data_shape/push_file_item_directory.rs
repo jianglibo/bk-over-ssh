@@ -93,7 +93,7 @@ impl PushPrimaryFileItem {
                 FileChanged::Len(fmeta.len, self.len)
             } else if fmeta.modified != self.modified {
                 FileChanged::Modified(fmeta.modified, self.modified)
-            } else if &fmeta.sha1 != &self.sha1{
+            } else if fmeta.sha1 != self.sha1 {
                 FileChanged::Sha1(fmeta.sha1, self.sha1.as_ref().cloned())
             } else {
                 FileChanged::NoChange

@@ -53,10 +53,6 @@ args:
         help: put application in long running state.
         long: as-service
         required: false
-    - skip-cron:
-        help: skip cron schedule, execute right now.
-        long: skip-cron
-        required: false
     - enable-sha1:
         help: detect file changing on file's sha1.
         long: enable-sha1
@@ -163,13 +159,6 @@ subcommands:
                 long: server-yml
                 required: true
                 index: 1
-    - get-file:
-        about: cp a file.
-        args:
-            - file:
-                help: the file to manual.
-                required: true
-                index: 1        
     - mkdir:
         about: create a new directory.
         args:

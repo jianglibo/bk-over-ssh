@@ -40,7 +40,7 @@ use mail::send_test_mail;
 use std::env;
 use std::sync::Arc;
 use std::time::Instant;
-use std::{fs, io, io::BufRead, io::Write, io::Read};
+use std::{fs, io, io::BufRead, io::Read, io::Write};
 
 use actions::{ssh_util, SyncDirReport};
 use base64;
@@ -65,7 +65,7 @@ fn main() -> Result<(), failure::Error> {
     if let ("pong", Some(_sub_matches)) = m.subcommand() {
         let mut stdin = io::stdin();
         let mut stdout = io::stdout();
-        let mut buf = [0;8];
+        let mut buf = [0; 8];
         stdin.read_exact(&mut buf)?;
         let len = u64::from_be_bytes(buf);
         info!("got ping: {}", len);
@@ -84,19 +84,6 @@ fn main() -> Result<(), failure::Error> {
         if let Err(err) = command::server_loop::server_receive_loop() {
             error!("server-receive-loop caught error: {:?}", err);
         }
-        return Ok(());
-    }
-
-    if let ("get-file", Some(_sub_matches)) = m.subcommand() {
-        let stdin = io::stdin();
-        let stdout = io::stdout();
-        let mut stdin_handler = stdin.lock();
-        let mut stdout_handler = stdout.lock();
-
-        let mut f = fs::OpenOptions::new()
-            .read(true)
-            .open("E:/ws/bk-over-ssh/fixtures/qrcode.png")?;
-        io::copy(&mut f, &mut io::stdout())?;
         return Ok(());
     }
 
@@ -135,7 +122,7 @@ fn main() -> Result<(), failure::Error> {
         app_conf.set_app_instance_id(aii);
     }
 
-    app_conf.mini_app_conf.skip_cron = m.is_present("skip-cron");
+    // app_conf.mini_app_conf.skip_cron = m.is_present("skip-cron");
     app_conf.mini_app_conf.skip_sha1 = !m.is_present("enable-sha1");
     app_conf.mini_app_conf.as_service = m.is_present("as-service");
 
@@ -206,6 +193,7 @@ fn main_entry<'a>(
             command::sync_pull_dirs(&app_conf, server_yml)?;
         }
         ("client-push-loop", Some(sub_matches)) => {
+            app_conf.mini_app_conf.app_role.replace(AppRole::ActiveLeaf);
             let server_yml = sub_matches.value_of("server-yml");
             if server_yml.is_none() {
                 app_conf.progress_bar.take();
