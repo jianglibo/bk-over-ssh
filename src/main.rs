@@ -84,7 +84,7 @@ fn main() -> Result<(), failure::Error> {
                 fs::create_dir_all(parent)?;
             }
         }
-        
+
         log_util::setup_logger_for_this_app(
             console_log,
             log_file,
@@ -137,6 +137,7 @@ fn main() -> Result<(), failure::Error> {
     app_conf.mini_app_conf.as_service = m.is_present("as-service");
 
     if !m.is_present("no-pb") && !app_conf.mini_app_conf.as_service {
+        app_conf.mini_app_conf.show_pb = true;
         app_conf
             .progress_bar
             .replace(Arc::new(MultiProgress::new()));

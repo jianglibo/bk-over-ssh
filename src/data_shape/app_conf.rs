@@ -137,7 +137,6 @@ fn guess_data_dir(data_dir: impl AsRef<str>) -> Result<PathBuf, failure::Error> 
 #[derive(Debug, Serialize, Clone)]
 pub struct MiniAppConf {
     pub buf_len: Option<usize>,
-    // pub skip_cron: bool,
     pub skip_sha1: bool,
     pub archive_cmd: Vec<String>,
     pub app_instance_id: String,
@@ -145,6 +144,7 @@ pub struct MiniAppConf {
     pub verbose: bool,
     pub console_log: bool,
     pub as_service: bool,
+    pub show_pb: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -211,6 +211,7 @@ where
             verbose: false,
             console_log: false,
             as_service: false,
+            show_pb: false,
         },
     }
 }
@@ -340,6 +341,7 @@ where
                                 verbose: false,
                                 console_log: false,
                                 as_service: false,
+                                show_pb: false,
                             },
                         };
                         Ok(app_conf)

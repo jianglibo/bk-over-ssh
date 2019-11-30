@@ -1240,7 +1240,6 @@ where
         pb: &mut Indicator,
         as_service: bool,
     ) -> Result<Option<SyncDirReport>, failure::Error> {
-        // if as_service || self.check_skip_cron(CRON_NAME_SYNC_PULL_DIRS) {
         info!(
             "start sync_pull_dirs on server: {} at: {}",
             self.get_host(),
@@ -1262,9 +1261,6 @@ where
             self.session.take();
         }
         Ok(Some(SyncDirReport::new(start.elapsed(), started_at, rs)))
-        // } else {
-        //     Ok(None)
-        // }
     }
 
     pub fn client_push_loop(&self) -> Result<Option<SyncDirReport>, failure::Error> {
@@ -1278,7 +1274,8 @@ where
         trace!("invoke remote: {}", cmd);
         channel.exec(&cmd).expect("start remote server-loop");
 
-        let mut cppb = ClientPushProgressBar::new(self.count_local_dir_files());
+        let mut cppb =
+            ClientPushProgressBar::new(self.count_local_dir_files(), self.app_conf.show_pb);
         let mut message_hub = SshChannelMessageHub::new(channel);
 
         let server_yml = StringMessage::from_path(
