@@ -41,11 +41,13 @@ use std::env;
 use std::sync::Arc;
 use std::time::Instant;
 use std::{fs, io, io::BufRead, io::Read, io::Write};
+use std::path::Path;
 
 use actions::{ssh_util, SyncDirReport};
 use base64;
 use data_shape::{AppConf, AppRole};
 use r2d2_sqlite::SqliteConnectionManager;
+
 
 /// we change mini_app_conf value here.
 fn main() -> Result<(), failure::Error> {
@@ -75,9 +77,17 @@ fn main() -> Result<(), failure::Error> {
 
     // When in server-receive-loop no configuration file is required.
     if let ("server-receive-loop", Some(_sub_matches)) = m.subcommand() {
+        let log_file = "data/server-receive-loop.log";
+        let log_file_path = Path::new(log_file);
+        if let Some(parent) = log_file_path.parent() {
+            if !parent.exists() {
+                fs::create_dir_all(parent)?;
+            }
+        }
+        
         log_util::setup_logger_for_this_app(
             console_log,
-            "data/server-receive-loop.log",
+            log_file,
             Vec::<String>::new(),
             verbose,
         )?;

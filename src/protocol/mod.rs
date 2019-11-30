@@ -99,6 +99,7 @@ pub trait MessageHub: Read + Write {
     ) -> Result<(), failure::Error> {
         let mut count = len;
         let file_path = file_path.as_ref();
+        trace!("start copy to file {:?}.", file_path);
         let parent = file_path
             .parent()
             .expect("copy_to_file should has a parent.");
@@ -129,11 +130,8 @@ pub trait MessageHub: Read + Write {
     }
 
     fn write_and_flush(&mut self, bytes: &[u8]) -> io::Result<()> {
-        // trace!("start send bytes: {:?}", bytes);
         self.write_all(bytes)?;
         self.flush()
-        // trace!("end send bytes.");
-        // r
     }
 
     fn write_error_message(&mut self, message: impl AsRef<str>) -> io::Result<()> {

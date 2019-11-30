@@ -75,7 +75,7 @@ fn client_push_loop_by_spawn_do(
                                 server.prune_backups().ok();
                             }
                         }
-                        Err(err) => println!("sync-pull-dirs failed: {:?}", err),
+                        Err(err) => println!("client-push-loop failed: {:?}", err),
                     }
                 }));
 
@@ -97,7 +97,7 @@ fn client_push_loop_by_spawn_do(
                     server.prune_backups().ok();
                 }
             }
-            Err(err) => println!("sync-pull-dirs failed: {:?}", err),
+            Err(err) => println!("client-push-loop failed {:?}", err),
         }
         None
     }

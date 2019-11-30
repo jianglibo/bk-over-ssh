@@ -30,13 +30,6 @@ impl ClientPushProgressBar {
         let prefix = format!("{}/{}", self.consumed_files, self.total_files);
         self.pb.set_prefix(prefix.as_str());
     }
-    pub fn finish(&self) {
-        self.pb.finish();
-    }
-
-    pub fn progress(&self, bytes: usize) {
-        self.pb.inc(bytes as u64);
-    }
 
     pub fn skip_one(&mut self) {
         self.consumed_files += 1;

@@ -1319,7 +1319,7 @@ where
                                 message_hub.flush()?;
                                 break;
                             } else {
-                                cppb.progress(readed);
+                                cppb.pb.inc(readed as u64);
                                 message_hub.write_all(&buf[..readed])?;
                             }
                         }
@@ -1341,7 +1341,7 @@ where
         }
         message_hub.write_and_flush(&[TransferType::RepeatDone.to_u8()])?;
         info!("changed: {}, unchanged: {}", changed, unchanged);
-        cppb.finish();
+        cppb.pb.finish_with_message("done.");
         Ok(None)
     }
 

@@ -15,6 +15,7 @@ pub enum FileChanged {
     Len(u64, u64),
     Modified(Option<u64>, Option<u64>),
     Sha1(Option<String>, Option<String>),
+    NoMetadata,
     NoChange,
 }
 
@@ -99,7 +100,7 @@ impl PushPrimaryFileItem {
                 FileChanged::NoChange
             }
         } else {
-            FileChanged::NoChange
+            FileChanged::NoMetadata
         }
     }
 
