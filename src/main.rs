@@ -73,6 +73,7 @@ fn main() -> Result<(), failure::Error> {
         return Ok(());
     }
 
+    // When in server-receive-loop no configuration file is required.
     if let ("server-receive-loop", Some(_sub_matches)) = m.subcommand() {
         log_util::setup_logger_for_this_app(
             console_log,

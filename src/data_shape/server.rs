@@ -2,7 +2,7 @@ use super::{
     app_conf, rolling_files, AppRole, AuthMethod, Directory, FileItemDirectories, FileItemMap,
     FileItemProcessResult, FileItemProcessResultStats, Indicator, MiniAppConf, PbProperties,
     PrimaryFileItem, ProgressWriter, PruneStrategy, RelativeFileItem, ScheduleItem, SlashPath,
-    SyncType,
+    SyncType, ClientPushProgressBar,
 };
 use crate::actions::{copy_a_file_item, copy_a_file_sftp, copy_file, ssh_util, SyncDirReport};
 use crate::db_accesses::{scheduler_util, DbAccess};
@@ -11,7 +11,6 @@ use base64;
 use bzip2::write::BzEncoder;
 use bzip2::Compression;
 use chrono::Local;
-use indicatif::ProgressStyle;
 use log::*;
 use r2d2;
 use serde::{Deserialize, Serialize};
@@ -24,6 +23,7 @@ use std::process::Command;
 use std::time::Instant;
 use std::{fs, io, io::Seek, io::Write};
 use tar::Builder;
+use indicatif::{ProgressStyle};
 
 pub const CRON_NAME_SYNC_PULL_DIRS: &str = "sync-pull-dirs";
 pub const CRON_NAME_SYNC_PUSH_DIRS: &str = "sync-push-dirs";
@@ -1272,7 +1272,7 @@ where
         pb: &mut Indicator,
         as_service: bool,
     ) -> Result<Option<SyncDirReport>, failure::Error> {
-        let file_count = self.count_local_dir_files();
+
         let session = self.create_ssh_session()?;
         let mut channel: ssh2::Channel = session.channel_session()?;
         let cmd = format!(
@@ -1283,6 +1283,7 @@ where
         trace!("invoke remote: {}", cmd);
         channel.exec(&cmd).expect("start remote server-loop");
 
+        let mut cppb = ClientPushProgressBar::new(self.count_local_dir_files());
         let mut message_hub = SshChannelMessageHub::new(channel);
 
         let server_yml = StringMessage::from_path(
@@ -1309,6 +1310,7 @@ where
                         let change_message = StringMessage::parse(&mut message_hub)?;
                         trace!("changed file: {}.", change_message.content);
                         let file_len = fi.local_path.as_path().metadata()?.len();
+                        cppb.push_one(file_len, fi.local_path.as_str());
                         let u64_message = U64Message::new(file_len);
                         message_hub.write_and_flush(&u64_message.as_start_send_bytes())?;
                         trace!("start send header sent.");
@@ -1323,13 +1325,15 @@ where
                                 message_hub.flush()?;
                                 break;
                             } else {
-                                message_hub.write(&buf[..readed])?;
+                                cppb.progress(readed);
+                                message_hub.write_all(&buf[..readed])?;
                             }
                         }
                         changed += 1;
                         trace!("send file content done.");
                     }
                     TransferType::FileItemUnchanged => {
+                        cppb.skip_one();
                         unchanged += 1;
                         trace!("unchanged file.");
                     }
@@ -1343,6 +1347,7 @@ where
         }
         message_hub.write_and_flush(&[TransferType::RepeatDone.to_u8()])?;
         info!("changed: {}, unchanged: {}", changed, unchanged);
+        cppb.finish();
         Ok(None)
     }
 
@@ -1416,6 +1421,7 @@ mod tests {
     use std::fs;
     use std::io::{self, Write};
     use std::net::TcpStream;
+    use indicatif::{ProgressBar, ProgressStyle};
 
     fn log() {
         log_util::setup_logger_detail(
@@ -1757,5 +1763,30 @@ mod tests {
         sess.userauth_password("Administrator", "pass.")
             .expect("should authenticate succeeded.");
         assert!(sess.authenticated(), "should authenticate succeeded.");
+    }
+
+    #[test]
+    fn t_pb_in_action() -> Result<(), failure::Error> {
+        let bar = ProgressBar::new(1000);
+        bar.set_style(
+            ProgressStyle::default_bar()
+                .template("{prefix}[{elapsed_precise}] {bar:40.cyan/blue} {bytes:>7}/{total_bytes:7} {bytes_per_sec} {msg}")
+                .progress_chars("##-"),
+        );
+        let three = std::time::Duration::from_millis(10);
+        bar.set_message("a");
+        for _ in 0..1000 {
+            bar.inc(1);
+            std::thread::sleep(three);
+        }
+        bar.reset();
+        bar.set_length(2000);
+        bar.set_message("hello b");
+        for _ in 0..2000 {
+            bar.inc(1);
+            std::thread::sleep(three);
+        }        
+        bar.finish();
+        Ok(())
     }
 }

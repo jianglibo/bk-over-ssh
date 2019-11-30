@@ -12,8 +12,11 @@ pub mod string_path;
 pub mod writer_with_progress;
 pub mod push_file_item_directory;
 pub mod data_shape_util;
+pub mod client_push_pb;
 
 pub use data_shape_util::{get_file_meta};
+
+pub use client_push_pb::{ClientPushProgressBar};
 
 pub use app_conf::{
     demo_app_conf, AppConf, AppRole, MailConf, MiniAppConf, ReadAppConfException, CONF_FILE_NAME,
