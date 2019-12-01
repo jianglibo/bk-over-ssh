@@ -1,14 +1,11 @@
 use super::string_path;
 use super::SlashPath;
-use crate::actions::hash_file_sha1;
 use crate::data_shape::data_shape_util;
 use crate::protocol::TransferType;
-use log::*;
 use serde::{Deserialize, Serialize};
 use std::convert::TryInto;
 use std::path::Path;
 use std::path::PathBuf;
-use std::time::SystemTime;
 
 #[derive(Debug)]
 pub enum FileChanged {
@@ -19,10 +16,10 @@ pub enum FileChanged {
     NoChange,
 }
 
-/// Like a disk directory, but it contains PushPrimaryFileItem.
+/// Like a disk directory, but it contains FullPathFileItem.
 /// No local_dir and remote_dir, but absolute local_path and remote_path.
 #[derive(Deserialize, Serialize, Debug)]
-pub struct PushPrimaryFileItem {
+pub struct FullPathFileItem {
     #[serde(deserialize_with = "string_path::deserialize_slash_path_from_str")]
     pub local_path: SlashPath,
     #[serde(deserialize_with = "string_path::deserialize_slash_path_from_str")]
@@ -33,61 +30,45 @@ pub struct PushPrimaryFileItem {
     pub created: Option<u64>,
 }
 
-impl PushPrimaryFileItem {
-    pub fn from_path(
-        base_path: &SlashPath,
-        absolute_path_buf: PathBuf,
-        app_instance_id: impl AsRef<str>,
+impl FullPathFileItem {
+    /// No matter it's be pushed or be pulled the remote path already point to the file about to be updated.
+    /// When to be pushed the remote path is joined by "{app_instance_id}/{remote_path}" and /user_home/directories/.
+    /// When to be pulled the remote path is joined by "{host_name_or_ip}/{remote_path}" and {app_setting_of_data_dir}.
+    pub fn create_item_from_path(
+        dir_to_read: &SlashPath,
+        absolute_file_to_read: PathBuf,
+        server_distinct_id: impl AsRef<str>,
         skip_sha1: bool,
     ) -> Option<Self> {
-        let app_instance_id = SlashPath::new(app_instance_id);
-
-        let metadata_r = absolute_path_buf.metadata();
-        match metadata_r {
-            Ok(metadata) => {
-                let sha1 = if !skip_sha1 {
-                    hash_file_sha1(&absolute_path_buf)
-                } else {
-                    Option::<String>::None
-                };
-
-                if let Some(relative_path) = base_path
-                    .parent()
-                    .expect("dir to backup shouldn't be the root.")
-                    .strip_prefix(absolute_path_buf.as_path())
-                {
-                    Some(Self {
-                        local_path: SlashPath::from_path(absolute_path_buf.as_path())
-                            .expect("slashpath from absolute file path"),
-                        // remote path is determined by the app_instance_id, base_path's name and the relative path.
-                        // the relative path already include base_path's name.
-                        remote_path: app_instance_id.join(relative_path),
-                        sha1,
-                        len: metadata.len(),
-                        modified: metadata
-                            .modified()
-                            .ok()
-                            .and_then(|st| st.duration_since(SystemTime::UNIX_EPOCH).ok())
-                            .map(|d| d.as_secs()),
-                        created: metadata
-                            .created()
-                            .ok()
-                            .and_then(|st| st.duration_since(SystemTime::UNIX_EPOCH).ok())
-                            .map(|d| d.as_secs()),
-                    })
-                } else {
-                    None
-                }
-            }
-            Err(err) => {
-                error!(
-                    "PushPrimaryFileItem get_meta failed: {:?}, {:?}",
-                    absolute_path_buf, err
-                );
+        let app_instance_id = SlashPath::new(server_distinct_id);
+        if let Some(fmeta) = data_shape_util::get_file_meta(absolute_file_to_read.as_path(), skip_sha1)
+        {
+            // if dir_to_read is "/a/b" and the absolute_file_to_read is "/a/b/c.txt"
+            // after relativelize the result is: b/c.txt.
+            if let Some(relative_path) = dir_to_read
+                .parent()
+                .expect("dir to backup shouldn't be the root.")
+                .strip_prefix(absolute_file_to_read.as_path())
+            {
+                Some(Self {
+                    local_path: SlashPath::from_path(absolute_file_to_read.as_path())
+                        .expect("slashpath from absolute file path"),
+                    // remote path is determined by the app_instance_id, base_path's name and the relative path.
+                    // the relative path already include base_path's name.
+                    remote_path: app_instance_id.join(relative_path),
+                    sha1: fmeta.sha1,
+                    len: fmeta.len,
+                    modified: fmeta.modified,
+                    created: fmeta.created,
+                })
+            } else {
                 None
             }
+        } else {
+            None
         }
     }
+
     pub fn changed(&self, file_path: impl AsRef<Path>) -> FileChanged {
         if let Some(fmeta) = data_shape_util::get_file_meta(file_path, self.sha1.is_none()) {
             if fmeta.len != self.len {
@@ -108,7 +89,7 @@ impl PushPrimaryFileItem {
         let mut v = Vec::new();
         v.insert(0, TransferType::FileItem.to_u8());
         let json_str =
-            serde_json::to_string(&self).expect("PushPrimaryFileItem to serialize to string.");
+            serde_json::to_string(&self).expect("FullPathFileItem to serialize to string.");
         let bytes = json_str.as_bytes();
         let bytes_len: u64 = bytes.len().try_into().expect("usize convert to u64");
         v.append(&mut bytes_len.to_be_bytes().to_vec());
@@ -138,8 +119,8 @@ mod tests {
     fn t_push_file_directories() -> Result<(), failure::Error> {
         log();
         let yml = r##"
-remote_dir: ~
-local_dir: E:/ws/bk-over-ssh/fixtures/a-dir
+to_dir: ~
+from_dir: E:/ws/bk-over-ssh/fixtures/a-dir
 includes:
   - "*.txt"
   - "*.png"
@@ -148,24 +129,24 @@ excludes:
   - "*.bak"
 "##;
 
-        let mut d = serde_yaml::from_str::<Directory>(&yml)?;
-        println!("{:?}", d);
+        let mut dir = serde_yaml::from_str::<Directory>(&yml)?;
+        println!("{:?}", dir);
 
-        assert!(d.includes_patterns.is_none());
-        assert!(d.excludes_patterns.is_none());
+        assert!(dir.includes_patterns.is_none());
+        assert!(dir.excludes_patterns.is_none());
 
-        d.compile_patterns()?;
+        dir.compile_patterns()?;
 
-        assert!(d.includes_patterns.is_some());
-        assert!(d.excludes_patterns.is_some());
+        assert!(dir.includes_patterns.is_some());
+        assert!(dir.excludes_patterns.is_some());
 
-        let files = d
-            .push_file_item_iter("abc", &d.local_dir, false)
+        let files = dir
+            .file_item_iter("abc", &dir.from_dir, false)
             .map(|it| {
                 println!("remote_path: {:?}", it.remote_path.slash);
                 it
             })
-            .collect::<Vec<PushPrimaryFileItem>>();
+            .collect::<Vec<FullPathFileItem>>();
 
         assert_eq!(files.len(), 5);
         assert!(
@@ -177,7 +158,6 @@ excludes:
                 .starts_with("abc/a-dir"),
             "should starts_with fixtures/"
         );
-
         Ok(())
     }
 }

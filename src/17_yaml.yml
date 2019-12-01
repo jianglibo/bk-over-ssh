@@ -323,6 +323,13 @@ subcommands:
                 long: rsync-window
                 takes_value: true
                 required: false
+    - server-send-loop:
+        about: server side send loop.
+        args:
+            - rsync-window:
+                long: rsync-window
+                takes_value: true
+                required: false
     - sync-push-dirs:
         about: sync directories in the configuration file. The configuration file is at fixed location.
         args:

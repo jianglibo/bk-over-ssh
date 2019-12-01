@@ -34,7 +34,7 @@ pub enum FileItemProcessResult {
 pub struct FileItemProcessResultStats {
     pub deserialize_failed: u64,
     pub skipped: u64,
-    pub no_corresponded_local_dir: u64,
+    pub no_corresponded_from_dir: u64,
     pub directory: u64,
     pub length_not_match: u64,
     pub sha1_not_match: u64,
@@ -53,8 +53,8 @@ impl FileItemProcessResultStats {
         Self {
             deserialize_failed: self.deserialize_failed + other.deserialize_failed,
             skipped: self.skipped + other.skipped,
-            no_corresponded_local_dir: self.no_corresponded_local_dir
-                + other.no_corresponded_local_dir,
+            no_corresponded_from_dir: self.no_corresponded_from_dir
+                + other.no_corresponded_from_dir,
             directory: self.directory + other.directory,
             length_not_match: self.length_not_match + other.length_not_match,
             sha1_not_match: self.sha1_not_match + other.sha1_not_match,

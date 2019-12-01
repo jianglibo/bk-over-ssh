@@ -204,7 +204,6 @@ where
         mini_app_conf: MiniAppConf {
             app_instance_id: "demo-app-instance-id".to_string(),
             skip_sha1: true,
-            // skip_cron: false,
             buf_len: None,
             archive_cmd: Vec::new(),
             app_role: Some(app_role),
@@ -334,7 +333,6 @@ where
                             mini_app_conf: MiniAppConf {
                                 app_instance_id,
                                 skip_sha1: true,
-                                // skip_cron: false,
                                 buf_len: None,
                                 archive_cmd,
                                 app_role: app_role.cloned(),
@@ -568,7 +566,7 @@ where
                 .server_yml
                 .directories
                 .iter()
-                .map(|d| format!("{}, {}", d.local_dir, d.remote_dir))
+                .map(|dir| format!("{}, {}", dir.from_dir, dir.to_dir))
                 .collect::<Vec<String>>()
         );
         Ok(server)

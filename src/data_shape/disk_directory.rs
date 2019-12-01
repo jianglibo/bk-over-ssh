@@ -1,7 +1,7 @@
 use super::{
     app_conf,
     string_path::{self, SlashPath},
-    AppRole, PushPrimaryFileItem, RelativeFileItem,
+    AppRole, FullPathFileItem, RelativeFileItem,
 };
 use crate::db_accesses::{DbAccess, RelativeFileItemInDb};
 use glob::Pattern;
@@ -55,9 +55,9 @@ fn match_path(
 #[derive(Deserialize, Serialize, Default, Debug)]
 pub struct Directory {
     #[serde(deserialize_with = "string_path::deserialize_slash_path_from_str")]
-    pub remote_dir: string_path::SlashPath,
+    pub to_dir: string_path::SlashPath,
     #[serde(deserialize_with = "string_path::deserialize_slash_path_from_str")]
-    pub local_dir: string_path::SlashPath,
+    pub from_dir: string_path::SlashPath,
     pub includes: Vec<String>,
     pub excludes: Vec<String>,
     #[serde(skip)]
@@ -68,17 +68,17 @@ pub struct Directory {
 
 impl Directory {
     /// for test purpose.
-    /// local_dir will change to absolute when load from yml file.
+    /// from_dir will change to absolute when load from yml file.
     #[allow(dead_code)]
     pub fn new(
-        remote_dir: impl AsRef<str>,
-        local_dir: impl AsRef<str>,
+        to_dir: impl AsRef<str>,
+        from_dir: impl AsRef<str>,
         includes: Vec<impl AsRef<str>>,
         excludes: Vec<impl AsRef<str>>,
     ) -> Self {
         let mut o = Self {
-            remote_dir: SlashPath::new(remote_dir),
-            local_dir: SlashPath::new(local_dir),
+            to_dir: SlashPath::new(to_dir),
+            from_dir: SlashPath::new(from_dir),
             includes: includes.iter().map(|s| s.as_ref().to_string()).collect(),
             excludes: excludes.iter().map(|s| s.as_ref().to_string()).collect(),
             ..Directory::default()
@@ -95,39 +95,6 @@ impl Directory {
             self.includes_patterns.as_ref(),
             self.excludes_patterns.as_ref(),
         )
-        // let has_includes = self.includes_patterns.is_some();
-        // let keep_file = if has_includes {
-        //     self.includes_patterns
-        //         .as_ref()
-        //         .unwrap()
-        //         .iter()
-        //         .any(|ptn| ptn.matches_path(&path))
-        // } else {
-        //     true
-        // };
-
-        // if !keep_file {
-        //     return None;
-        // }
-
-        // let has_excludes = self.excludes_patterns.is_some();
-
-        // let keep_file = if has_excludes {
-        //     !self
-        //         .excludes_patterns
-        //         .as_ref()
-        //         .unwrap()
-        //         .iter()
-        //         .any(|p| p.matches_path(&path))
-        // } else {
-        //     true
-        // };
-
-        // if keep_file {
-        //     Some(path)
-        // } else {
-        //     None
-        // }
     }
     /// When includes is empty, includes_patterns will be None, excludes is the same.
     pub fn compile_patterns(&mut self) -> Result<(), failure::Error> {
@@ -152,7 +119,7 @@ impl Directory {
     }
 
     pub fn count_total_size(&self) -> u64 {
-        WalkDir::new(self.local_dir.as_path())
+        WalkDir::new(self.from_dir.as_path())
             .follow_links(false)
             .into_iter()
             .filter_map(|e| e.ok())
@@ -170,7 +137,7 @@ impl Directory {
 
     #[allow(dead_code)]
     pub fn list_files_recursive(&self) -> impl Iterator<Item = (u64, String)> {
-        WalkDir::new(self.local_dir.as_path())
+        WalkDir::new(self.from_dir.as_path())
             .follow_links(false)
             .into_iter()
             .filter_map(|e| e.ok())
@@ -196,18 +163,18 @@ impl Directory {
         remote_exec: &str,
     ) -> Result<(), failure::Error> {
         trace!("origin directory: {:?}", self);
-        if self.local_dir.is_empty() {
+        if self.from_dir.is_empty() {
             bail!("when in push mode, local_dir cannot be empty.");
         }
 
-        if !self.local_dir.exists() {
-            bail!("local_dir does not exist: {}", &self.local_dir);
+        if !self.from_dir.exists() {
+            bail!("local_dir does not exist: {}", &self.from_dir);
         }
 
         trace!("origin directory: {:?}", self);
 
-        if self.remote_dir.is_empty() {
-            self.remote_dir.set_slash(self.local_dir.get_last_name());
+        if self.to_dir.is_empty() {
+            self.to_dir.set_slash(self.from_dir.get_last_name());
         }
 
         let remote_path = SlashPath::new(remote_exec)
@@ -217,8 +184,8 @@ impl Directory {
             .join(app_conf::RECEIVE_SERVERS_DATA)
             .join(app_instance_id)
             .join("directories")
-            .join(self.remote_dir.get_slash());
-        self.remote_dir = remote_path;
+            .join(self.to_dir.get_slash());
+        self.to_dir = remote_path;
         Ok(())
     }
 
@@ -231,18 +198,18 @@ impl Directory {
         let directories_dir = directories_dir.as_ref();
         trace!("origin directory: {:?}", self);
 
-        if self.local_dir.is_empty() {
+        if self.from_dir.is_empty() {
             bail!("when in push mode, local_dir cannot be empty.");
         }
 
-        if self.remote_dir.is_empty() {
-            self.remote_dir.set_slash(self.local_dir.get_last_name());
+        if self.to_dir.is_empty() {
+            self.to_dir.set_slash(self.from_dir.get_last_name());
         }
 
         let remote_path = SlashPath::from_path(directories_dir)
             .expect("normalize_receive_hub_sync directories_dir to_str should succeed.")
-            .join(self.remote_dir.get_slash());
-        self.remote_dir = remote_path;
+            .join(self.to_dir.get_slash());
+        self.to_dir = remote_path;
         Ok(())
     }
 
@@ -255,23 +222,23 @@ impl Directory {
         let directories_dir = directories_dir.as_ref();
         trace!("origin directory: {:?}", self);
 
-        if self.local_dir.is_empty() {
-            self.local_dir.set_slash(self.remote_dir.get_last_name());
+        if self.from_dir.is_empty() {
+            self.from_dir.set_slash(self.to_dir.get_last_name());
         }
 
-        if self.local_dir.as_path().is_absolute() {
+        if self.from_dir.as_path().is_absolute() {
             bail!(
                 "the local_dir of a server can't be absolute. {:?}",
-                self.local_dir
+                self.from_dir
             );
         }
 
-        self.local_dir = SlashPath::from_path(directories_dir)
+        self.from_dir = SlashPath::from_path(directories_dir)
             .expect("normalize_pull_hub_sync directories_dir to_str should succeed.")
-            .join_another(&self.local_dir);
+            .join_another(&self.from_dir);
 
-        if !self.local_dir.exists() {
-            self.local_dir.create_dir_all()?;
+        if !self.from_dir.exists() {
+            self.from_dir.create_dir_all()?;
         }
         Ok(())
     }
@@ -293,8 +260,8 @@ impl Directory {
         trace!("load_relative_item, skip_sha1: {}", skip_sha1);
         let dir_to_read = if let Some(app_role) = app_role {
             match app_role {
-                AppRole::PassiveLeaf => &self.remote_dir,
-                AppRole::ActiveLeaf => &self.local_dir,
+                AppRole::PassiveLeaf => &self.to_dir,
+                AppRole::ActiveLeaf => &self.from_dir,
                 _ => bail!(
                     "when invoking load_relative_item, got unsupported app role. {:?}",
                     app_role
@@ -343,15 +310,17 @@ impl Directory {
             })
     }
 
-    pub fn push_file_item_iter(
+    /// When push to remote server the server_distinct_id is app_instance_id,
+    /// When be pulled the server_distinct_id is {host_name_or_ip}/directories.
+    pub fn file_item_iter(
         &self,
-        app_instance_id: impl AsRef<str>,
+        server_distinct_id: impl AsRef<str>,
         dir_to_read: &SlashPath,
         skip_sha1: bool,
-    ) -> impl Iterator<Item = PushPrimaryFileItem> + '_ {
+    ) -> impl Iterator<Item = FullPathFileItem> + '_ {
         let includes_patterns = self.includes_patterns.clone();
         let excludes_patterns = self.excludes_patterns.clone();
-        let app_instance_id = app_instance_id.as_ref().to_string();
+        let app_instance_id = server_distinct_id.as_ref().to_string();
         let dir_to_read = dir_to_read.clone();
 
         WalkDir::new(dir_to_read.as_path())
@@ -367,10 +336,10 @@ impl Directory {
                     excludes_patterns.as_ref(),
                 )
             })
-            .filter_map(move |absolute_path_buf| {
-                PushPrimaryFileItem::from_path(
+            .filter_map(move |absolute_file_path| {
+                FullPathFileItem::create_item_from_path(
                     &dir_to_read,
-                    absolute_path_buf,
+                    absolute_file_path,
                     &app_instance_id,
                     skip_sha1,
                 )
@@ -386,7 +355,7 @@ impl Directory {
     pub fn count_local_files(&self, app_role: Option<&AppRole>) -> Result<u64, failure::Error> {
         let dir_to_read = if let Some(app_role) = app_role {
             match app_role {
-                AppRole::ReceiveHub => &self.remote_dir,
+                AppRole::ReceiveHub => &self.to_dir,
                 _ => bail!(
                     "when invoking load_relative_item_to_sqlite, got unsupported app role. {:?}",
                     app_role
@@ -408,7 +377,7 @@ impl Directory {
         let includes_patterns = self.includes_patterns.clone();
         let excludes_patterns = self.excludes_patterns.clone();
 
-        WalkDir::new(self.local_dir.as_path())
+        WalkDir::new(self.from_dir.as_path())
             .follow_links(false)
             .into_iter()
             .filter_map(|dir_entry| dir_entry.ok())
@@ -452,8 +421,8 @@ impl Directory {
 
         let dir_to_read = if let Some(app_role) = app_role {
             match app_role {
-                AppRole::PassiveLeaf | AppRole::ReceiveHub => &self.remote_dir,
-                AppRole::ActiveLeaf => &self.local_dir,
+                AppRole::PassiveLeaf | AppRole::ReceiveHub => &self.to_dir,
+                AppRole::ActiveLeaf => &self.from_dir,
                 _ => bail!(
                     "when invoking load_relative_item_to_sqlite, got unsupported app role. {:?}",
                     app_role
@@ -509,8 +478,8 @@ mod tests {
     #[test]
     fn t_directory_i() -> Result<(), failure::Error> {
         let yml = r##"
-remote_dir: F:/github/bk-over-ssh/fixtures/adir
-local_dir: ~
+to_dir: F:/github/bk-over-ssh/fixtures/adir
+from_dir: ~
 includes:
   - "*.txt"
   - "*.png"

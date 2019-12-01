@@ -31,8 +31,9 @@ rsync:
   sig_ext: .sig
   delta_ext: .delta
 directories:
-  - remote_dir: /home/jianglibo/ws/bk-over-ssh/fixtures/adir
-    local_dir: ~
+  - to_dir: ~
+    # from_dir is always an absolute and exist path.
+    from_dir: /home/jianglibo/ws/bk-over-ssh/fixtures/a-dir
     includes:
       - "*.txt"
       - "*.png"

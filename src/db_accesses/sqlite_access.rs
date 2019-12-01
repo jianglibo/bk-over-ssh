@@ -699,7 +699,7 @@ mod tests {
         t_dir.make_a_file_with_content("b.tar", "abc")?;
 
         let dir = Directory {
-            remote_dir: SlashPath::new(t_dir.tmp_dir_str().to_owned()),
+            to_dir: SlashPath::new(t_dir.tmp_dir_str().to_owned()),
             ..Default::default()
         };
 
@@ -802,7 +802,7 @@ mod tests {
         t_dir.make_a_file_with_content("abc2012010203.zip", "abc")?;
 
         let dir = Directory {
-            remote_dir: SlashPath::new(t_dir.tmp_dir_str().to_owned()),
+            to_dir: SlashPath::new(t_dir.tmp_dir_str().to_owned()),
             ..Default::default()
         };
 

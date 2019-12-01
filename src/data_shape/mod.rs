@@ -10,7 +10,7 @@ pub mod server;
 pub mod sha1_reader;
 pub mod string_path;
 pub mod writer_with_progress;
-pub mod push_file_item_directory;
+pub mod full_path_item;
 pub mod data_shape_util;
 pub mod client_push_pb;
 
@@ -27,7 +27,7 @@ pub use file_item_map::{FileItemMap, FileItemProcessResult, FileItemProcessResul
 pub use file_item_directory::{FileItemDirectory, FileItemDirectories, PrimaryFileItem};
 pub use indicator::{Indicator, PbProperties};
 pub use relative_file_item::{RelativeFileItem};
-pub use push_file_item_directory::{PushPrimaryFileItem, FileChanged};
+pub use full_path_item::{FullPathFileItem, FileChanged};
 pub use server::{Server, ServerYml};
 pub use sha1_reader::Sha1Reader;
 pub use string_path::SlashPath;

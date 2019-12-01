@@ -1,8 +1,8 @@
 use super::{
-    app_conf, rolling_files, AppRole, AuthMethod, ClientPushProgressBar, Directory,
-    FileItemDirectories, FileItemMap, FileItemProcessResult, FileItemProcessResultStats, Indicator,
-    MiniAppConf, PbProperties, PrimaryFileItem, ProgressWriter, PruneStrategy, RelativeFileItem,
-    ScheduleItem, SlashPath, SyncType,
+    app_conf, rolling_files, AppRole, AuthMethod, ClientPushProgressBar, Directory, FileChanged,
+    FileItemDirectories, FileItemMap, FileItemProcessResult, FileItemProcessResultStats,
+    FullPathFileItem, Indicator, MiniAppConf, PbProperties, PrimaryFileItem, ProgressWriter,
+    PruneStrategy, RelativeFileItem, ScheduleItem, SlashPath, SyncType,
 };
 use crate::actions::{copy_a_file_item, copy_a_file_sftp, copy_file, ssh_util, SyncDirReport};
 use crate::db_accesses::DbAccess;
@@ -75,7 +75,7 @@ fn accumulate_file_process(
     match item {
         FileItemProcessResult::DeserializeFailed(_) => accu.deserialize_failed += 1,
         FileItemProcessResult::Skipped(_) => accu.skipped += 1,
-        FileItemProcessResult::NoCorrespondedLocalDir(_) => accu.no_corresponded_local_dir += 1,
+        FileItemProcessResult::NoCorrespondedLocalDir(_) => accu.no_corresponded_from_dir += 1,
         FileItemProcessResult::Directory(_) => accu.directory += 1,
         FileItemProcessResult::LengthNotMatch(_) => accu.length_not_match += 1,
         FileItemProcessResult::Sha1NotMatch(_) => accu.sha1_not_match += 1,
@@ -270,6 +270,12 @@ where
             lock_file: None,
         })
     }
+
+    /// Server's my_dir is composed of the app_setting's 'data dir' and the server distinctness, app_instance_id or hostname.
+    /// It varies on role of the application.
+    pub fn get_my_dir(&self) -> &Path {
+        self.my_dir.as_path()
+    }
     /// Lock the server, preventing server from concurrently executing.
     pub fn lock_working_file(&mut self) -> Result<(), failure::Error> {
         let lof = self.working_dir.join("working.lock");
@@ -416,9 +422,9 @@ where
             .server_yml
             .directories
             .iter()
-            .map(|d| &d.remote_dir)
+            .map(|dir| &dir.to_dir)
             .collect();
-        let ass: Vec<&SlashPath> = directories.iter().map(|d| &d.remote_dir).collect();
+        let ass: Vec<&SlashPath> = directories.iter().map(|dir| &dir.to_dir).collect();
         ss == ass
     }
 
@@ -545,7 +551,7 @@ where
 
         for dir in self.server_yml.directories.iter() {
             let len = dir.count_total_size();
-            let d_path = &dir.local_dir.as_path();
+            let d_path = &dir.from_dir.as_path();
             if let Some(d_path_name) = d_path.file_name() {
                 if d_path.exists() {
                     pb.set_message_pb_total(format!(
@@ -559,7 +565,7 @@ where
                     warn!("unexist directory: {:?}", d_path);
                 }
             } else {
-                error!("dir.local_dir get file_name failed: {:?}", d_path);
+                error!("dir.from_dir get file_name failed: {:?}", d_path);
             }
         }
         archive.finish()?;
@@ -582,7 +588,7 @@ where
         for dir in self.server_yml.directories.iter() {
             pb.set_message(format!(
                 "archive directory: {:?}, using out util: {}",
-                dir.local_dir,
+                dir.from_dir,
                 self.app_conf.archive_cmd.get(0).unwrap()
             ));
             let archive_cmd = self
@@ -593,7 +599,7 @@ where
                     if s == "archive_file_name" {
                         cur_archive_name.to_owned()
                     } else if s == "files_and_dirs" {
-                        dir.local_dir.get_os_string()
+                        dir.from_dir.get_os_string()
                     } else {
                         OsString::from(s)
                     }
@@ -972,7 +978,7 @@ where
         self.server_yml
             .directories
             .iter()
-            .map(|d| (d.local_dir.clone(), d.remote_dir.clone()))
+            .map(|dir| (dir.from_dir.clone(), dir.to_dir.clone()))
             .collect()
     }
     /// First list changed file to file_list_file.
@@ -1146,11 +1152,11 @@ where
                         .server_yml
                         .directories
                         .iter()
-                        .find(|d| d.remote_dir.slash_equal_to(&line));
+                        .find(|dir| dir.to_dir.slash_equal_to(&line));
 
                     if let Some(found_directory) = found_directory {
                         current_remote_dir = Some(line.clone());
-                        current_local_dir = Some(found_directory.local_dir.as_path());
+                        current_local_dir = Some(found_directory.from_dir.as_path());
                         FileItemProcessResult::Directory(line)
                     } else {
                         // we compare the remote dir line with this server_yml.directories's remote dir
@@ -1159,7 +1165,7 @@ where
                             line, self.server_yml
                                 .directories
                                 .iter()
-                                .map(|d| d.local_dir.as_str())
+                                .map(|dir| dir.from_dir.as_str())
                                 .collect::<Vec<&str>>()
                         );
                         current_remote_dir = None;
@@ -1188,37 +1194,11 @@ where
             .cloned()
     }
 
-    // fn check_skip_cron(&self, cron_name: &str) -> bool {
-    //     self.app_conf.skip_cron
-    //         || if let Some(si) = self.find_cron_by_name(cron_name) {
-    //             match scheduler_util::need_execute(
-    //                 self.db_access.as_ref(),
-    //                 self.yml_location.as_ref().unwrap().to_str().unwrap(),
-    //                 &si.name,
-    //                 &si.cron,
-    //             ) {
-    //                 (true, None) => true,
-    //                 (false, Some(dt)) => {
-    //                     eprintln!(
-    //                         "cron time didn't meet yet. next execution scheduled at: {:?}",
-    //                         dt
-    //                     );
-    //                     false
-    //                 }
-    //                 (_, _) => false,
-    //             }
-    //         } else {
-    //             error!("Can't find cron item with name: {}", cron_name);
-    //             false
-    //         }
-    // }
-
     /// We can push files to multiple destinations simultaneously.
     pub fn sync_push_dirs(
         &self,
         progress_bar: &mut Indicator,
     ) -> Result<Option<SyncDirReport>, failure::Error> {
-        // if self.check_skip_cron("sync-push-dirs") {
         info!(
             "start sync_push_dirs on server: {} at: {}",
             self.get_host(),
@@ -1230,9 +1210,6 @@ where
         let rs = self.start_push_sync_working_file_list(progress_bar)?;
         self.confirm_local_sync()?;
         Ok(Some(SyncDirReport::new(start.elapsed(), started_at, rs)))
-        // } else {
-        //     Ok(None)
-        // }
     }
     /// If as_service is true, one must connect to server first, and then after executing task close the connection.
     pub fn sync_pull_dirs(
@@ -1263,6 +1240,110 @@ where
         Ok(Some(SyncDirReport::new(start.elapsed(), started_at, rs)))
     }
 
+    pub fn client_pull_loop(&self) -> Result<Option<SyncDirReport>, failure::Error> {
+        let session = self.create_ssh_session()?;
+        let mut channel: ssh2::Channel = session.channel_session()?;
+        let cmd = format!(
+            "{}{}{} server-send-loop",
+            self.server_yml.remote_exec,
+            if self.app_conf.verbose { " --vv" } else { "" },
+            if self.app_conf.skip_sha1 {
+                ""
+            } else {
+                "--enable-sha1"
+            },
+        );
+        trace!("invoke remote: {}", cmd);
+        channel.exec(&cmd).expect("start remote server-loop");
+
+        let mut message_hub = SshChannelMessageHub::new(channel);
+
+        let server_yml = StringMessage::from_path(
+            self.yml_location
+                .as_ref()
+                .expect("yml_location should exist.")
+                .as_path(),
+        );
+        message_hub.write_and_flush(server_yml.as_server_yml_sent_bytes().as_slice())?;
+
+        let to_dir =
+            SlashPath::from_path(self.my_dir.as_path()).expect("my_dir should exists.");
+
+        let mut cppb =
+            ClientPushProgressBar::new(self.count_local_dir_files(), self.app_conf.show_pb);
+
+        let mut last_df: Option<SlashPath> = None;
+        let mut last_file_item: Option<FullPathFileItem> = None;
+        let mut buf = vec![0; 8192];
+
+        loop {
+            match message_hub.read_type_byte()? {
+                TransferType::FileItem => {
+                    let string_message = StringMessage::parse(&mut message_hub)?;
+                    trace!("got file item: {}", string_message.content);
+                    match serde_json::from_str::<FullPathFileItem>(&string_message.content) {
+                        Ok(file_item) => {
+                            let df = to_dir.join_another(&file_item.remote_path); // use remote path.
+                            match file_item.changed(df.as_path()) {
+                                FileChanged::NoChange => {
+                                    message_hub.write_transfer_type_only(
+                                        TransferType::FileItemUnchanged,
+                                    )?;
+                                }
+                                fc => {
+                                    let string_message = StringMessage::new(format!("{:?}", fc));
+                                    message_hub.write_and_flush(
+                                        &string_message.as_string_sent_bytes_with_header(
+                                            TransferType::FileItemChanged,
+                                        ),
+                                    )?;
+                                    last_df.replace(df);
+                                    last_file_item.replace(file_item);
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            message_hub.write_error_message(format!("{:?}", err))?;
+                        }
+                    };
+                }
+                TransferType::StartSend => {
+                    let content_len = U64Message::parse(&mut message_hub)?;
+                    if let Some(df) = last_df.take() {
+                        trace!("copy to file: {:?}", df.as_path());
+                        if let Err(err) =
+                            message_hub.copy_to_file(&mut buf, content_len.value, df.as_path())
+                        {
+                            message_hub.write_error_message(format!("{:?}", err))?;
+                        } else if let Some(lfi) = last_file_item.as_ref() {
+                            if let Some(md) = lfi.modified {
+                                let ft = filetime::FileTime::from_unix_time(md as i64, 0);
+                                filetime::set_file_mtime(df.as_path(), ft)?;
+                            } else {
+                                message_hub.write_error_message(
+                                    "push_primary_file_item has no modified value.",
+                                )?;
+                            }
+                        } else {
+                            message_hub.write_error_message("last_file_item is empty.")?;
+                        }
+                    } else {
+                        error!("empty last_df.");
+                    }
+                }
+                TransferType::RepeatDone | TransferType::Eof => {
+                    info!("got eof, exiting.");
+                    break;
+                }
+                t => {
+                    error!("unhandled transfer type: {:?}", t);
+                    panic!("unimplement transfer type.");
+                }
+            }
+        }
+        Ok(None)
+    }
+
     pub fn client_push_loop(&self) -> Result<Option<SyncDirReport>, failure::Error> {
         let session = self.create_ssh_session()?;
         let mut channel: ssh2::Channel = session.channel_session()?;
@@ -1289,9 +1370,9 @@ where
         let mut unchanged = 0_u64;
         // after sent server_yml, will send push_primary_file_item repeatly, when finish sending follow a RepeatDone message.
         for dir in self.server_yml.directories.iter() {
-            let push_file_items = dir.push_file_item_iter(
+            let push_file_items = dir.file_item_iter(
                 &self.app_conf.app_instance_id,
-                &dir.local_dir,
+                &dir.from_dir,
                 self.app_conf.skip_sha1,
             );
             for fi in push_file_items {
@@ -1479,11 +1560,42 @@ mod tests {
         Ok(())
     }
 
+
     #[test]
-    fn t_client_loop() -> Result<(), failure::Error> {
+    fn t_client_pull_loop() -> Result<(), failure::Error> {
+        log();
+        let mut app_conf = tutil::load_demo_app_conf_sqlite(None, AppRole::PullHub);
+        app_conf.mini_app_conf.verbose = true;
+        app_conf.mini_app_conf.console_log = true;
+
+        assert!(app_conf.mini_app_conf.app_role == Some(AppRole::PullHub));
+        let server = tutil::load_demo_server_sqlite(&app_conf, Some("localhost_2.yml"));
+
+        let a_dir = SlashPath::from_path(
+            server.get_my_dir()
+                .join("directories")
+                .join("a-dir")
+                .as_path(),
+        )
+        .expect("get slash path from home_dir");
+
+        server.client_pull_loop()?;
+
+        info!("a_dir is {:?}", a_dir);
+        let cc_txt = a_dir.join("b").join("c c").join("c c .txt");
+        info!("cc_txt is {:?}", cc_txt);
+        assert!(cc_txt.exists());
+        assert!(a_dir.join("b").join("b.txt").exists());
+        assert!(a_dir.join("b b").join("b b.txt").exists());
+        assert!(a_dir.join("a.txt").exists());
+        assert!(a_dir.join("qrcode.png").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn t_client_push_loop() -> Result<(), failure::Error> {
         log();
         let mut app_conf = tutil::load_demo_app_conf_sqlite(None, AppRole::ActiveLeaf);
-        // app_conf.mini_app_conf.skip_cron = true;
         app_conf.mini_app_conf.verbose = true;
         app_conf.mini_app_conf.console_log = true;
 
@@ -1517,7 +1629,6 @@ mod tests {
     fn t_sync_push_dirs() -> Result<(), failure::Error> {
         log();
         let mut app_conf = tutil::load_demo_app_conf_sqlite(None, AppRole::ActiveLeaf);
-        // app_conf.mini_app_conf.skip_cron = true;
         app_conf.mini_app_conf.verbose = true;
 
         assert!(app_conf.mini_app_conf.app_role == Some(AppRole::ActiveLeaf));
@@ -1540,9 +1651,9 @@ mod tests {
             .server_yml
             .directories
             .iter()
-            .find(|d| d.remote_dir.ends_with("a-dir"))
+            .find(|d| d.to_dir.ends_with("a-dir"))
             .expect("should have a directory who's remote_dir end with 'a-dir'")
-            .remote_dir;
+            .to_dir;
 
         if a_dir.exists() {
             info!("directories path: {:?}", a_dir.as_path());
@@ -1571,7 +1682,6 @@ mod tests {
     fn t_sync_pull_dirs() -> Result<(), failure::Error> {
         log();
         let mut app_conf = tutil::load_demo_app_conf_sqlite(None, AppRole::PullHub);
-        // app_conf.mini_app_conf.skip_cron = true;
         app_conf.mini_app_conf.verbose = true;
 
         assert!(app_conf.mini_app_conf.app_role == Some(AppRole::PullHub));
@@ -1597,9 +1707,9 @@ mod tests {
             .server_yml
             .directories
             .iter()
-            .find(|d| d.remote_dir.ends_with("a-dir"))
+            .find(|dir| dir.to_dir.ends_with("a-dir"))
             .expect("should have a directory who's remote_dir end with 'a-dir'")
-            .local_dir
+            .from_dir
             .clone();
 
         let a_dir = a_dir.as_path();
@@ -1690,7 +1800,7 @@ mod tests {
         log_util::setup_logger_empty();
         let mut cur = tutil::get_a_cursor_writer();
         let mut one_dir = Directory {
-            remote_dir: SlashPath::new("fixtures/a-dir"),
+            to_dir: SlashPath::new("fixtures/a-dir"),
             ..Directory::default()
         };
 
@@ -1702,7 +1812,7 @@ mod tests {
 
         let mut cur = tutil::get_a_cursor_writer();
         let mut one_dir = Directory {
-            remote_dir: SlashPath::new("fixtures/a-dir"),
+            to_dir: SlashPath::new("fixtures/a-dir"),
             includes: vec!["**/fixtures/a-dir/b/b.txt".to_string()],
             ..Directory::default()
         };
@@ -1715,7 +1825,7 @@ mod tests {
 
         let mut cur = tutil::get_a_cursor_writer();
         let mut one_dir = Directory {
-            remote_dir: SlashPath::new("fixtures/a-dir"),
+            to_dir: SlashPath::new("fixtures/a-dir"),
             excludes: vec!["**/fixtures/a-dir/b/b.txt".to_string()],
             ..Directory::default()
         };
@@ -1728,7 +1838,7 @@ mod tests {
 
         let mut cur = tutil::get_a_cursor_writer();
         let mut one_dir = Directory {
-            remote_dir: SlashPath::new("fixtures/a-dir"),
+            to_dir: SlashPath::new("fixtures/a-dir"),
             excludes: vec!["**/Tomcat6/logs/**".to_string()],
             ..Directory::default()
         };

@@ -76,8 +76,8 @@ rsync:
   sig_ext: .sig
   delta_ext: .delta
 directories:
-  - remote_dir: /home/jianglibo/ws/bk-over-ssh/fixtures/adir
-    local_dir: ~
+  - to_dir: /home/jianglibo/ws/bk-over-ssh/fixtures/adir
+    from_dir: ~
     includes:
       - "*.txt"
       - "*.png"

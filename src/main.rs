@@ -38,16 +38,15 @@ use indicatif::MultiProgress;
 use log::*;
 use mail::send_test_mail;
 use std::env;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 use std::{fs, io, io::BufRead, io::Read, io::Write};
-use std::path::Path;
 
 use actions::{ssh_util, SyncDirReport};
 use base64;
 use data_shape::{AppConf, AppRole};
 use r2d2_sqlite::SqliteConnectionManager;
-
 
 /// we change mini_app_conf value here.
 fn main() -> Result<(), failure::Error> {
@@ -63,6 +62,7 @@ fn main() -> Result<(), failure::Error> {
     } else {
         ""
     };
+    let skip_sha1 = !m.is_present("enable-sha1");
 
     if let ("pong", Some(_sub_matches)) = m.subcommand() {
         let mut stdin = io::stdin();
@@ -85,14 +85,26 @@ fn main() -> Result<(), failure::Error> {
             }
         }
 
-        log_util::setup_logger_for_this_app(
-            console_log,
-            log_file,
-            Vec::<String>::new(),
-            verbose,
-        )?;
+        log_util::setup_logger_for_this_app(console_log, log_file, Vec::<String>::new(), verbose)?;
         if let Err(err) = command::server_loop::server_receive_loop() {
             error!("server-receive-loop caught error: {:?}", err);
+        }
+        return Ok(());
+    }
+
+    // When in server-send-loop no configuration file is required.
+    if let ("server-send-loop", Some(_sub_matches)) = m.subcommand() {
+        let log_file = "data/server-send-loop.log";
+        let log_file_path = Path::new(log_file);
+        if let Some(parent) = log_file_path.parent() {
+            if !parent.exists() {
+                fs::create_dir_all(parent)?;
+            }
+        }
+
+        log_util::setup_logger_for_this_app(console_log, log_file, Vec::<String>::new(), verbose)?;
+        if let Err(err) = command::server_loop::server_send_loop(skip_sha1) {
+            error!("server-send-loop caught error: {:?}", err);
         }
         return Ok(());
     }
@@ -132,8 +144,7 @@ fn main() -> Result<(), failure::Error> {
         app_conf.set_app_instance_id(aii);
     }
 
-    // app_conf.mini_app_conf.skip_cron = m.is_present("skip-cron");
-    app_conf.mini_app_conf.skip_sha1 = !m.is_present("enable-sha1");
+    app_conf.mini_app_conf.skip_sha1 = skip_sha1;
     app_conf.mini_app_conf.as_service = m.is_present("as-service");
 
     if !m.is_present("no-pb") && !app_conf.mini_app_conf.as_service {

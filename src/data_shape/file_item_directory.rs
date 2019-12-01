@@ -8,18 +8,18 @@ use std::sync::{Arc, Mutex};
 /// Like a disk directory, but it contains PrimaryFileItem.
 #[derive(Debug)]
 pub struct PrimaryFileItem {
-    pub local_dir: Arc<SlashPath>,
-    pub remote_dir: Arc<SlashPath>,
+    pub from_dir: Arc<SlashPath>,
+    pub to_dir: Arc<SlashPath>,
     pub relative_item: RelativeFileItem,
 }
 
 impl PrimaryFileItem {
     pub fn get_local_path(&self) -> SlashPath {
-        self.local_dir.join(self.relative_item.get_path())
+        self.from_dir.join(self.relative_item.get_path())
     }
 
     pub fn get_remote_path(&self) -> SlashPath {
-        self.remote_dir.join(self.relative_item.get_path())
+        self.to_dir.join(self.relative_item.get_path())
     }
 
     pub fn get_relative_item(&self) -> &RelativeFileItem {
@@ -35,8 +35,8 @@ impl PrimaryFileItem {
 /// represent a directory on the dist.
 #[derive(Debug)]
 pub struct FileItemDirectory<R: BufRead> {
-    pub local_dir: Arc<SlashPath>,
-    pub remote_dir: Arc<SlashPath>,
+    pub from_dir: Arc<SlashPath>,
+    pub to_dir: Arc<SlashPath>,
     reader: Arc<Mutex<R>>,
     maybe_dir_line: Arc<Mutex<Option<String>>>,
 }
@@ -67,8 +67,8 @@ impl<R: BufRead> Iterator for FileItemDirectory<R> {
                         match serde_json::from_str::<RelativeFileItem>(&line) {
                             Ok(relative_item) => {
                                 let fi = PrimaryFileItem {
-                                    local_dir: self.local_dir.clone(),
-                                    remote_dir: self.remote_dir.clone(),
+                                    from_dir: self.from_dir.clone(),
+                                    to_dir: self.to_dir.clone(),
                                     relative_item,
                                 };
                                 return Some(fi);
@@ -97,14 +97,14 @@ impl<R: BufRead> Iterator for FileItemDirectory<R> {
 
 impl<R: BufRead> FileItemDirectory<R> {
     pub fn new(
-        local_dir: SlashPath,
-        remote_dir: SlashPath,
+        from_dir: SlashPath,
+        to_dir: SlashPath,
         reader: Arc<Mutex<R>>,
         maybe_dir_line: Arc<Mutex<Option<String>>>,
     ) -> Self {
         Self {
-            local_dir: Arc::new(local_dir),
-            remote_dir: Arc::new(remote_dir),
+            from_dir: Arc::new(from_dir),
+            to_dir: Arc::new(to_dir),
             reader,
             maybe_dir_line,
         }

@@ -70,7 +70,7 @@ impl SlashPath {
     /// relativelize the path.
     pub fn strip_prefix(&self, full_path: impl AsRef<Path>) -> Option<String> {
         let full = SlashPath::from_path(full_path.as_ref());
-        full.map(|f|f.as_str().split_at(self.as_str().len() + 1).1.to_owned())
+        full.map(|f| f.as_str().split_at(self.as_str().len() + 1).1.to_owned())
     }
 
     pub fn from_path(path: &Path) -> Option<Self> {
@@ -144,15 +144,14 @@ impl SlashPath {
     #[allow(dead_code)]
     pub fn join_path(&self, path: &Path) -> Option<SlashPath> {
         if let Some(extra_path) = SlashPath::from_path(path) {
-            Some(        SlashPath::new(format!(
-            "{}/{}",
-            self.get_not_slash_end_str(),
-            extra_path.get_not_slash_start_str()
-        )))
+            Some(SlashPath::new(format!(
+                "{}/{}",
+                self.get_not_slash_end_str(),
+                extra_path.get_not_slash_start_str()
+            )))
         } else {
             None
         }
-
     }
 
     pub fn join_another(&self, another: &SlashPath) -> SlashPath {
@@ -250,6 +249,33 @@ pub fn join_path<P: AsRef<str> + fmt::Display>(path_parent: P, path_child: P) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    pub fn deserialize_option<'de, D>(deserializer: D) -> Result<Option<SlashPath>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s: Option<String> = Deserialize::deserialize(deserializer)?;
+        Ok(s.map(|ss| SlashPath { slash: ss }))
+    }
+
+    #[derive(Deserialize, Serialize, Debug, PartialEq)]
+    pub struct DwithOption {
+        #[serde(deserialize_with = "deserialize_option")]
+        pub local_path: Option<SlashPath>,
+    }
+
+    #[test]
+    fn t_deserialize_option_item() -> Result<(), failure::Error> {
+        let dop = DwithOption {
+            local_path: Some(SlashPath::new("abc")),
+        };
+        let s = serde_json::to_string_pretty(&dop)?;
+        eprintln!("{}", s);
+        let dop1 = serde_json::from_str(&s)?;
+        assert_eq!(dop, dop1);
+        Ok(())
+    }
+
     #[test]
     fn t_idx() {
         let s = "a:\\b";
