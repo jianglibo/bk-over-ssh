@@ -94,9 +94,9 @@ impl SlashPath {
     /// /a/ will return a, /a will still return a.
     pub fn get_last_name(&self) -> String {
         let mut split = self.slash.rsplitn(3, '/');
-        let mut s = split.next().expect("local_dir should has dir name.");
+        let mut s = split.next().expect("from_dir should has dir name.");
         if s.is_empty() {
-            s = split.next().expect("local_dir should has dir name.");
+            s = split.next().expect("from_dir should has dir name.");
         }
         s.to_string()
     }
@@ -135,11 +135,15 @@ impl SlashPath {
 
     pub fn join(&self, extra_path: impl AsRef<str>) -> SlashPath {
         let extra_path = SlashPath::new(extra_path.as_ref());
-        SlashPath::new(format!(
-            "{}/{}",
-            self.get_not_slash_end_str(),
-            extra_path.get_not_slash_start_str()
-        ))
+        if self.slash.is_empty() {
+            SlashPath::new(extra_path.get_not_slash_start_str())
+        } else {
+            SlashPath::new(format!(
+                "{}/{}",
+                self.get_not_slash_end_str(),
+                extra_path.get_not_slash_start_str()
+            ))
+        }
     }
     #[allow(dead_code)]
     pub fn join_path(&self, path: &Path) -> Option<SlashPath> {
@@ -162,6 +166,7 @@ impl SlashPath {
         ))
     }
 
+    #[allow(dead_code)]
     pub fn create_dir_all(&self) -> io::Result<()> {
         fs::create_dir_all(&self.slash)
     }

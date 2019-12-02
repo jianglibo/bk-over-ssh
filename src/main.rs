@@ -222,6 +222,14 @@ fn main_entry<'a>(
             }
             command::client_push_loops(&app_conf, server_yml)?;
         }
+        ("client-pull-loop", Some(sub_matches)) => {
+            app_conf.mini_app_conf.app_role.replace(AppRole::PullHub);
+            let server_yml = sub_matches.value_of("server-yml");
+            if server_yml.is_none() {
+                app_conf.progress_bar.take();
+            }
+            command::client_pull_loops(&app_conf, server_yml)?;
+        }
         ("sync-push-dirs", Some(sub_matches)) => {
             let server_yml = sub_matches.value_of("server-yml");
             if server_yml.is_none() {

@@ -136,7 +136,7 @@ impl<R: BufRead> FileItemDirectories<R> {
     fn process_dir_line(&self, line: impl AsRef<str>) -> Option<FileItemDirectory<R>> {
         let line = SlashPath::new(line);
 
-        if let Some((local_dir, remote_dir)) =
+        if let Some((from_dir, to_dir)) =
             self.local_remote_pairs.iter().find(|pair| {
                 match &self.app_role {
                     AppRole::PassiveLeaf => pair.1 == line,
@@ -146,8 +146,8 @@ impl<R: BufRead> FileItemDirectories<R> {
             })
         {
             Some(FileItemDirectory::new(
-                local_dir.clone(),
-                remote_dir.clone(),
+                from_dir.clone(),
+                to_dir.clone(),
                 self.reader.clone(),
                 self.maybe_dir_line.clone(),
             ))

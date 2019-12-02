@@ -13,8 +13,8 @@ use std::{fs, io::Read, io::Write};
 
 pub const CONF_FILE_NAME: &str = "bk_over_ssh.yml";
 
-pub const PULL_SERVERS_CONF: &str = "pull-servers-conf";
-pub const PULL_SERVERS_DATA: &str = "pull-servers-data";
+pub const PULL_CONF: &str = "pull-conf";
+pub const PULL_DATA: &str = "pull-data";
 
 pub const RECEIVE_SERVERS_CONF: &str = "receive-servers-conf";
 pub const RECEIVE_SERVERS_DATA: &str = "receive-servers-data";
@@ -24,8 +24,8 @@ pub const PASSIVE_LEAF_CONF: &str = "passive-leaf-conf";
 pub const PASSIVE_LEAF_DATA: &str = "passive-leaf-data";
 
 // even active leaf may have multiple configuration file. For example push to mulitple ReceiveHubs.
-pub const ACTIVE_LEAF_CONF: &str = "active-leaf-conf";
-pub const ACTIVE_LEAF_DATA: &str = "active-leaf-data";
+pub const PUSH_CONF: &str = "push-conf";
+pub const PUSH_DATA: &str = "push-data";
 
 #[derive(Debug, Deserialize, Serialize, Default)]
 pub struct LogConf {
@@ -185,8 +185,8 @@ where
     D: DbAccess<M>,
 {
     let servers_conf_dir_name = match app_role {
-        AppRole::PullHub => PULL_SERVERS_CONF,
-        AppRole::ActiveLeaf => ACTIVE_LEAF_CONF,
+        AppRole::PullHub => PULL_CONF,
+        AppRole::ActiveLeaf => PUSH_CONF,
         AppRole::PassiveLeaf => PASSIVE_LEAF_CONF,
         AppRole::ReceiveHub => RECEIVE_SERVERS_CONF,
     };
@@ -291,10 +291,10 @@ where
                         let servers_conf_dir = if let Some(app_role) = app_role {
                             match app_role {
                                 AppRole::PullHub => {
-                                    data_dir_full_path.as_path().join(PULL_SERVERS_CONF)
+                                    data_dir_full_path.as_path().join(PULL_CONF)
                                 }
                                 AppRole::ActiveLeaf => {
-                                    data_dir_full_path.as_path().join(ACTIVE_LEAF_CONF)
+                                    data_dir_full_path.as_path().join(PUSH_CONF)
                                 }
                                 AppRole::PassiveLeaf => {
                                     data_dir_full_path.as_path().join(PASSIVE_LEAF_CONF)
@@ -306,6 +306,8 @@ where
                         } else {
                             data_dir_full_path.clone()
                         };
+
+                        trace!("found servers conf dir: {:?}", servers_conf_dir);
 
                         if !servers_conf_dir.exists() {
                             if let Err(err) = fs::create_dir_all(&servers_conf_dir) {
@@ -441,6 +443,7 @@ where
 
     /// load all .yml file under servers directory.
     pub fn load_all_server_yml(&self) -> Vec<(Server<M, D>, Indicator)> {
+        trace!("servers_conf_dir is: {:?}", self.servers_conf_dir);
         if let Ok(read_dir) = self.servers_conf_dir.read_dir() {
             read_dir
                 .filter_map(|ery| match ery {
@@ -457,6 +460,7 @@ where
                     }
                     Ok(astr) => Some(astr),
                 })
+                .filter(|s|s.ends_with(".yml") || s.ends_with(".yaml"))
                 .map(|astr| self.load_server_yml(astr))
                 .filter_map(|rr| match rr {
                     Err(err) => {
@@ -520,8 +524,8 @@ where
 
         let servers_data_dir = if let Some(app_role) = self.mini_app_conf.app_role.as_ref() {
             match app_role {
-                AppRole::PullHub => data_dir.join(PULL_SERVERS_DATA),
-                AppRole::ActiveLeaf => data_dir.join(ACTIVE_LEAF_DATA),
+                AppRole::PullHub => data_dir.join(PULL_DATA),
+                AppRole::ActiveLeaf => data_dir.join(PUSH_DATA),
                 AppRole::PassiveLeaf => data_dir.join(PASSIVE_LEAF_DATA),
                 AppRole::ReceiveHub => data_dir.join(RECEIVE_SERVERS_DATA),
             }
@@ -561,7 +565,7 @@ where
         server.yml_location.replace(ab);
 
         trace!(
-            "loaded server, directory pairs, [local_dir, remote_dir]: {:?}",
+            "loaded server, directory pairs, [from_dir, to_dir]: {:?}",
             server
                 .server_yml
                 .directories

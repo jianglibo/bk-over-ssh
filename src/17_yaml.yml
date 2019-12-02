@@ -307,7 +307,17 @@ subcommands:
     - pong:
         about: reply a message to client.
     - client-push-loop:
-        about: client side loop.
+        about: client side push loop.
+        args:
+            - server-yml:
+                required: false
+                index: 1
+            - rsync-window:
+                long: rsync-window
+                takes_value: true
+                required: false
+    - client-pull-loop:
+        about: client side pull loop.
         args:
             - server-yml:
                 required: false

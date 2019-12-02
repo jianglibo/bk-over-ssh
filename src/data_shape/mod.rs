@@ -16,7 +16,7 @@ pub mod client_push_pb;
 
 pub use data_shape_util::{get_file_meta};
 
-pub use client_push_pb::{ClientPushProgressBar};
+pub use client_push_pb::{TransferFileProgressBar};
 
 pub use app_conf::{
     demo_app_conf, AppConf, AppRole, MailConf, MiniAppConf, ReadAppConfException, CONF_FILE_NAME,

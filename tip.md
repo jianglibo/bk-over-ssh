@@ -45,13 +45,13 @@ Every user will create a linux account and a home directory. For example: userad
 .\target\debug\bk-over-ssh.exe --console-log --as-service --app-role pull_hub sync-pull-dirs .\data\pull-servers-conf\localhost.yml
 
 
-.\target\debug\bk-over-ssh.exe --console-log --as-service --app-role active_leaf sync-push-dirs .\data\active-leaf-conf\localhost.yml
+.\target\debug\bk-over-ssh.exe --console-log --as-service --app-role active_leaf sync-push-dirs .\data\push-conf\localhost.yml
 
-.\target\debug\bk-over-ssh.exe --console-log --app-role active_leaf sync-push-dirs .\data\active-leaf-conf\localhost.yml
+.\target\debug\bk-over-ssh.exe --console-log --app-role active_leaf sync-push-dirs .\data\push-conf\localhost.yml
 
 .\target\debug\bk-over-ssh.exe --console-log --vv  --app-role pull_hub create-remote-db .\data\pull-servers-conf\go2wheel.yml --force
 
-.\target\debug\bk-over-ssh.exe --console-log --vv  --app-role active_leaf sync-push-dirs .\data\active-leaf-conf\go2wheel.yml --force
+.\target\debug\bk-over-ssh.exe --console-log --vv  --app-role active_leaf sync-push-dirs .\data\push-conf\go2wheel.yml --force
 
 ## window service.
 https://github.com/kohsuke/winsw/

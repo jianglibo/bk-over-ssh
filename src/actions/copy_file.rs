@@ -779,7 +779,7 @@ mod tests {
         let tu = tutil::TestDir::new();
         let dir_str = tu.tmp_dir_str();
         let f_path_buf = tu.make_a_file_with_content("a.txt", "abc")?;
-        let remote_dir_str = string_path::SlashPath::new(dir_str)
+        let to_dir_str = string_path::SlashPath::new(dir_str)
             .join("a/b/c/d/e.txt")
             .slash;
         dotenv().ok();
@@ -791,11 +791,11 @@ mod tests {
             password.as_str(),
         )?;
         let sftp = sess.sftp()?;
-        eprintln!("copy {:?} to {:?}", f_path_buf, remote_dir_str);
+        eprintln!("copy {:?} to {:?}", f_path_buf, to_dir_str);
         if let Err(err) = copy_a_file_sftp(
             &sftp,
             f_path_buf.to_str().expect("f_path_buf to_str failed."),
-            remote_dir_str.as_str(),
+            to_dir_str.as_str(),
         ) {
             if let SftpException::NoSuchFile = err {
                 let mut channel = sess.channel_session()?;
@@ -805,7 +805,7 @@ mod tests {
             }
         };
 
-        assert!(Path::new(remote_dir_str.as_str()).exists());
+        assert!(Path::new(to_dir_str.as_str()).exists());
         Ok(())
     }
 

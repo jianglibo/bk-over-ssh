@@ -1,13 +1,13 @@
 use indicatif::{ProgressBar, ProgressStyle};
 
-pub struct ClientPushProgressBar {
+pub struct TransferFileProgressBar {
     pub total_files: u64,
     pub consumed_files: u64,
     pub pb: ProgressBar,
     pub show_pb: bool,
 }
 
-impl ClientPushProgressBar {
+impl TransferFileProgressBar {
     pub fn new(total_files: u64, show_pb: bool) -> Self {
         let pb = ProgressBar::new(!0);
         pb.set_style(
@@ -16,7 +16,7 @@ impl ClientPushProgressBar {
                 .progress_chars("##-"),
         );
 
-        Self {
+        TransferFileProgressBar {
             total_files,
             pb,
             show_pb,

@@ -139,6 +139,10 @@ impl U64Message {
         v
     }
 
+    pub fn as_bytes(&self) -> Vec<u8> {
+        self.value.to_be_bytes().to_vec()
+    }
+
     pub fn parse<T>(message_hub: &mut T) -> Result<U64Message, HeaderParseError>
     where
         T: MessageHub,

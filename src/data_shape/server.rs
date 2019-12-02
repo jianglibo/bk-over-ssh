@@ -1,5 +1,5 @@
 use super::{
-    app_conf, rolling_files, AppRole, AuthMethod, ClientPushProgressBar, Directory, FileChanged,
+    app_conf, rolling_files, AppRole, AuthMethod, TransferFileProgressBar, Directory, FileChanged,
     FileItemDirectories, FileItemMap, FileItemProcessResult, FileItemProcessResultStats,
     FullPathFileItem, Indicator, MiniAppConf, PbProperties, PrimaryFileItem, ProgressWriter,
     PruneStrategy, RelativeFileItem, ScheduleItem, SlashPath, SyncType,
@@ -231,12 +231,12 @@ where
 
         if let Some(app_role) = app_conf.app_role.as_ref() {
             match app_role {
-                AppRole::PullHub => {
-                    server_yml
-                        .directories
-                        .iter_mut()
-                        .try_for_each(|d| d.normalize_pull_hub_sync(directories_dir.as_path()))?;
-                }
+                // AppRole::PullHub => {
+                //     server_yml
+                //         .directories
+                //         .iter_mut()
+                //         .try_for_each(|d| d.normalize_pull_hub_sync(directories_dir.as_path()))?;
+                // }
                 AppRole::ActiveLeaf => {
                     let remote_home = server_yml.remote_exec.as_str();
                     server_yml.directories.iter_mut().try_for_each(|d| {
@@ -271,8 +271,8 @@ where
         })
     }
 
-    /// Server's my_dir is composed of the app_setting's 'data dir' and the server distinctness, app_instance_id or hostname.
-    /// It varies on role of the application.
+    /// Server's my_dir is composed of the app_setting's 'data dir' and the server distinctness, app_instance_id o/r hostname.
+    /// It varies on the role of the application.
     pub fn get_my_dir(&self) -> &Path {
         self.my_dir.as_path()
     }
@@ -300,11 +300,11 @@ where
             .count() as u64
     }
 
-    pub fn count_local_dir_files(&self) -> u64 {
+    pub fn count_from_dir_files(&self) -> u64 {
         self.server_yml
             .directories
             .iter()
-            .map(|dir| dir.count_local_dir_files())
+            .map(|dir| dir.count_from_dir_files())
             .sum()
     }
     /// For app_role is ReceiveHub, remote exec is from user's home directory.
@@ -510,7 +510,7 @@ where
     }
 
     fn archive_internal(&self, pb: &mut Indicator) -> Result<PathBuf, failure::Error> {
-        let total_size = self.count_local_dirs_size();
+        let total_size = self.count_from_dirs_size();
 
         let style = ProgressStyle::default_bar()
             .template(
@@ -773,7 +773,7 @@ where
         Ok(working_file)
     }
 
-    pub fn create_remote_dir(&self, dir: &str) -> Result<(), failure::Error> {
+    pub fn create_to_dir(&self, dir: &str) -> Result<(), failure::Error> {
         let mut channel: ssh2::Channel = self.create_channel()?;
         let dir = base64::encode(dir);
         let cmd = format!(
@@ -1025,7 +1025,7 @@ where
                     let push_result = push_a_file_item_sftp(&sftp, item, &mut buff, progress_bar);
                     progress_bar.tick_total_pb_style_1(self.get_host(), file_len);
                     if let FileItemProcessResult::MayBeNoParentDir(item) = push_result {
-                        match self.create_remote_dir(
+                        match self.create_to_dir(
                             item.get_remote_path()
                                 .parent()
                                 .expect("slash path's parent directory should exist.")
@@ -1036,7 +1036,7 @@ where
                                 push_a_file_item_sftp(&sftp, item, &mut buff, progress_bar)
                             }
                             Err(err) => {
-                                error!("create_remote_dir failed: {:?}", err);
+                                error!("create_to_dir failed: {:?}", err);
                                 FileItemProcessResult::SftpOpenFailed
                             }
                         }
@@ -1070,8 +1070,8 @@ where
         file_item_lines: R,
         progress_bar: &mut Indicator,
     ) -> Result<FileItemProcessResultStats, failure::Error> {
-        let mut current_remote_dir = Option::<String>::None;
-        let mut current_local_dir = Option::<&Path>::None;
+        let mut current_to_dir = Option::<String>::None;
+        let mut current_from_dir = Option::<&Path>::None;
 
         self.init_total_progress_bar(progress_bar, self.get_working_file_list_file())?;
 
@@ -1090,8 +1090,8 @@ where
             .map(|line| {
                 if line.starts_with('{') {
                     trace!("got item line {}", line);
-                    if let (Some(remote_dir), Some(local_dir)) =
-                        (current_remote_dir.as_ref(), current_local_dir)
+                    if let (Some(to_dir), Some(from_dir)) =
+                        (current_to_dir.as_ref(), current_from_dir)
                     {
                         match serde_json::from_str::<RelativeFileItem>(&line) {
                             Ok(remote_item) => {
@@ -1104,8 +1104,8 @@ where
                                     SyncType::Sftp
                                 };
                                 let file_item_map = FileItemMap::new(
-                                    local_dir,
-                                    remote_dir.as_str(),
+                                    from_dir,
+                                    to_dir.as_str(),
                                     remote_item,
                                     sync_type,
                                     true,
@@ -1155,21 +1155,21 @@ where
                         .find(|dir| dir.to_dir.slash_equal_to(&line));
 
                     if let Some(found_directory) = found_directory {
-                        current_remote_dir = Some(line.clone());
-                        current_local_dir = Some(found_directory.from_dir.as_path());
+                        current_to_dir = Some(line.clone());
+                        current_from_dir = Some(found_directory.from_dir.as_path());
                         FileItemProcessResult::Directory(line)
                     } else {
                         // we compare the remote dir line with this server_yml.directories's remote dir
                         error!(
-                            "this is line from remote: {:?}, this is all remote_dir in configuration file: {:?}, no one matches.",
+                            "this is line from remote: {:?}, this is all to_dir in configuration file: {:?}, no one matches.",
                             line, self.server_yml
                                 .directories
                                 .iter()
                                 .map(|dir| dir.from_dir.as_str())
                                 .collect::<Vec<&str>>()
                         );
-                        current_remote_dir = None;
-                        current_local_dir = None;
+                        current_to_dir = None;
+                        current_from_dir = None;
                         FileItemProcessResult::NoCorrespondedLocalDir(line)
                     }
                 }
@@ -1178,7 +1178,7 @@ where
         Ok(result)
     }
 
-    pub fn count_local_dirs_size(&self) -> u64 {
+    pub fn count_from_dirs_size(&self) -> u64 {
         self.server_yml
             .directories
             .iter()
@@ -1266,11 +1266,13 @@ where
         );
         message_hub.write_and_flush(server_yml.as_server_yml_sent_bytes().as_slice())?;
 
-        let to_dir =
-            SlashPath::from_path(self.my_dir.as_path()).expect("my_dir should exists.");
+        let file_count = U64Message::parse(&mut message_hub)?;
 
+        let my_dir =
+            SlashPath::from_path(self.get_my_dir()).expect("my_dir should exists.").join("directories");
+        trace!("save to my_dir: {:?}", my_dir);
         let mut cppb =
-            ClientPushProgressBar::new(self.count_local_dir_files(), self.app_conf.show_pb);
+            TransferFileProgressBar::new(file_count.value, self.app_conf.show_pb);
 
         let mut last_df: Option<SlashPath> = None;
         let mut last_file_item: Option<FullPathFileItem> = None;
@@ -1283,12 +1285,13 @@ where
                     trace!("got file item: {}", string_message.content);
                     match serde_json::from_str::<FullPathFileItem>(&string_message.content) {
                         Ok(file_item) => {
-                            let df = to_dir.join_another(&file_item.remote_path); // use remote path.
+                            let df = my_dir.join_another(&file_item.to_path); // use to path.
                             match file_item.changed(df.as_path()) {
                                 FileChanged::NoChange => {
                                     message_hub.write_transfer_type_only(
                                         TransferType::FileItemUnchanged,
                                     )?;
+                                    cppb.skip_one();
                                 }
                                 fc => {
                                     let string_message = StringMessage::new(format!("{:?}", fc));
@@ -1309,10 +1312,11 @@ where
                 }
                 TransferType::StartSend => {
                     let content_len = U64Message::parse(&mut message_hub)?;
-                    if let Some(df) = last_df.take() {
+                    if let (Some(df), Some(file_item)) = (last_df.take(), last_file_item.take()) {
+                        cppb.push_one(file_item.len, df.as_str());
                         trace!("copy to file: {:?}", df.as_path());
                         if let Err(err) =
-                            message_hub.copy_to_file(&mut buf, content_len.value, df.as_path())
+                            message_hub.copy_to_file(&mut buf, content_len.value, df.as_path(), Some(&cppb))
                         {
                             message_hub.write_error_message(format!("{:?}", err))?;
                         } else if let Some(lfi) = last_file_item.as_ref() {
@@ -1341,6 +1345,7 @@ where
                 }
             }
         }
+        cppb.pb.finish_with_message("done.");
         Ok(None)
     }
 
@@ -1356,7 +1361,7 @@ where
         channel.exec(&cmd).expect("start remote server-loop");
 
         let mut cppb =
-            ClientPushProgressBar::new(self.count_local_dir_files(), self.app_conf.show_pb);
+            TransferFileProgressBar::new(self.count_from_dir_files(), self.app_conf.show_pb);
         let mut message_hub = SshChannelMessageHub::new(channel);
 
         let server_yml = StringMessage::from_path(
@@ -1381,15 +1386,15 @@ where
                     TransferType::FileItemChanged => {
                         let change_message = StringMessage::parse(&mut message_hub)?;
                         trace!("changed file: {}.", change_message.content);
-                        let file_len = fi.local_path.as_path().metadata()?.len();
-                        cppb.push_one(file_len, fi.local_path.as_str());
+                        let file_len = fi.from_path.as_path().metadata()?.len();
+                        cppb.push_one(file_len, fi.from_path.as_str());
                         let u64_message = U64Message::new(file_len);
                         message_hub.write_and_flush(&u64_message.as_start_send_bytes())?;
                         trace!("start send header sent.");
                         let mut buf = [0; 8192];
                         let mut file = fs::OpenOptions::new()
                             .read(true)
-                            .open(fi.local_path.as_path())?;
+                            .open(fi.from_path.as_path())?;
                         trace!("start send file content.");
                         loop {
                             let readed = file.read(&mut buf)?;
@@ -1652,7 +1657,7 @@ mod tests {
             .directories
             .iter()
             .find(|d| d.to_dir.ends_with("a-dir"))
-            .expect("should have a directory who's remote_dir end with 'a-dir'")
+            .expect("should have a directory who's to_dir end with 'a-dir'")
             .to_dir;
 
         if a_dir.exists() {
@@ -1708,7 +1713,7 @@ mod tests {
             .directories
             .iter()
             .find(|dir| dir.to_dir.ends_with("a-dir"))
-            .expect("should have a directory who's remote_dir end with 'a-dir'")
+            .expect("should have a directory who's to_dir end with 'a-dir'")
             .from_dir
             .clone();
 

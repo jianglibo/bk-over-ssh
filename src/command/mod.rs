@@ -12,13 +12,14 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use std::{fs, io::Write};
+use log::*;
 
 use crate::data_shape::{AppConf, AppRole, Indicator, ReadAppConfException, Server};
 use r2d2_sqlite::SqliteConnectionManager;
 
 pub use archives::archive_local;
 pub use sync_dirs::{sync_pull_dirs, sync_push_dirs};
-pub use client_loop::{client_push_loops};
+pub use client_loop::{client_push_loops, client_pull_loops};
 
 
 pub const SERVER_TEMPLATE_BYTES: &[u8] = include_bytes!("../server_template.yaml");
@@ -175,6 +176,7 @@ pub fn load_server_indicator_pairs(
         let server = load_server_yml_by_name(app_conf, server_yml, true)?;
         server_indicator_pairs.push(server);
     } else {
+        trace!("start load_all_server_yml.");
         server_indicator_pairs.append(&mut load_all_server_yml(app_conf, true));
     }
     // all progress bars already create from here on.

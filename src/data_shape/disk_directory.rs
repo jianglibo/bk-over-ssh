@@ -164,11 +164,11 @@ impl Directory {
     ) -> Result<(), failure::Error> {
         trace!("origin directory: {:?}", self);
         if self.from_dir.is_empty() {
-            bail!("when in push mode, local_dir cannot be empty.");
+            bail!("when in push mode, from_dir cannot be empty.");
         }
 
         if !self.from_dir.exists() {
-            bail!("local_dir does not exist: {}", &self.from_dir);
+            bail!("from_dir does not exist: {}", &self.from_dir);
         }
 
         trace!("origin directory: {:?}", self);
@@ -198,56 +198,41 @@ impl Directory {
         let directories_dir = directories_dir.as_ref();
         trace!("origin directory: {:?}", self);
 
-        if self.from_dir.is_empty() {
-            bail!("when in push mode, local_dir cannot be empty.");
+        if self.from_dir.is_empty()  || !self.from_dir.as_path().is_absolute() {
+            bail!("from_dir is always absolute and existing.");
         }
 
         if self.to_dir.is_empty() {
             self.to_dir.set_slash(self.from_dir.get_last_name());
         }
 
-        let remote_path = SlashPath::from_path(directories_dir)
-            .expect("normalize_receive_hub_sync directories_dir to_str should succeed.")
+        let to_path = SlashPath::from_path(directories_dir)
+            .expect("directories_dir to_str should succeed.")
             .join(self.to_dir.get_slash());
-        self.to_dir = remote_path;
+        self.to_dir = to_path;
         Ok(())
     }
 
     /// When pulling remote the remote directory is absolute path, local path is relative.
     /// This method is for normalize local directory ready for coping.
-    pub fn normalize_pull_hub_sync(
-        &mut self,
-        directories_dir: impl AsRef<Path>,
-    ) -> Result<(), failure::Error> {
-        let directories_dir = directories_dir.as_ref();
-        trace!("origin directory: {:?}", self);
+    // pub fn normalize_pull_hub_sync(
+    //     &mut self,
+    //     directories_dir: impl AsRef<Path>,
+    // ) -> Result<(), failure::Error> {
+    //     let directories_dir = directories_dir.as_ref();
+    //     trace!("origin directory: {:?}", self);
 
-        if self.from_dir.is_empty() {
-            self.from_dir.set_slash(self.to_dir.get_last_name());
-        }
-
-        if self.from_dir.as_path().is_absolute() {
-            bail!(
-                "the local_dir of a server can't be absolute. {:?}",
-                self.from_dir
-            );
-        }
-
-        self.from_dir = SlashPath::from_path(directories_dir)
-            .expect("normalize_pull_hub_sync directories_dir to_str should succeed.")
-            .join_another(&self.from_dir);
-
-        if !self.from_dir.exists() {
-            self.from_dir.create_dir_all()?;
-        }
-        Ok(())
-    }
+    //     if self.from_dir.is_empty() || !self.from_dir.as_path().is_absolute() {
+    //         bail!("from_dir is always absolute and existing.");
+    //     }
+    //     Ok(())
+    // }
 
     /// The method read information of files from disk file.
-    /// but from which directory to read on? local_dir or remote_dir?
+    /// but from which directory to read on? from_dir or to_dir?
     /// It depends on the role of the running application.
-    /// when as AppRole::PassiveLeaf use remote_dir.
-    /// when as AppRole::ActiveLeaf use local_dir.
+    /// when as AppRole::PassiveLeaf use to_dir.
+    /// when as AppRole::ActiveLeaf use from_dir.
     pub fn load_relative_item<O>(
         &self,
         app_role: Option<&AppRole>,
@@ -311,7 +296,7 @@ impl Directory {
     }
 
     /// When push to remote server the server_distinct_id is app_instance_id,
-    /// When be pulled the server_distinct_id is {host_name_or_ip}/directories.
+    /// When be pulled the server_distinct_id is unnecessary.
     pub fn file_item_iter(
         &self,
         server_distinct_id: impl AsRef<str>,
@@ -320,7 +305,7 @@ impl Directory {
     ) -> impl Iterator<Item = FullPathFileItem> + '_ {
         let includes_patterns = self.includes_patterns.clone();
         let excludes_patterns = self.excludes_patterns.clone();
-        let app_instance_id = server_distinct_id.as_ref().to_string();
+        let server_distinct_id = server_distinct_id.as_ref().to_string();
         let dir_to_read = dir_to_read.clone();
 
         WalkDir::new(dir_to_read.as_path())
@@ -340,7 +325,7 @@ impl Directory {
                 FullPathFileItem::create_item_from_path(
                     &dir_to_read,
                     absolute_file_path,
-                    &app_instance_id,
+                    &server_distinct_id,
                     skip_sha1,
                 )
             })
@@ -373,7 +358,7 @@ impl Directory {
         Ok(file_num as u64)
     }
 
-    pub fn count_local_dir_files(&self) -> u64 {
+    pub fn count_from_dir_files(&self) -> u64 {
         let includes_patterns = self.includes_patterns.clone();
         let excludes_patterns = self.excludes_patterns.clone();
 

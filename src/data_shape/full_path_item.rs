@@ -17,13 +17,13 @@ pub enum FileChanged {
 }
 
 /// Like a disk directory, but it contains FullPathFileItem.
-/// No local_dir and remote_dir, but absolute local_path and remote_path.
+/// No from_dir and to_dir, but absolute local_path and remote_path.
 #[derive(Deserialize, Serialize, Debug)]
 pub struct FullPathFileItem {
     #[serde(deserialize_with = "string_path::deserialize_slash_path_from_str")]
-    pub local_path: SlashPath,
+    pub from_path: SlashPath,
     #[serde(deserialize_with = "string_path::deserialize_slash_path_from_str")]
-    pub remote_path: SlashPath,
+    pub to_path: SlashPath,
     pub sha1: Option<String>,
     pub len: u64,
     pub modified: Option<u64>,
@@ -51,11 +51,11 @@ impl FullPathFileItem {
                 .strip_prefix(absolute_file_to_read.as_path())
             {
                 Some(Self {
-                    local_path: SlashPath::from_path(absolute_file_to_read.as_path())
+                    from_path: SlashPath::from_path(absolute_file_to_read.as_path())
                         .expect("slashpath from absolute file path"),
                     // remote path is determined by the app_instance_id, base_path's name and the relative path.
                     // the relative path already include base_path's name.
-                    remote_path: app_instance_id.join(relative_path),
+                    to_path: app_instance_id.join(relative_path),
                     sha1: fmeta.sha1,
                     len: fmeta.len,
                     modified: fmeta.modified,
@@ -143,7 +143,7 @@ excludes:
         let files = dir
             .file_item_iter("abc", &dir.from_dir, false)
             .map(|it| {
-                println!("remote_path: {:?}", it.remote_path.slash);
+                println!("to_path: {:?}", it.to_path.slash);
                 it
             })
             .collect::<Vec<FullPathFileItem>>();
@@ -153,7 +153,7 @@ excludes:
             files
                 .get(0)
                 .unwrap()
-                .remote_path
+                .to_path
                 .slash
                 .starts_with("abc/a-dir"),
             "should starts_with fixtures/"

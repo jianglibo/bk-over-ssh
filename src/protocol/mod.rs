@@ -9,6 +9,7 @@ use std::convert::TryInto;
 use std::fs;
 use std::io::{self, Cursor, Read, StdinLock, StdoutLock, Write};
 use std::path::Path;
+use crate::data_shape::{TransferFileProgressBar};
 
 /// Only this method aware of underlying reader!!!
 fn read_inner(
@@ -96,6 +97,7 @@ pub trait MessageHub: Read + Write {
         buf: &mut [u8],
         len: u64,
         file_path: impl AsRef<Path>,
+        progress_bar: Option<&TransferFileProgressBar>,
     ) -> Result<(), failure::Error> {
         let mut count = len;
         let file_path = file_path.as_ref();
@@ -123,6 +125,9 @@ pub trait MessageHub: Read + Write {
                 self.get_remains().append(&mut new_remains);
                 f.write_all(&buf[..count as usize])?;
                 break;
+            }
+            if let Some(pb) = progress_bar {
+                pb.pb.inc(readed as u64);
             }
             count -= readed as u64;
         }

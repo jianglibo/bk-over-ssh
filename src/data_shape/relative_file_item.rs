@@ -128,13 +128,13 @@ impl RelativeFileItem {
 //         sql_batch_size
 //     );
 //     // let base_path = directory.get_remote_canonicalized_dir_str()?;
-//     let base_path = directory.remote_dir.as_str();
+//     let base_path = directory.to_dir.as_str();
 //     // let dir_id = db_access.insert_directory(base_path.as_str())?;
 //     let dir_id = db_access.insert_directory(base_path)?;
 
 //     if sql_batch_size > 1 {
 //         // WalkDir::new(&base_path)
-//         WalkDir::new(&directory.remote_dir.as_path())
+//         WalkDir::new(&directory.to_dir.as_path())
 //             .follow_links(false)
 //             .into_iter()
 //             .filter_map(|e| e.ok())
@@ -143,7 +143,7 @@ impl RelativeFileItem {
 //             .filter_map(|d| directory.match_path(d))
 //             // .filter_map(|d| RelativeFileItemInDb::from_path(&base_path, d, skip_sha1, dir_id))
 //             .filter_map(|d| {
-//                 RelativeFileItemInDb::from_path(&directory.remote_dir, d, skip_sha1, dir_id)
+//                 RelativeFileItemInDb::from_path(&directory.to_dir, d, skip_sha1, dir_id)
 //             })
 //             .filter(|rfi| !(rfi.path.ends_with(sig_ext) || rfi.path.ends_with(delta_ext)))
 //             .filter_map(|rfi| db_access.insert_or_update_relative_file_item(rfi, true))
@@ -164,7 +164,7 @@ impl RelativeFileItem {
 //             .filter_map(|d| d.path().canonicalize().ok())
 //             .filter_map(|d| directory.match_path(d))
 //             .filter_map(|d| {
-//                 RelativeFileItemInDb::from_path(&directory.remote_dir, d, skip_sha1, dir_id)
+//                 RelativeFileItemInDb::from_path(&directory.to_dir, d, skip_sha1, dir_id)
 //             })
 //             // .filter_map(|d| RelativeFileItemInDb::from_path(&base_path, d, skip_sha1, dir_id))
 //             .filter_map(|rfi| db_access.insert_or_update_relative_file_item(rfi, false))
@@ -185,14 +185,14 @@ impl RelativeFileItem {
 //     // let base_path = directory.get_remote_canonicalized_dir_str()?;
 //     // writeln!(out, "{}", base_path)?;
 //     // WalkDir::new(&base_path)
-//     WalkDir::new(directory.remote_dir.as_path())
+//     WalkDir::new(directory.to_dir.as_path())
 //         .follow_links(false)
 //         .into_iter()
 //         .filter_map(|e| e.ok())
 //         .filter(|d| d.file_type().is_file())
 //         .filter_map(|d| d.path().canonicalize().ok())
 //         .filter_map(|d| directory.match_path(d))
-//         .filter_map(|d| RelativeFileItem::from_path(&directory.remote_dir, d, skip_sha1))
+//         .filter_map(|d| RelativeFileItem::from_path(&directory.to_dir, d, skip_sha1))
 //         .for_each(|rfi| match serde_json::to_string(&rfi) {
 //             Ok(line) => {
 //                 if let Err(err) = writeln!(out, "{}", line) {
