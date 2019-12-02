@@ -1,8 +1,8 @@
 use super::{
-    app_conf, rolling_files, AppRole, AuthMethod, TransferFileProgressBar, Directory, FileChanged,
-    FileItemDirectories, FileItemMap, FileItemProcessResult, FileItemProcessResultStats,
-    FullPathFileItem, Indicator, MiniAppConf, PbProperties, PrimaryFileItem, ProgressWriter,
-    PruneStrategy, RelativeFileItem, ScheduleItem, SlashPath, SyncType,
+    app_conf, rolling_files, AppRole, AuthMethod, Directory, FileChanged, FileItemDirectories,
+    FileItemMap, FileItemProcessResult, FileItemProcessResultStats, FullPathFileItem, Indicator,
+    MiniAppConf, PbProperties, PrimaryFileItem, ProgressWriter, PruneStrategy, RelativeFileItem,
+    ScheduleItem, SlashPath, SyncType, TransferFileProgressBar,
 };
 use crate::actions::{copy_a_file_item, copy_a_file_sftp, copy_file, ssh_util, SyncDirReport};
 use crate::db_accesses::DbAccess;
@@ -22,7 +22,7 @@ use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
-use std::{fs, io, io::Seek, io::Write};
+use std::{fs, io, io::Seek};
 use tar::Builder;
 
 pub const CRON_NAME_SYNC_PULL_DIRS: &str = "sync-pull-dirs";
@@ -231,12 +231,6 @@ where
 
         if let Some(app_role) = app_conf.app_role.as_ref() {
             match app_role {
-                // AppRole::PullHub => {
-                //     server_yml
-                //         .directories
-                //         .iter_mut()
-                //         .try_for_each(|d| d.normalize_pull_hub_sync(directories_dir.as_path()))?;
-                // }
                 AppRole::ActiveLeaf => {
                     let remote_home = server_yml.remote_exec.as_str();
                     server_yml.directories.iter_mut().try_for_each(|d| {
@@ -1267,12 +1261,13 @@ where
         message_hub.write_and_flush(server_yml.as_server_yml_sent_bytes().as_slice())?;
 
         let file_count = U64Message::parse(&mut message_hub)?;
+        trace!("got file_count: {}", file_count.value);
 
-        let my_dir =
-            SlashPath::from_path(self.get_my_dir()).expect("my_dir should exists.").join("directories");
+        let my_dir = SlashPath::from_path(self.get_my_dir())
+            .expect("my_dir should exists.")
+            .join("directories");
         trace!("save to my_dir: {:?}", my_dir);
-        let mut cppb =
-            TransferFileProgressBar::new(file_count.value, self.app_conf.show_pb);
+        let mut cppb = TransferFileProgressBar::new(file_count.value, self.app_conf.show_pb);
 
         let mut last_df: Option<SlashPath> = None;
         let mut last_file_item: Option<FullPathFileItem> = None;
@@ -1312,24 +1307,31 @@ where
                 }
                 TransferType::StartSend => {
                     let content_len = U64Message::parse(&mut message_hub)?;
+                    // file item is from another side.
                     if let (Some(df), Some(file_item)) = (last_df.take(), last_file_item.take()) {
                         cppb.push_one(file_item.len, df.as_str());
                         trace!("copy to file: {:?}", df.as_path());
-                        if let Err(err) =
-                            message_hub.copy_to_file(&mut buf, content_len.value, df.as_path(), Some(&cppb))
-                        {
-                            message_hub.write_error_message(format!("{:?}", err))?;
-                        } else if let Some(lfi) = last_file_item.as_ref() {
-                            if let Some(md) = lfi.modified {
-                                let ft = filetime::FileTime::from_unix_time(md as i64, 0);
-                                filetime::set_file_mtime(df.as_path(), ft)?;
-                            } else {
-                                message_hub.write_error_message(
-                                    "push_primary_file_item has no modified value.",
-                                )?;
+                        match message_hub.copy_to_file(
+                            &mut buf,
+                            content_len.value,
+                            df.as_path(),
+                            Some(&cppb),
+                        ) {
+                            Err(err) => {
+                                message_hub.write_error_message(format!("{:?}", err))?;
+                                //log at client side.
+                                error!("copy_to_file got error {:?}", err);
                             }
-                        } else {
-                            message_hub.write_error_message("last_file_item is empty.")?;
+                            Ok(()) => {
+                                if let Some(md) = file_item.modified {
+                                    let ft = filetime::FileTime::from_unix_time(md as i64, 0);
+                                    filetime::set_file_mtime(df.as_path(), ft)?;
+                                } else {
+                                    message_hub.write_error_message(
+                                        "push_primary_file_item has no modified value.",
+                                    )?;
+                                }
+                            }
                         }
                     } else {
                         error!("empty last_df.");
@@ -1374,6 +1376,7 @@ where
         message_hub.write_and_flush(server_yml.as_server_yml_sent_bytes().as_slice())?;
         let mut changed = 0_u64;
         let mut unchanged = 0_u64;
+        let mut buf = [0; 8192];
         // after sent server_yml, will send push_primary_file_item repeatly, when finish sending follow a RepeatDone message.
         for dir in self.server_yml.directories.iter() {
             let push_file_items = dir.file_item_iter(
@@ -1387,26 +1390,7 @@ where
                     TransferType::FileItemChanged => {
                         let change_message = StringMessage::parse(&mut message_hub)?;
                         trace!("changed file: {}.", change_message.content);
-                        let file_len = fi.from_path.as_path().metadata()?.len();
-                        cppb.push_one(file_len, fi.from_path.as_str());
-                        let u64_message = U64Message::new(file_len);
-                        message_hub.write_and_flush(&u64_message.as_start_send_bytes())?;
-                        trace!("start send header sent.");
-                        let mut buf = [0; 8192];
-                        let mut file = fs::OpenOptions::new()
-                            .read(true)
-                            .open(fi.from_path.as_path())?;
-                        trace!("start send file content.");
-                        loop {
-                            let readed = file.read(&mut buf)?;
-                            if readed == 0 {
-                                message_hub.flush()?;
-                                break;
-                            } else {
-                                cppb.pb.inc(readed as u64);
-                                message_hub.write_all(&buf[..readed])?;
-                            }
-                        }
+                        message_hub.copy_from_file(&mut buf, &fi, Some(&cppb))?;
                         changed += 1;
                         trace!("send file content done.");
                     }
@@ -1567,7 +1551,6 @@ mod tests {
         Ok(())
     }
 
-
     #[test]
     fn t_client_pull_loop() -> Result<(), failure::Error> {
         log();
@@ -1579,7 +1562,8 @@ mod tests {
         let server = tutil::load_demo_server_sqlite(&app_conf, Some("localhost_2.yml"));
 
         let a_dir = SlashPath::from_path(
-            server.get_my_dir()
+            server
+                .get_my_dir()
                 .join("directories")
                 .join("a-dir")
                 .as_path(),
