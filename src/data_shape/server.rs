@@ -1346,6 +1346,7 @@ where
             }
         }
         cppb.pb.finish_with_message("done.");
+        message_hub.close()?;
         Ok(None)
     }
 
@@ -1425,6 +1426,7 @@ where
         message_hub.write_and_flush(&[TransferType::RepeatDone.to_u8()])?;
         info!("changed: {}, unchanged: {}", changed, unchanged);
         cppb.pb.finish_with_message("done.");
+        message_hub.close()?;
         Ok(None)
     }
 

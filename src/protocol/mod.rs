@@ -39,6 +39,8 @@ fn read_inner(
 pub trait MessageHub: Read + Write {
     fn get_remains(&mut self) -> &mut Vec<u8>;
 
+    fn close(&mut self) -> Result<(), failure::Error>;
+
     fn read_one_byte(&mut self) -> Result<u8, HeaderParseError> {
         let mut buf = [0; 1];
         match self.read_exact(&mut buf) {
@@ -167,6 +169,10 @@ impl MessageHub for SshChannelMessageHub {
     fn get_remains(&mut self) -> &mut Vec<u8> {
         &mut self.remains
     }
+    fn close(&mut self) -> Result<(), failure::Error> {
+        self.channel.close();
+        Ok(())
+    }
 }
 
 impl Write for SshChannelMessageHub {
@@ -205,6 +211,9 @@ impl<'a> MessageHub for StdInOutMessageHub<'a> {
     fn get_remains(&mut self) -> &mut Vec<u8> {
         &mut self.remains
     }
+    fn close(&mut self) -> Result<(), failure::Error> {
+        Ok(())
+    }
 }
 
 impl<'a> Write for StdInOutMessageHub<'a> {
@@ -241,6 +250,10 @@ impl<'a> CursorMessageHub<'a> {
 impl<'a> MessageHub for CursorMessageHub<'a> {
     fn get_remains(&mut self) -> &mut Vec<u8> {
         &mut self.remains
+    }
+
+    fn close(&mut self) -> Result<(), failure::Error> {
+        Ok(())
     }
 }
 
