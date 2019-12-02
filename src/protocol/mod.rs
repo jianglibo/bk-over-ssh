@@ -9,7 +9,7 @@ use std::convert::TryInto;
 use std::fs;
 use std::io::{self, Cursor, Read, StdinLock, StdoutLock, Write};
 use std::path::Path;
-use crate::data_shape::{TransferFileProgressBar};
+use crate::data_shape::{TransferFileProgressBar, FullPathFileItem};
 
 /// Only this method aware of underlying reader!!!
 fn read_inner(
@@ -93,6 +93,47 @@ pub trait MessageHub: Read + Write {
             Ok(result)
         }
     }
+    /// copy_from_file may cause a special case that's dealing withchanging file.
+    /// when first send the len of the file, then then content of the file. at this period, if file length was changed.
+    /// then only part of the file was sent, further more this will break the loop because of unpredictable header.
+    /// So only send bytes as length as sent length at beginning.
+    fn copy_from_file(
+        &mut self,
+        buf: &mut [u8],
+        file_item: &FullPathFileItem,
+        progress_bar: Option<&TransferFileProgressBar>,
+    ) -> Result<(), failure::Error> {
+        let mut remain_in_file = file_item.from_path.as_path().metadata()?.len();
+        let u64_message = U64Message::new(remain_in_file);
+
+        self.write_and_flush(&u64_message.as_start_send_bytes())?;
+        let file_path = file_item.from_path.as_path();
+        trace!("start copy from file {:?}.", file_path);
+
+        let mut f = fs::OpenOptions::new()
+            .read(true)
+            .open(file_path)?;
+
+        loop {
+            let readed = f.read(buf)?;
+            if readed == 0 {
+                self.flush()?;
+                break;
+            }
+            if readed as u64 > remain_in_file { // that's wrong. the file has changed during the coping.
+                error!("file changed when reading: {:?}", file_path);
+                self.write_all(&buf[..remain_in_file as usize])?; // only sent number of bytes that will obey the length sent at the beginning.
+            } else {
+                self.write_all(&buf[..readed])?;
+            }
+            if let Some(pb) = progress_bar {
+                pb.pb.inc(readed as u64);
+            }
+            remain_in_file -= readed as u64;
+        }
+        Ok(())
+    }
+
 
     fn copy_to_file(
         &mut self,
@@ -170,7 +211,7 @@ impl MessageHub for SshChannelMessageHub {
         &mut self.remains
     }
     fn close(&mut self) -> Result<(), failure::Error> {
-        self.channel.close();
+        self.channel.close()?;
         Ok(())
     }
 }
