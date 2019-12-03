@@ -1319,7 +1319,7 @@ where
                     let content_len = U64Message::parse(&mut message_hub)?;
                     // file item is from another side.
                     if let (Some(df), Some(file_item)) = (last_df.take(), last_file_item.take()) {
-                        cppb.push_one(file_item.len, df.as_str());
+                        cppb.push_one(file_item.len, &file_item);
                         trace!("copy to file: {:?}", df.as_path());
                         match message_hub.copy_to_file(
                             &mut buf,
@@ -1400,6 +1400,7 @@ where
                     TransferType::FileItemChanged => {
                         let change_message = StringMessage::parse(&mut message_hub)?;
                         trace!("changed file: {}.", change_message.content);
+                        cppb.push_one(fi.len, &fi);
                         message_hub.copy_from_file(&mut buf, &fi, Some(&cppb))?;
                         changed += 1;
                         trace!("send file content done.");

@@ -1,4 +1,5 @@
 use indicatif::{ProgressBar, ProgressStyle};
+use crate::data_shape::{FullPathFileItem};
 
 pub struct TransferFileProgressBar {
     pub total_files: u64,
@@ -24,12 +25,12 @@ impl TransferFileProgressBar {
         }
     }
 
-    pub fn push_one(&mut self, file_len: u64, file_name: impl AsRef<str>) {
+    pub fn push_one(&mut self, file_len: u64, file_item: &FullPathFileItem) {
         if self.show_pb {
             self.consumed_files += 1;
             self.pb.set_position(0);
             self.pb.set_length(file_len);
-            self.pb.set_message(file_name.as_ref());
+            self.pb.set_message(file_item.to_path.as_str());
             let prefix = format!("{}/{}", self.consumed_files, self.total_files);
             self.pb.set_prefix(prefix.as_str());
         }

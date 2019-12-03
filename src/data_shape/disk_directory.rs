@@ -9,6 +9,7 @@ use itertools::Itertools;
 use log::*;
 use r2d2;
 use serde::{Deserialize, Serialize};
+use std::cmp::Ordering;
 use std::io;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
@@ -52,6 +53,14 @@ fn match_path(
     }
 }
 
+#[derive(Deserialize, Serialize, Debug, PartialEq)]
+// #[serde(untagged)]
+pub enum FileSelector {
+    Latest(usize),
+    LatestWithPattern(usize, String),
+    All,
+}
+
 #[derive(Deserialize, Serialize, Default, Debug)]
 pub struct Directory {
     #[serde(deserialize_with = "string_path::deserialize_slash_path_from_str")]
@@ -60,6 +69,8 @@ pub struct Directory {
     pub from_dir: string_path::SlashPath,
     pub includes: Vec<String>,
     pub excludes: Vec<String>,
+    // #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_selector: Option<FileSelector>,
     #[serde(skip)]
     pub includes_patterns: Option<Vec<Pattern>>,
     #[serde(skip)]
@@ -198,7 +209,7 @@ impl Directory {
         let directories_dir = directories_dir.as_ref();
         trace!("origin directory: {:?}", self);
 
-        if self.from_dir.is_empty()  || !self.from_dir.as_path().is_absolute() {
+        if self.from_dir.is_empty() || !self.from_dir.as_path().is_absolute() {
             bail!("from_dir is always absolute and existing.");
         }
 
@@ -295,18 +306,62 @@ impl Directory {
             })
     }
 
-    /// When push to remote server the server_distinct_id is app_instance_id,
-    /// When be pulled the server_distinct_id is unnecessary.
-    pub fn file_item_iter(
+    fn file_item_iter_file_selector(
         &self,
-        server_distinct_id: impl AsRef<str>,
-        dir_to_read: &SlashPath,
+        server_distinct_id: String,
+        dir_to_read: SlashPath,
+        skip_sha1: bool,
+        file_selector: &FileSelector,
+    ) -> impl Iterator<Item = FullPathFileItem> + '_ {
+        match file_selector {
+            FileSelector::Latest(num) => {
+                return WalkDir::new(dir_to_read.as_path())
+                    .min_depth(1)
+                    .max_depth(1)
+                    .sort_by(|a, b| {
+                        if let (Ok(a_meta), Ok(b_meta)) = (a.metadata(), b.metadata()) {
+                            if let (Ok(a_time), Ok(b_time)) = (a_meta.modified(), b_meta.modified())
+                            {
+                                return a_time.cmp(&b_time);
+                            }
+                        }
+                        Ordering::Equal
+                    })
+                    .follow_links(false)
+                    .into_iter()
+                    .filter_entry(|e| e.file_type().is_file())
+                    .filter_map(|e| e.ok())
+                    .filter_map(|dir_entry| dir_entry.path().canonicalize().ok())
+                    .filter_map(move |absolute_file_path| {
+                        FullPathFileItem::create_item_from_path(
+                            &dir_to_read,
+                            absolute_file_path,
+                            &server_distinct_id,
+                            skip_sha1,
+                        )
+                    })
+                    .take(*num);
+            }
+            FileSelector::LatestWithPattern(num, ptn) => {
+                panic!(
+                    "unimplement FileSelector::LatestWithPattern({}, {})",
+                    num, ptn
+                );
+            }
+            FileSelector::All => {
+                panic!("unimplement FileSelector::All");
+            }
+        }
+    }
+
+    fn file_item_iter_no_file_selector(
+        &self,
+        server_distinct_id: String,
+        dir_to_read: SlashPath,
         skip_sha1: bool,
     ) -> impl Iterator<Item = FullPathFileItem> + '_ {
         let includes_patterns = self.includes_patterns.clone();
         let excludes_patterns = self.excludes_patterns.clone();
-        let server_distinct_id = server_distinct_id.as_ref().to_string();
-        let dir_to_read = dir_to_read.clone();
 
         WalkDir::new(dir_to_read.as_path())
             .follow_links(false)
@@ -329,6 +384,33 @@ impl Directory {
                     skip_sha1,
                 )
             })
+    }
+
+    /// When push to remote server the server_distinct_id is app_instance_id,
+    /// When be pulled the server_distinct_id is unnecessary.
+    pub fn file_item_iter(
+        &self,
+        server_distinct_id: impl AsRef<str>,
+        dir_to_read: &SlashPath,
+        skip_sha1: bool,
+    ) -> Box<dyn Iterator<Item = FullPathFileItem> + '_> {
+        let server_distinct_id = server_distinct_id.as_ref().to_string();
+        let dir_to_read = dir_to_read.clone();
+
+        if let Some(file_selector) = self.file_selector.as_ref() {
+            Box::new(self.file_item_iter_file_selector(
+                server_distinct_id,
+                dir_to_read,
+                skip_sha1,
+                file_selector,
+            ))
+        } else {
+            Box::new(self.file_item_iter_no_file_selector(
+                server_distinct_id,
+                dir_to_read,
+                skip_sha1,
+            ))
+        }
     }
 
     /// get all leaf directories under this directory.
@@ -480,6 +562,80 @@ excludes:
         for line in cur.lines() {
             println!("{:?}", line?);
         }
+        Ok(())
+    }
+
+    #[derive(Deserialize, Serialize, Debug)]
+    struct FileSelectorContainer {
+        file_selector: Option<FileSelector>,
+    }
+
+    #[test]
+    fn t_file_selector_enum() -> Result<(), failure::Error> {
+        let file_selector = FileSelector::Latest(3);
+        let s = serde_yaml::to_string(&file_selector)?;
+        eprintln!("{}", s);
+        let file_selector_1 = serde_yaml::from_str::<FileSelector>(&s)?;
+        assert_eq!(file_selector, file_selector_1);
+
+        let file_selector = FileSelector::LatestWithPattern(3, "abc".to_owned());
+        let s = serde_yaml::to_string(&file_selector)?;
+        eprintln!("{}", s);
+        let file_selector_1 = serde_yaml::from_str::<FileSelector>(&s)?;
+        assert_eq!(file_selector, file_selector_1);
+
+        let file_selector = FileSelector::All;
+        let s = serde_yaml::to_string(&file_selector)?;
+        eprintln!("{}", s);
+        let file_selector_1 = serde_yaml::from_str::<FileSelector>(&s)?;
+        assert_eq!(file_selector, file_selector_1);
+
+        let fc = FileSelectorContainer {
+            file_selector: Some(FileSelector::All),
+        };
+        let s = serde_yaml::to_string(&fc)?;
+        eprintln!("{}", s);
+        let fc1 = serde_yaml::from_str::<FileSelectorContainer>(&s)?;
+        assert_eq!(fc.file_selector, fc1.file_selector);
+
+        let fc = FileSelectorContainer {
+            file_selector: Some(FileSelector::Latest(3)),
+        };
+        let s = serde_yaml::to_string(&fc)?;
+        eprintln!("{}", s);
+        let fc1 = serde_yaml::from_str::<FileSelectorContainer>(&s)?;
+        assert_eq!(fc.file_selector, fc1.file_selector);
+
+        let fc = FileSelectorContainer {
+            file_selector: Some(FileSelector::LatestWithPattern(3, "abc".to_owned())),
+        };
+        let s = serde_yaml::to_string(&fc)?;
+        eprintln!("{}", s);
+        let fc1 = serde_yaml::from_str::<FileSelectorContainer>(&s)?;
+        assert_eq!(fc.file_selector, fc1.file_selector);
+
+        let fc = FileSelectorContainer {
+            file_selector: None,
+        };
+        let s = serde_yaml::to_string(&fc)?;
+        eprintln!("{}", s);
+        let fc1 = serde_yaml::from_str::<FileSelectorContainer>(&s)?;
+        assert_eq!(fc.file_selector, fc1.file_selector);
+
+        // ---
+        // All
+        // ---
+        // file_selector: All
+        // ---
+        // file_selector:
+        //   Latest: 3
+        // ---
+        // file_selector:
+        //   LatestWithPattern:
+        //     - 3
+        //     - abc
+        // ---
+        // file_selector: ~
         Ok(())
     }
 }
