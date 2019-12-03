@@ -31,17 +31,15 @@ pub struct FullPathFileItem {
 }
 
 impl FullPathFileItem {
-    /// No matter it's be pushed or be pulled the remote path already point to the file about to be updated.
-    /// When to be pushed the remote path is joined by "{app_instance_id}/{remote_path}" and /user_home/directories/.
-    /// When to be pulled the remote path is joined by "{host_name_or_ip}/{remote_path}" and {app_setting_of_data_dir}.
     pub fn create_item_from_path(
         dir_to_read: &SlashPath,
         absolute_file_to_read: PathBuf,
         server_distinct_id: impl AsRef<str>,
         skip_sha1: bool,
     ) -> Option<Self> {
-        let app_instance_id = SlashPath::new(server_distinct_id);
-        if let Some(fmeta) = data_shape_util::get_file_meta(absolute_file_to_read.as_path(), skip_sha1)
+        let server_distinct_id = SlashPath::new(server_distinct_id);
+        if let Some(fmeta) =
+            data_shape_util::get_file_meta(absolute_file_to_read.as_path(), skip_sha1)
         {
             // if dir_to_read is "/a/b" and the absolute_file_to_read is "/a/b/c.txt"
             // after relativelize the result is: b/c.txt.
@@ -50,17 +48,18 @@ impl FullPathFileItem {
                 .expect("dir to backup shouldn't be the root.")
                 .strip_prefix(absolute_file_to_read.as_path())
             {
-                Some(Self {
-                    from_path: SlashPath::from_path(absolute_file_to_read.as_path())
-                        .expect("slashpath from absolute file path"),
-                    // remote path is determined by the app_instance_id, base_path's name and the relative path.
-                    // the relative path already include base_path's name.
-                    to_path: app_instance_id.join(relative_path),
-                    sha1: fmeta.sha1,
-                    len: fmeta.len,
-                    modified: fmeta.modified,
-                    created: fmeta.created,
-                })
+                if let Some(from_path) = SlashPath::from_path(absolute_file_to_read.as_path()) {
+                    Some(Self {
+                        from_path,
+                        to_path: server_distinct_id.join(relative_path),
+                        sha1: fmeta.sha1,
+                        len: fmeta.len,
+                        modified: fmeta.modified,
+                        created: fmeta.created,
+                    })
+                } else {
+                    None
+                }
             } else {
                 None
             }
@@ -150,12 +149,7 @@ excludes:
 
         assert_eq!(files.len(), 5);
         assert!(
-            files
-                .get(0)
-                .unwrap()
-                .to_path
-                .slash
-                .starts_with("abc/a-dir"),
+            files.get(0).unwrap().to_path.slash.starts_with("abc/a-dir"),
             "should starts_with fixtures/"
         );
         Ok(())

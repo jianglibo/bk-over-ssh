@@ -53,7 +53,15 @@ pub fn server_receive_loop() -> Result<(), failure::Error> {
     let mut buf = vec![0; 8192];
     // after read server_yml, we wait the other side to send file items.
     loop {
-        match message_hub.read_type_byte()? {
+        let type_byte = match message_hub.read_type_byte() {
+            Err(err) => {
+                error!("got error type byte: {}", err);
+                break;
+            }
+            Ok(type_byte) => type_byte,
+        };
+
+        match type_byte {
             TransferType::FileItem => {
                 let string_message = StringMessage::parse(&mut message_hub)?;
                 trace!("got file item: {}", string_message.content);

@@ -145,18 +145,6 @@ impl SlashPath {
             ))
         }
     }
-    #[allow(dead_code)]
-    pub fn join_path(&self, path: &Path) -> Option<SlashPath> {
-        if let Some(extra_path) = SlashPath::from_path(path) {
-            Some(SlashPath::new(format!(
-                "{}/{}",
-                self.get_not_slash_end_str(),
-                extra_path.get_not_slash_start_str()
-            )))
-        } else {
-            None
-        }
-    }
 
     pub fn join_another(&self, another: &SlashPath) -> SlashPath {
         SlashPath::new(format!(

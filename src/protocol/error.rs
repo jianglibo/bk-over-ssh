@@ -10,4 +10,6 @@ pub enum HeaderParseError {
     Utf8Error(usize),
     #[fail(display = "demanded {}, provided: {}", _0, _1)]
     InsufficientBytes(u64, u64),
+    #[fail(display = "unexpected end of file.")]
+    UnexpectedEof,
 }

@@ -1,6 +1,7 @@
 pub mod error;
 pub mod exchange;
 
+use crate::data_shape::{FullPathFileItem, TransferFileProgressBar};
 pub use error::HeaderParseError;
 pub use exchange::{StringMessage, TransferType, U64Message};
 use log::*;
@@ -9,7 +10,6 @@ use std::convert::TryInto;
 use std::fs;
 use std::io::{self, Cursor, Read, StdinLock, StdoutLock, Write};
 use std::path::Path;
-use crate::data_shape::{TransferFileProgressBar, FullPathFileItem};
 
 /// Only this method aware of underlying reader!!!
 fn read_inner(
@@ -45,8 +45,7 @@ pub trait MessageHub: Read + Write {
         let mut buf = [0; 1];
         match self.read_exact(&mut buf) {
             Err(err) if err.kind() == io::ErrorKind::UnexpectedEof => {
-                error!("{:?}", err);
-                Ok(0)
+                Err(HeaderParseError::UnexpectedEof)
             }
             Err(err) => Err(HeaderParseError::Io(err)),
             Ok(_) => Ok(buf[0]),
@@ -103,24 +102,28 @@ pub trait MessageHub: Read + Write {
         file_item: &FullPathFileItem,
         progress_bar: Option<&TransferFileProgressBar>,
     ) -> Result<(), failure::Error> {
-        let mut remain_in_file = file_item.from_path.as_path().metadata()?.len();
-        let u64_message = U64Message::new(remain_in_file);
-
-        self.write_and_flush(&u64_message.as_start_send_bytes())?;
         let file_path = file_item.from_path.as_path();
         trace!("start copy from file {:?}.", file_path);
+        let mut remain_in_file = match file_path.metadata() {
+            Ok(meta) => meta.len(),
+            Err(err) => {
+                error!("get metadata failed: {:?}, {:?}", file_path, err);
+                return Ok(());
+            }
+        };
+        let u64_message = U64Message::new(remain_in_file);
 
-        let mut f = fs::OpenOptions::new()
-            .read(true)
-            .open(file_path)?;
+        let mut f = fs::OpenOptions::new().read(true).open(file_path)?;
 
+        self.write_and_flush(&u64_message.as_start_send_bytes())?;
         loop {
             let readed = f.read(buf)?;
             if readed == 0 {
                 self.flush()?;
                 break;
             }
-            if readed as u64 > remain_in_file { // that's wrong. the file has changed during the coping.
+            if readed as u64 > remain_in_file {
+                // that's wrong. the file has changed during the coping.
                 error!("file changed when reading: {:?}", file_path);
                 self.write_all(&buf[..remain_in_file as usize])?; // only sent number of bytes that will obey the length sent at the beginning.
             } else {
@@ -133,7 +136,6 @@ pub trait MessageHub: Read + Write {
         }
         Ok(())
     }
-
 
     fn copy_to_file(
         &mut self,

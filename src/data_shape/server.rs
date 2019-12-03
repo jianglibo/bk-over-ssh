@@ -1274,7 +1274,17 @@ where
         let mut buf = vec![0; 8192];
 
         loop {
-            match message_hub.read_type_byte()? {
+            let type_byte = match message_hub.read_type_byte() {
+                Err(err) => {
+                    error!("got error type byte: {}", err);
+                    error!("last_df: {:?}", last_df);
+                    error!("last_file_item: {:?}", last_file_item);
+                    break;
+                }
+                Ok(type_byte) => type_byte,
+            };
+
+            match type_byte {
                 TransferType::FileItem => {
                     let string_message = StringMessage::parse(&mut message_hub)?;
                     trace!("got file item: {}", string_message.content);

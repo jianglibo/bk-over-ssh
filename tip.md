@@ -56,6 +56,9 @@ Every user will create a linux account and a home directory. For example: userad
 ## window service.
 https://github.com/kohsuke/winsw/
 
+.\WinSW.NET4.exe status
+
+
 
 ## ActiveLeaf mode sync details.
 1. fetch the file list from the remote pair. compare to the file list in local db. These two should have same count and each item should have same len. considering compare count only.
