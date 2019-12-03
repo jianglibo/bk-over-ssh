@@ -70,7 +70,13 @@ impl SlashPath {
     /// relativelize the path.
     pub fn strip_prefix(&self, full_path: impl AsRef<Path>) -> Option<String> {
         let full = SlashPath::from_path(full_path.as_ref());
-        full.map(|f| f.as_str().split_at(self.as_str().len() + 1).1.to_owned())
+        let len = self.as_str().len();
+        let pos = if len == 1 {
+            1
+        } else {
+            len + 1
+        };
+        full.map(|f| f.as_str().split_at(pos).1.to_owned())
     }
 
     pub fn from_path(path: &Path) -> Option<Self> {
@@ -145,6 +151,18 @@ impl SlashPath {
             ))
         }
     }
+    
+//    pub fn join_path(&self, path: &Path) -> Option<SlashPath> {
+//         if let Some(extra_path) = SlashPath::from_path(path) {
+//             Some(SlashPath::new(format!(
+//                 "{}/{}",
+//                 self.get_not_slash_end_str(),
+//                 extra_path.get_not_slash_start_str()
+//             )))
+//         } else {
+//             None
+//         }
+//     }
 
     pub fn join_another(&self, another: &SlashPath) -> SlashPath {
         SlashPath::new(format!(
@@ -276,6 +294,15 @@ mod tests {
         let c1 = s.chars().nth(1).expect("at least have one char.");
         assert!(c0.is_ascii_alphabetic());
         assert_eq!(c1, ':');
+    }
+
+    #[test]
+    fn t_strip_one_level_dir() -> Result<(), failure::Error> {
+        let s1 = SlashPath::new("/data");
+        let s2 = s1.parent().expect("at least have one").strip_prefix("/abc/cc").unwrap();
+        assert_eq!(s2.as_str(), "abc/cc");
+        println!("{}", s2);
+        Ok(())
     }
 
     #[test]
