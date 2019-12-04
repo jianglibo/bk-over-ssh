@@ -43,8 +43,6 @@ impl LogConf {
 #[serde(rename_all(deserialize = "snake_case"))]
 pub enum AppRole {
     PullHub,
-    ReceiveHub,
-    PassiveLeaf,
     ActiveLeaf,
 }
 
@@ -52,8 +50,6 @@ impl AppRole {
     pub fn to_str(&self) -> &str {
         match &self {
             AppRole::PullHub => "pull_hub",
-            AppRole::ReceiveHub => "receive_hub",
-            AppRole::PassiveLeaf => "passive_leaf",
             AppRole::ActiveLeaf => "active_leaf",
         }
     }
@@ -65,8 +61,6 @@ impl FromStr for AppRole {
     fn from_str(role_name: &str) -> Result<Self, Self::Err> {
         match role_name {
             "pull_hub" => Ok(AppRole::PullHub),
-            "receive_hub" => Ok(AppRole::ReceiveHub),
-            "passive_leaf" => Ok(AppRole::PassiveLeaf),
             "active_leaf" => Ok(AppRole::ActiveLeaf),
             _rn => Err("unexpected role name"),
         }
@@ -187,8 +181,6 @@ where
     let servers_conf_dir_name = match app_role {
         AppRole::PullHub => PULL_CONF,
         AppRole::ActiveLeaf => PUSH_CONF,
-        AppRole::PassiveLeaf => PASSIVE_LEAF_CONF,
-        AppRole::ReceiveHub => RECEIVE_SERVERS_CONF,
     };
 
     AppConf {
@@ -295,12 +287,6 @@ where
                                 }
                                 AppRole::ActiveLeaf => {
                                     data_dir_full_path.as_path().join(PUSH_CONF)
-                                }
-                                AppRole::PassiveLeaf => {
-                                    data_dir_full_path.as_path().join(PASSIVE_LEAF_CONF)
-                                }
-                                AppRole::ReceiveHub => {
-                                    data_dir_full_path.as_path().join(RECEIVE_SERVERS_CONF)
                                 }
                             }
                         } else {
@@ -526,8 +512,6 @@ where
             match app_role {
                 AppRole::PullHub => data_dir.join(PULL_DATA),
                 AppRole::ActiveLeaf => data_dir.join(PUSH_DATA),
-                AppRole::PassiveLeaf => data_dir.join(PASSIVE_LEAF_DATA),
-                AppRole::ReceiveHub => data_dir.join(RECEIVE_SERVERS_DATA),
             }
         } else {
             data_dir.to_path_buf()
@@ -543,9 +527,6 @@ where
         // Then use app_instance_id as my_dir.
         let my_dir = if let Some(app_role) = self.mini_app_conf.app_role.as_ref() {
             match app_role {
-                AppRole::PassiveLeaf | AppRole::ReceiveHub => {
-                    servers_data_dir.join(self.inner.app_instance_id.as_str())
-                }
                 _ => servers_data_dir.join(&server_yml.host),
             }
         } else {

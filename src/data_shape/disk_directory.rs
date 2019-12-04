@@ -1,7 +1,7 @@
 use super::{
     app_conf,
     string_path::{self, SlashPath},
-    AppRole, FullPathFileItem, RelativeFileItem,
+    AppRole, FullPathFileItem,
 };
 use crate::db_accesses::{DbAccess, RelativeFileItemInDb};
 use glob::Pattern;
@@ -225,87 +225,66 @@ impl Directory {
         Ok(())
     }
 
-    /// When pulling remote the remote directory is absolute path, local path is relative.
-    /// This method is for normalize local directory ready for coping.
-    // pub fn normalize_pull_hub_sync(
-    //     &mut self,
-    //     directories_dir: impl AsRef<Path>,
-    // ) -> Result<(), failure::Error> {
-    //     let directories_dir = directories_dir.as_ref();
-    //     trace!("origin directory: {:?}", self);
-
-    //     if self.from_dir.is_empty() || !self.from_dir.as_path().is_absolute() {
-    //         bail!("from_dir is always absolute and existing.");
-    //     }
+    // pub fn load_relative_item<O>(
+    //     &self,
+    //     app_role: Option<&AppRole>,
+    //     out: &mut O,
+    //     skip_sha1: bool,
+    // ) -> Result<(), failure::Error>
+    // where
+    //     O: io::Write,
+    // {
+    //     trace!("load_relative_item, skip_sha1: {}", skip_sha1);
+    //     let dir_to_read = if let Some(app_role) = app_role {
+    //         match app_role {
+    //             AppRole::ActiveLeaf => &self.from_dir,
+    //             _ => bail!(
+    //                 "when invoking load_relative_item, got unsupported app role. {:?}",
+    //                 app_role
+    //             ),
+    //         }
+    //     } else {
+    //         bail!("no app_role when load_relative_item");
+    //     };
+    //     self.relative_item_iter(dir_to_read.clone(), skip_sha1)
+    //         .for_each(|rfi| match serde_json::to_string(&rfi) {
+    //             Ok(line) => {
+    //                 if let Err(err) = writeln!(out, "{}", line) {
+    //                     error!("write item line failed: {:?}, {:?}", err, line);
+    //                 }
+    //             }
+    //             Err(err) => {
+    //                 error!("serialize item line failed: {:?}", err);
+    //             }
+    //         });
     //     Ok(())
     // }
 
-    /// The method read information of files from disk file.
-    /// but from which directory to read on? from_dir or to_dir?
-    /// It depends on the role of the running application.
-    /// when as AppRole::PassiveLeaf use to_dir.
-    /// when as AppRole::ActiveLeaf use from_dir.
-    pub fn load_relative_item<O>(
-        &self,
-        app_role: Option<&AppRole>,
-        out: &mut O,
-        skip_sha1: bool,
-    ) -> Result<(), failure::Error>
-    where
-        O: io::Write,
-    {
-        trace!("load_relative_item, skip_sha1: {}", skip_sha1);
-        let dir_to_read = if let Some(app_role) = app_role {
-            match app_role {
-                AppRole::PassiveLeaf => &self.to_dir,
-                AppRole::ActiveLeaf => &self.from_dir,
-                _ => bail!(
-                    "when invoking load_relative_item, got unsupported app role. {:?}",
-                    app_role
-                ),
-            }
-        } else {
-            bail!("no app_role when load_relative_item");
-        };
-        self.relative_item_iter(dir_to_read.clone(), skip_sha1)
-            .for_each(|rfi| match serde_json::to_string(&rfi) {
-                Ok(line) => {
-                    if let Err(err) = writeln!(out, "{}", line) {
-                        error!("write item line failed: {:?}, {:?}", err, line);
-                    }
-                }
-                Err(err) => {
-                    error!("serialize item line failed: {:?}", err);
-                }
-            });
-        Ok(())
-    }
+    // pub fn relative_item_iter(
+    //     &self,
+    //     dir_to_read: SlashPath,
+    //     skip_sha1: bool,
+    // ) -> impl Iterator<Item = RelativeFileItem> + '_ {
+    //     let includes_patterns = self.includes_patterns.clone();
+    //     let excludes_patterns = self.excludes_patterns.clone();
 
-    pub fn relative_item_iter(
-        &self,
-        dir_to_read: SlashPath,
-        skip_sha1: bool,
-    ) -> impl Iterator<Item = RelativeFileItem> + '_ {
-        let includes_patterns = self.includes_patterns.clone();
-        let excludes_patterns = self.excludes_patterns.clone();
-
-        WalkDir::new(dir_to_read.as_path())
-            .follow_links(false)
-            .into_iter()
-            .filter_map(|e| e.ok())
-            .filter(|dir_entry| dir_entry.file_type().is_file())
-            .filter_map(|dir_entry| dir_entry.path().canonicalize().ok())
-            .filter_map(move |disk_file_path_buf| {
-                match_path(
-                    disk_file_path_buf,
-                    includes_patterns.as_ref(),
-                    excludes_patterns.as_ref(),
-                )
-            })
-            .filter_map(move |absolute_path_buf| {
-                RelativeFileItem::from_path(&dir_to_read, absolute_path_buf, skip_sha1)
-            })
-    }
+    //     WalkDir::new(dir_to_read.as_path())
+    //         .follow_links(false)
+    //         .into_iter()
+    //         .filter_map(|e| e.ok())
+    //         .filter(|dir_entry| dir_entry.file_type().is_file())
+    //         .filter_map(|dir_entry| dir_entry.path().canonicalize().ok())
+    //         .filter_map(move |disk_file_path_buf| {
+    //             match_path(
+    //                 disk_file_path_buf,
+    //                 includes_patterns.as_ref(),
+    //                 excludes_patterns.as_ref(),
+    //             )
+    //         })
+    //         .filter_map(move |absolute_path_buf| {
+    //             RelativeFileItem::from_path(&dir_to_read, absolute_path_buf, skip_sha1)
+    //         })
+    // }
 
     fn file_item_iter_file_selector(
         &self,
@@ -316,7 +295,7 @@ impl Directory {
     ) -> impl Iterator<Item = FullPathFileItem> + '_ {
         match file_selector {
             FileSelector::Latest(num) => {
-                return WalkDir::new(dir_to_read.as_path())
+                WalkDir::new(dir_to_read.as_path())
                     .min_depth(1)
                     .max_depth(1)
                     .sort_by(|a, b| {
@@ -342,7 +321,7 @@ impl Directory {
                             skip_sha1,
                         )
                     })
-                    .take(*num);
+                    .take(*num)
             }
             FileSelector::LatestWithPattern(num, ptn) => {
                 panic!(
@@ -374,7 +353,7 @@ impl Directory {
             !if de.file_type().is_dir() {
                 if let Some(path) = de.path().to_str() {
                     let sl = SlashPath::new(path);
-                    excludes.iter().find(|&p| p == &sl).is_some()
+                    excludes.iter().any(|p| p == &sl)
                 } else {
                     false // keep it
                 }
@@ -435,26 +414,26 @@ impl Directory {
         }
     }
 
-    pub fn count_local_files(&self, app_role: Option<&AppRole>) -> Result<u64, failure::Error> {
-        let dir_to_read = if let Some(app_role) = app_role {
-            match app_role {
-                AppRole::ReceiveHub => &self.to_dir,
-                _ => bail!(
-                    "when invoking load_relative_item_to_sqlite, got unsupported app role. {:?}",
-                    app_role
-                ),
-            }
-        } else {
-            return Ok(0);
-        };
-        let file_num = WalkDir::new(dir_to_read.as_path())
-            .follow_links(false)
-            .into_iter()
-            .filter_map(|dir_entry| dir_entry.ok())
-            .filter(|dir_entry| dir_entry.file_type().is_file())
-            .count();
-        Ok(file_num as u64)
-    }
+    // pub fn count_local_files(&self, app_role: Option<&AppRole>) -> Result<u64, failure::Error> {
+    //     let dir_to_read = if let Some(app_role) = app_role {
+    //         match app_role {
+    //             // AppRole::ReceiveHub => &self.to_dir,
+    //             _ => bail!(
+    //                 "when invoking load_relative_item_to_sqlite, got unsupported app role. {:?}",
+    //                 app_role
+    //             ),
+    //         }
+    //     } else {
+    //         return Ok(0);
+    //     };
+    //     let file_num = WalkDir::new(dir_to_read.as_path())
+    //         .follow_links(false)
+    //         .into_iter()
+    //         .filter_map(|dir_entry| dir_entry.ok())
+    //         .filter(|dir_entry| dir_entry.file_type().is_file())
+    //         .count();
+    //     Ok(file_num as u64)
+    // }
     
     /// this function will walk over the directory, for every file checking it's metadata and compare to corepsonding item in the db.
     /// for new and changed items mark changed field to true.
@@ -484,7 +463,6 @@ impl Directory {
 
         let dir_to_read = if let Some(app_role) = app_role {
             match app_role {
-                AppRole::PassiveLeaf | AppRole::ReceiveHub => &self.to_dir,
                 AppRole::ActiveLeaf => &self.from_dir,
                 _ => bail!(
                     "when invoking load_relative_item_to_sqlite, got unsupported app role. {:?}",

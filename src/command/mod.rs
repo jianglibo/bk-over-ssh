@@ -2,7 +2,7 @@ pub mod archives;
 pub mod db_cmd;
 pub mod misc;
 pub mod rsync;
-pub mod sync_dirs;
+// pub mod sync_dirs;
 pub mod client_loop;
 pub mod server_loop;
 
@@ -18,7 +18,7 @@ use crate::data_shape::{AppConf, AppRole, Indicator, ReadAppConfException, Serve
 use r2d2_sqlite::SqliteConnectionManager;
 
 pub use archives::archive_local;
-pub use sync_dirs::{sync_pull_dirs, sync_push_dirs};
+// pub use sync_dirs::{sync_pull_dirs, sync_push_dirs};
 pub use client_loop::{client_push_loops, client_pull_loops};
 
 

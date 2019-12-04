@@ -33,42 +33,42 @@ pub fn sync_push_dirs(
     Ok(())
 }
 
-fn push_one_server(
-    server: &mut Server<SqliteConnectionManager, SqliteDbAccess>,
-    indicator: &mut Indicator,
-    force: bool,
-) {
-    let mut need_reset = force && server.get_db_file().exists();
-    if !need_reset {
-        let rfs = server.count_remote_files().unwrap_or(0);
-        if let Some(db_access) = server.db_access.as_ref() {
-            if let Ok(c) = db_access.count_relative_file_item(CountItemParam::default()) {
-                if c != rfs {
-                    need_reset = true;
-                }
-            } else {
-                error!("count_relative_file_item failed");
-            }
-        }
-    }
-    if need_reset {
-        server.db_access.take();
-        fs::remove_file(server.get_db_file()).expect("should remove db_file.");
-        let sqlite_db_access = SqliteDbAccess::new(server.get_db_file());
-        sqlite_db_access
-            .create_database()
-            .expect("should recreate database.");
-        server.set_db_access(sqlite_db_access);
-    }
+// fn push_one_server(
+//     server: &mut Server<SqliteConnectionManager, SqliteDbAccess>,
+//     indicator: &mut Indicator,
+//     force: bool,
+// ) {
+//     let mut need_reset = force && server.get_db_file().exists();
+//     if !need_reset {
+//         let rfs = server.count_remote_files().unwrap_or(0);
+//         if let Some(db_access) = server.db_access.as_ref() {
+//             if let Ok(c) = db_access.count_relative_file_item(CountItemParam::default()) {
+//                 if c != rfs {
+//                     need_reset = true;
+//                 }
+//             } else {
+//                 error!("count_relative_file_item failed");
+//             }
+//         }
+//     }
+//     if need_reset {
+//         server.db_access.take();
+//         fs::remove_file(server.get_db_file()).expect("should remove db_file.");
+//         let sqlite_db_access = SqliteDbAccess::new(server.get_db_file());
+//         sqlite_db_access
+//             .create_database()
+//             .expect("should recreate database.");
+//         server.set_db_access(sqlite_db_access);
+//     }
 
-    match server.sync_push_dirs(indicator) {
-        Ok(result) => {
-            indicator.pb_finish();
-            actions::write_dir_sync_result(&server, result.as_ref());
-        }
-        Err(err) => println!("sync-push-dirs failed: {:?}", err),
-    }
-}
+//     match server.sync_push_dirs(indicator) {
+//         Ok(result) => {
+//             indicator.pb_finish();
+//             actions::write_dir_sync_result(&server, result.as_ref());
+//         }
+//         Err(err) => println!("sync-push-dirs failed: {:?}", err),
+//     }
+// }
 
 fn push_by_par_iter(
     server_indicator_pairs: Vec<ServerAndIndicatorSqlite>,

@@ -68,7 +68,7 @@ fn client_push_loop_by_spawn_do(
                     match server.client_push_loop() {
                         Ok(result) => {
                             indicator.pb_finish();
-                            actions::write_dir_sync_result(&server, result.as_ref());
+                            // actions::write_dir_sync_result(&server, result.as_ref());
                             // archive when succeeded.
                             if follow_archive {
                                 server.archive_local(&mut indicator).ok();
@@ -90,7 +90,7 @@ fn client_push_loop_by_spawn_do(
         match server.client_push_loop() {
             Ok(result) => {
                 indicator.pb_finish();
-                actions::write_dir_sync_result(&server, result.as_ref());
+                // actions::write_dir_sync_result(&server, result.as_ref());
                 // archive when succeeded.
                 if follow_archive {
                     server.archive_local(&mut indicator).ok();
@@ -165,7 +165,7 @@ fn client_pull_loop_by_spawn_do(
                     match server.client_pull_loop() {
                         Ok(result) => {
                             indicator.pb_finish();
-                            actions::write_dir_sync_result(&server, result.as_ref());
+                            // actions::write_dir_sync_result(&server, result.as_ref());
                             // archive when succeeded.
                             if follow_archive {
                                 server.archive_local(&mut indicator).ok();
@@ -187,7 +187,7 @@ fn client_pull_loop_by_spawn_do(
         match server.client_pull_loop() {
             Ok(result) => {
                 indicator.pb_finish();
-                actions::write_dir_sync_result(&server, result.as_ref());
+                // actions::write_dir_sync_result(&server, result.as_ref());
                 // archive when succeeded.
                 if follow_archive {
                     server.archive_local(&mut indicator).ok();

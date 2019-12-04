@@ -1,10 +1,10 @@
 pub mod app_conf;
 pub mod count_reader;
 pub mod disk_directory;
-pub mod file_item_map;
-pub mod file_item_directory;
+// pub mod file_item_map;
+// pub mod file_item_directory;
 pub mod indicator;
-pub mod relative_file_item;
+// pub mod relative_file_item;
 pub mod rolling_files;
 pub mod server;
 pub mod sha1_reader;
@@ -23,10 +23,10 @@ pub use app_conf::{
 };
 pub use count_reader::CountReader;
 pub use disk_directory::Directory;
-pub use file_item_map::{FileItemMap, FileItemProcessResult, FileItemProcessResultStats, SyncType};
-pub use file_item_directory::{FileItemDirectory, FileItemDirectories, PrimaryFileItem};
+// pub use file_item_map::{FileItemMap, FileItemProcessResult, FileItemProcessResultStats, SyncType};
+// pub use file_item_directory::{FileItemDirectory, FileItemDirectories, PrimaryFileItem};
 pub use indicator::{Indicator, PbProperties};
-pub use relative_file_item::{RelativeFileItem};
+// pub use relative_file_item::{RelativeFileItem};
 pub use full_path_item::{FullPathFileItem, FileChanged};
 pub use server::{Server, ServerYml};
 pub use sha1_reader::Sha1Reader;

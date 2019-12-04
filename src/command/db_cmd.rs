@@ -7,22 +7,22 @@ use r2d2_sqlite::SqliteConnectionManager;
 
 use super::*;
 
-pub fn create_remote_db<'a>(
-    app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
-    m: &'a clap::ArgMatches<'a>,
-) -> Result<bool, failure::Error> {
-    if let ("create-remote-db", Some(sub_matches)) = m.subcommand() {
-        let (mut server, _indicator) =
-            load_server_yml(&app_conf, sub_matches.value_of("server-yml"), false)?;
-        let db_type = sub_matches.value_of("db-type").unwrap_or("sqlite");
-        let force = sub_matches.is_present("force");
-        server.connect()?;
-        server.create_remote_db(db_type, force)?;
-        Ok(true)
-    } else {
-        Ok(false)
-    }
-}
+// pub fn create_remote_db<'a>(
+//     app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
+//     m: &'a clap::ArgMatches<'a>,
+// ) -> Result<bool, failure::Error> {
+//     if let ("create-remote-db", Some(sub_matches)) = m.subcommand() {
+//         let (mut server, _indicator) =
+//             load_server_yml(&app_conf, sub_matches.value_of("server-yml"), false)?;
+//         let db_type = sub_matches.value_of("db-type").unwrap_or("sqlite");
+//         let force = sub_matches.is_present("force");
+//         server.connect()?;
+//         server.create_remote_db(db_type, force)?;
+//         Ok(true)
+//     } else {
+//         Ok(false)
+//     }
+// }
 
 pub fn create_db<'a>(
     app_conf: &mut AppConf<SqliteConnectionManager, SqliteDbAccess>,

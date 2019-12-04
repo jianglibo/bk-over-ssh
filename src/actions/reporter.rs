@@ -1,4 +1,4 @@
-use crate::data_shape::{FileItemProcessResultStats, Server};
+use crate::data_shape::{Server};
 use crate::db_accesses::DbAccess;
 use log::*;
 use r2d2;
@@ -39,47 +39,47 @@ use chrono::{DateTime, Local};
 //     }
 // }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct SyncDirReport {
-    duration: Duration,
-    started_at: DateTime<Local>,
-    statistics: FileItemProcessResultStats,
-}
+// #[derive(Debug, Serialize, Deserialize)]
+// pub struct SyncDirReport {
+//     duration: Duration,
+//     started_at: DateTime<Local>,
+//     statistics: FileItemProcessResultStats,
+// }
 
-impl SyncDirReport {
-    pub fn new(duration: Duration, started_at: DateTime<Local>, statistics: FileItemProcessResultStats) -> Self {
-        Self {
-            duration,
-            started_at,
-            statistics,
-        }
-    }
-}
+// impl SyncDirReport {
+//     pub fn new(duration: Duration, started_at: DateTime<Local>, statistics: FileItemProcessResultStats) -> Self {
+//         Self {
+//             duration,
+//             started_at,
+//             statistics,
+//         }
+//     }
+// }
 
-pub fn write_dir_sync_result<M, D>(server: &Server<M, D>, result: Option<&SyncDirReport>)
-where
-    M: r2d2::ManageConnection,
-    D: DbAccess<M>,
-{
-    if let Some(result) = result {
-        let rp = &server.get_dir_sync_report_file();
-        match fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .write(true)
-            .open(rp)
-        {
-            Err(err) => error!("open report file failed: {:?}, {:?}", rp, err),
-            Ok(mut out) => match serde_json::to_string(result) {
-                Err(err) => {
-                    error!("serialize reporter failed: {:?}", err);
-                }
-                Ok(s) => {
-                    if let Err(err) = writeln!(out, "{}", s) {
-                        error!("write report failed: {:?}", err);
-                    }
-                }
-            },
-        }
-    }
-}
+// pub fn write_dir_sync_result<M, D>(server: &Server<M, D>, result: Option<&SyncDirReport>)
+// where
+//     M: r2d2::ManageConnection,
+//     D: DbAccess<M>,
+// {
+//     if let Some(result) = result {
+//         let rp = &server.get_dir_sync_report_file();
+//         match fs::OpenOptions::new()
+//             .create(true)
+//             .append(true)
+//             .write(true)
+//             .open(rp)
+//         {
+//             Err(err) => error!("open report file failed: {:?}, {:?}", rp, err),
+//             Ok(mut out) => match serde_json::to_string(result) {
+//                 Err(err) => {
+//                     error!("serialize reporter failed: {:?}", err);
+//                 }
+//                 Ok(s) => {
+//                     if let Err(err) = writeln!(out, "{}", s) {
+//                         error!("write report failed: {:?}", err);
+//                     }
+//                 }
+//             },
+//         }
+//     }
+// }
