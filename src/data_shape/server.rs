@@ -298,9 +298,10 @@ where
         self.server_yml
             .directories
             .iter()
-            .map(|dir| dir.count_from_dir_files())
+            .map(|dir| dir.file_item_iter("", false).count() as u64)
             .sum()
     }
+
     /// For app_role is ReceiveHub, remote exec is from user's home directory.
     pub fn get_remote_exec(&self) -> SlashPath {
         SlashPath::new(&self.server_yml.remote_exec)

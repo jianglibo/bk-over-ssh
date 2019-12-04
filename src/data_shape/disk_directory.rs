@@ -435,12 +435,6 @@ impl Directory {
         }
     }
 
-    /// get all leaf directories under this directory.
-    #[allow(dead_code)]
-    pub fn get_sub_directory_names(&self) -> Vec<String> {
-        vec![]
-    }
-
     pub fn count_local_files(&self, app_role: Option<&AppRole>) -> Result<u64, failure::Error> {
         let dir_to_read = if let Some(app_role) = app_role {
             match app_role {
@@ -461,27 +455,7 @@ impl Directory {
             .count();
         Ok(file_num as u64)
     }
-
-    pub fn count_from_dir_files(&self) -> u64 {
-        let includes_patterns = self.includes_patterns.clone();
-        let excludes_patterns = self.excludes_patterns.clone();
-
-        WalkDir::new(self.from_dir.as_path())
-            .follow_links(false)
-            .into_iter()
-            .filter_map(|dir_entry| dir_entry.ok())
-            .filter(|dir_entry| dir_entry.file_type().is_file())
-            .map(|dir_entry| dir_entry.path().to_path_buf())
-            .filter_map(move |disk_file_path_buf| {
-                match_path(
-                    disk_file_path_buf,
-                    includes_patterns.as_ref(),
-                    excludes_patterns.as_ref(),
-                )
-            })
-            .count() as u64
-    }
-
+    
     /// this function will walk over the directory, for every file checking it's metadata and compare to corepsonding item in the db.
     /// for new and changed items mark changed field to true.
     /// for unchanged items, if the status in db is changed chang to unchanged.

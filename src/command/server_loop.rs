@@ -168,7 +168,7 @@ pub fn server_send_loop(skip_sha1: bool) -> Result<(), failure::Error> {
     let count: u64 = server_yml
         .directories
         .iter()
-        .map(|dir| dir.count_from_dir_files())
+        .map(|dir| dir.file_item_iter("", false).count() as u64)
         .sum();
     let u64_message = U64Message::new(count);
     message_hub.write_and_flush(&u64_message.as_bytes())?;
