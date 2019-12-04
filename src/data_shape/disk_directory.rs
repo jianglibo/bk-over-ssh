@@ -419,6 +419,7 @@ impl Directory {
         let dir_to_read = self.from_dir.clone();
 
         if let Some(file_selector) = self.file_selector.as_ref() {
+            trace!("find file_selector");
             Box::new(self.file_item_iter_file_selector(
                 server_distinct_id,
                 dir_to_read,
