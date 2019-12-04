@@ -1391,7 +1391,6 @@ where
         for dir in self.server_yml.directories.iter() {
             let push_file_items = dir.file_item_iter(
                 &self.app_conf.app_instance_id,
-                &dir.from_dir,
                 self.app_conf.skip_sha1,
             );
             for fi in push_file_items {

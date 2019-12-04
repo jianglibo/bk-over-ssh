@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::io;
 use std::path::{Path, PathBuf};
-use walkdir::WalkDir;
+use walkdir::{DirEntry, WalkDir};
 
 /// if has includes get includes first.
 /// if has excludes exclude files.
@@ -54,7 +54,6 @@ fn match_path(
 }
 
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
-// #[serde(untagged)]
 pub enum FileSelector {
     Latest(usize),
     LatestWithPattern(usize, String),
@@ -98,6 +97,7 @@ impl Directory {
             .expect("directory pattern should compile.");
         o
     }
+
     /// if has includes get includes first.
     /// if has excludes exclude files.
     pub fn match_path(&self, path: PathBuf) -> Option<PathBuf> {
@@ -109,6 +109,7 @@ impl Directory {
     }
     /// When includes is empty, includes_patterns will be None, excludes is the same.
     pub fn compile_patterns(&mut self) -> Result<(), failure::Error> {
+        self.from_dir.sanitize();
         if self.includes_patterns.is_none() && !self.includes.is_empty() {
             self.includes_patterns.replace(
                 self.includes
@@ -322,7 +323,8 @@ impl Directory {
                         if let (Ok(a_meta), Ok(b_meta)) = (a.metadata(), b.metadata()) {
                             if let (Ok(a_time), Ok(b_time)) = (a_meta.modified(), b_meta.modified())
                             {
-                                return a_time.cmp(&b_time);
+                                // return a_time.cmp(&b_time);
+                                return b_time.cmp(&a_time);
                             }
                         }
                         Ordering::Equal
@@ -362,10 +364,29 @@ impl Directory {
     ) -> impl Iterator<Item = FullPathFileItem> + '_ {
         let includes_patterns = self.includes_patterns.clone();
         let excludes_patterns = self.excludes_patterns.clone();
+        let excludes = self
+            .excludes
+            .iter()
+            .map(SlashPath::new)
+            .collect::<Vec<SlashPath>>();
+
+        let not_exact_exclude = move |de: &DirEntry| -> bool {
+            !if de.file_type().is_dir() {
+                if let Some(path) = de.path().to_str() {
+                    let sl = SlashPath::new(path);
+                    excludes.iter().find(|&p| p == &sl).is_some()
+                } else {
+                    false // keep it
+                }
+            } else {
+                false // keep it
+            }
+        };
 
         WalkDir::new(dir_to_read.as_path())
             .follow_links(false)
             .into_iter()
+            .filter_entry(not_exact_exclude)
             .filter_map(|e| e.ok())
             .filter(|dir_entry| dir_entry.file_type().is_file())
             .filter_map(|dir_entry| dir_entry.path().canonicalize().ok())
@@ -391,11 +412,11 @@ impl Directory {
     pub fn file_item_iter(
         &self,
         server_distinct_id: impl AsRef<str>,
-        dir_to_read: &SlashPath,
+        // dir_to_read: &SlashPath,
         skip_sha1: bool,
     ) -> Box<dyn Iterator<Item = FullPathFileItem> + '_> {
         let server_distinct_id = server_distinct_id.as_ref().to_string();
-        let dir_to_read = dir_to_read.clone();
+        let dir_to_read = self.from_dir.clone();
 
         if let Some(file_selector) = self.file_selector.as_ref() {
             Box::new(self.file_item_iter_file_selector(
@@ -540,7 +561,9 @@ impl Directory {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::develope::tutil;
     use std::io::BufRead;
+    use std::time::Duration;
 
     #[test]
     fn t_directory_i() -> Result<(), failure::Error> {
@@ -562,6 +585,82 @@ excludes:
         for line in cur.lines() {
             println!("{:?}", line?);
         }
+        Ok(())
+    }
+
+    #[test]
+    fn t_directory_file_selector() -> Result<(), failure::Error> {
+        let tdir = tutil::TestDir::new();
+        let _a1 = tdir.make_a_file_with_content("a1", "abc")?;
+        let _a2 = tdir.make_a_file_with_content("a_2", "abc")?;
+        let _a3 = tdir.make_a_file_with_content("xx", "abc")?;
+
+        let d1 = tdir.tmp_dir_path().join("kkc");
+        std::fs::create_dir(d1.as_path())?;
+        tutil::make_a_file_with_content(d1.as_path(), "ccc", "cccc")?;
+
+        let d1_path = SlashPath::from_path(d1.as_path()).expect("from path.");
+        println!("ccc dir: {}", d1_path);
+
+        let yml = format!(
+            r##"
+to_dir: ~
+from_dir: {}
+includes: []
+excludes:
+  - {}
+  - "*.log"
+  - "*.bak"
+"##,
+            SlashPath::new(tdir.tmp_dir_str()),
+            d1_path
+        );
+
+        let mut d = serde_yaml::from_str::<Directory>(&yml)?;
+        d.compile_patterns()?;
+        let files = d
+            .file_item_iter("abc", false)
+            .collect::<Vec<FullPathFileItem>>();
+        assert_eq!(files.len(), 3);
+
+        let tdir = tutil::TestDir::new();
+        let _a1 = tdir.make_a_file_with_content("a1", "abc")?;
+        std::thread::sleep(Duration::from_secs(2));
+        let _a2 = tdir.make_a_file_with_content("a_2", "abc")?;
+        std::thread::sleep(Duration::from_secs(2));
+        let _a3 = tdir.make_a_file_with_content("xx", "abc")?;
+
+        let yml = format!(
+            r##"
+to_dir: ~
+from_dir: {}
+file_selector:
+  Latest: 2
+includes:
+  - "*.txt"
+  - "*.png"
+excludes:
+  - "*.log"
+  - "*.bak"
+"##,
+            SlashPath::new(tdir.tmp_dir_str())
+        );
+
+        let mut d = serde_yaml::from_str::<Directory>(&yml)?;
+        d.compile_patterns()?;
+        let files = d
+            .file_item_iter("abc", false)
+            .collect::<Vec<FullPathFileItem>>();
+        assert_eq!(files.len(), 2);
+        let a1 = &files.get(0).as_ref().unwrap().to_path;
+        let a2 = &files.get(1).as_ref().unwrap().to_path;
+
+        eprintln!("{}", a1);
+        eprintln!("{}", a2);
+
+        assert!(a1.slash.ends_with("xx"));
+        assert!(a2.slash.ends_with("a_2"));
+
         Ok(())
     }
 

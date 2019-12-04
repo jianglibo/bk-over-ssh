@@ -140,7 +140,7 @@ excludes:
         assert!(dir.excludes_patterns.is_some());
 
         let files = dir
-            .file_item_iter("abc", &dir.from_dir, false)
+            .file_item_iter("abc", false)
             .map(|it| {
                 println!("to_path: {:?}", it.to_path.slash);
                 it

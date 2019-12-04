@@ -177,7 +177,7 @@ pub fn server_send_loop(skip_sha1: bool) -> Result<(), failure::Error> {
     // let server_distinct_id = format!("{}/directories", server_yml.host);
     let mut buf = vec![0; 8192];
     for dir in server_yml.directories.iter() {
-        let push_file_items = dir.file_item_iter("", &dir.from_dir, skip_sha1);
+        let push_file_items = dir.file_item_iter("", skip_sha1);
         for fi in push_file_items {
             message_hub.write_and_flush(&fi.as_sent_bytes())?;
             match message_hub.read_type_byte().expect("read type byte.") {

@@ -51,6 +51,24 @@ pub fn print_cursor_lines(cursor: &mut io::Cursor<Vec<u8>>) {
         eprintln!("{}", line.unwrap());
     });
 }
+    pub fn make_a_file_with_content(
+        dir: impl AsRef<Path>,
+        file_name: impl AsRef<str>,
+        content: impl AsRef<str>,
+    ) -> Result<PathBuf, failure::Error> {
+        let dir = dir.as_ref();
+        let tmp_file = dir.join(file_name.as_ref());
+        let mut tmp_file_writer = BufWriter::new(
+            fs::OpenOptions::new()
+                .write(true)
+                .truncate(true)
+                .create(true)
+                .open(&tmp_file)?,
+        );
+        write!(tmp_file_writer, "{}", content.as_ref())?;
+        Ok(tmp_file)
+    }
+
 
 #[allow(dead_code)]
 #[derive(Debug)]
@@ -142,16 +160,7 @@ impl TestDir {
         file_name: impl AsRef<str>,
         content: impl AsRef<str>,
     ) -> Result<PathBuf, failure::Error> {
-        let tmp_file = self.tmp_dir.path().join(file_name.as_ref());
-        let mut tmp_file_writer = BufWriter::new(
-            fs::OpenOptions::new()
-                .write(true)
-                .truncate(true)
-                .create(true)
-                .open(&tmp_file)?,
-        );
-        write!(tmp_file_writer, "{}", content.as_ref())?;
-        Ok(tmp_file)
+        make_a_file_with_content(self.tmp_dir.path(), file_name, content)
     }
 
     pub fn make_a_file_with_len(
