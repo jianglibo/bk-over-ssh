@@ -1,5 +1,4 @@
 use super::{
-    app_conf,
     string_path::{self, SlashPath},
     AppRole, FullPathFileItem,
 };
@@ -165,41 +164,39 @@ impl Directory {
             })
     }
 
-    /// When in active leaf mode, the local directory is absolute, the remote directory is relative.
-    /// How to find the remote data directory?
-    ///
-    pub fn normalize_active_leaf_sync(
-        &mut self,
-        _directories_dir: impl AsRef<Path>,
-        app_instance_id: &str,
-        remote_exec: &str,
-    ) -> Result<(), failure::Error> {
-        trace!("origin directory: {:?}", self);
-        if self.from_dir.is_empty() {
-            bail!("when in push mode, from_dir cannot be empty.");
-        }
+    /// When in push mode, if from_path is 
+    // pub fn normalize_push(
+    //     &mut self,
+    //     _directories_dir: impl AsRef<Path>,
+    //     app_instance_id: &str,
+    //     remote_exec: &str,
+    // ) -> Result<(), failure::Error> {
+    //     trace!("origin directory: {:?}", self);
+    //     if self.from_dir.is_empty() {
+    //         bail!("when in push mode, from_dir cannot be empty.");
+    //     }
 
-        if !self.from_dir.exists() {
-            bail!("from_dir does not exist: {}", &self.from_dir);
-        }
+    //     if !self.from_dir.exists() {
+    //         bail!("from_dir does not exist: {}", &self.from_dir);
+    //     }
 
-        trace!("origin directory: {:?}", self);
+    //     trace!("origin directory: {:?}", self);
 
-        if self.to_dir.is_empty() {
-            self.to_dir.set_slash(self.from_dir.get_last_name());
-        }
+    //     if self.to_dir.is_empty() {
+    //         self.to_dir.set_slash(self.from_dir.get_last_name());
+    //     }
 
-        let remote_path = SlashPath::new(remote_exec)
-            .parent()
-            .expect("remote_exec parent should exist")
-            .join("data")
-            .join(app_conf::RECEIVE_SERVERS_DATA)
-            .join(app_instance_id)
-            .join("directories")
-            .join(self.to_dir.get_slash());
-        self.to_dir = remote_path;
-        Ok(())
-    }
+    //     let to_path = SlashPath::new(remote_exec)
+    //         .parent()
+    //         .expect("remote_exec parent should exist")
+    //         .join("data")
+    //         .join(app_conf::RECEIVE_SERVERS_DATA)
+    //         .join(app_instance_id)
+    //         .join("directories")
+    //         .join(self.to_dir.get_slash());
+    //     self.to_dir = to_path;
+    //     Ok(())
+    // }
 
     /// When in receive hub mode, the local directory is absolute, the remote directory is relative.
     /// The remote directory is always relative to the 'directories' dir in the user's home directory.

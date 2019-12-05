@@ -31,6 +31,12 @@ pub struct FullPathFileItem {
 }
 
 impl FullPathFileItem {
+    /// if dir_to_read is "/a/b" and the absolute_file_to_read is "/a/b/c.txt"
+    /// after relativelize the result is: b/c.txt.
+    /// if server_distinct_id is "abc", then the final to_dir is "abc/b/c.txt", it a relative path,
+    /// and hand over to another side, get the final absolute path by another side.
+    /// for pushing the server_distinct_id is necessory because there is no way to determine where do the file come from.
+    /// but for pull, there is an ip address as distinctness, so it's unnecessary.
     pub fn create_item_from_path(
         dir_to_read: &SlashPath,
         absolute_file_to_read: PathBuf,
@@ -41,8 +47,6 @@ impl FullPathFileItem {
         if let Some(fmeta) =
             data_shape_util::get_file_meta(absolute_file_to_read.as_path(), skip_sha1)
         {
-            // if dir_to_read is "/a/b" and the absolute_file_to_read is "/a/b/c.txt"
-            // after relativelize the result is: b/c.txt.
             if let Some(relative_path) = dir_to_read
                 .parent()
                 .expect("dir to backup shouldn't be the root.")
@@ -102,6 +106,7 @@ mod tests {
     use super::*;
     use crate::data_shape::Directory;
     use crate::log_util;
+    use crate::develope::tutil;
 
     fn log() {
         log_util::setup_logger_detail(
@@ -117,25 +122,36 @@ mod tests {
     #[test]
     fn t_push_file_directories() -> Result<(), failure::Error> {
         log();
-        let yml = r##"
+
+        let tdir = tutil::TestDir::new();
+        let dir = tdir.create_sub_dir("a-dir/bbb");
+
+        tutil::make_a_file_with_content(dir.as_path(), "a.txt", "abc")?;
+        tutil::make_a_file_with_content(dir.as_path(), "a.png", "abc")?;
+        tutil::make_a_file_with_content(dir.as_path(), "a.log", "abc")?;
+        tutil::make_a_file_with_content(dir.as_path(), "a.bak", "abc")?;
+
+
+        let yml = format!(r##"
 to_dir: ~
-from_dir: E:/ws/bk-over-ssh/fixtures/a-dir
+from_dir: {}
 includes:
   - "*.txt"
   - "*.png"
 excludes:
   - "*.log"
   - "*.bak"
-"##;
+"##, dir.to_string_lossy());
 
         let mut dir = serde_yaml::from_str::<Directory>(&yml)?;
-        println!("{:?}", dir);
+        println!("{}", dir.from_dir);
 
         assert!(dir.includes_patterns.is_none());
         assert!(dir.excludes_patterns.is_none());
 
         dir.compile_patterns()?;
 
+        println!("{}", dir.from_dir);
         assert!(dir.includes_patterns.is_some());
         assert!(dir.excludes_patterns.is_some());
 
@@ -147,9 +163,12 @@ excludes:
             })
             .collect::<Vec<FullPathFileItem>>();
 
-        assert_eq!(files.len(), 5);
+        assert_eq!(files.len(), 2);
+        let s = &files.get(0).unwrap().to_path.slash;
+        eprintln!("{}", s);
         assert!(
-            files.get(0).unwrap().to_path.slash.starts_with("abc/a-dir"),
+            // s.starts_with("abc/a-dir/bbb"),
+            s.starts_with("abc/bbb"), // need the result like above.
             "should starts_with fixtures/"
         );
         Ok(())

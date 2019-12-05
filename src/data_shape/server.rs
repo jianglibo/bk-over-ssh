@@ -121,18 +121,18 @@ impl Server {
                 .expect("compile_patterns should succeeded.")
         });
 
-        if let Some(app_role) = app_conf.app_role.as_ref() {
-            if let AppRole::ActiveLeaf = app_role {
-                let remote_home = server_yml.remote_exec.as_str();
-                server_yml.directories.iter_mut().try_for_each(|d| {
-                    d.normalize_active_leaf_sync(
-                        directories_dir.as_path(),
-                        app_conf.app_instance_id.as_str(),
-                        remote_home,
-                    )
-                })?;
-            }
-        }
+        // if let Some(app_role) = app_conf.app_role.as_ref() {
+        //     if let AppRole::ActiveLeaf = app_role {
+        //         let remote_home = server_yml.remote_exec.as_str();
+        //         server_yml.directories.iter_mut().try_for_each(|d| {
+        //             d.normalize_push(
+        //                 directories_dir.as_path(),
+        //                 app_conf.app_instance_id.as_str(),
+        //                 remote_home,
+        //             )
+        //         })?;
+        //     }
+        // }
 
         Ok(Self {
             server_yml,
@@ -777,6 +777,9 @@ mod tests {
 
         assert!(app_conf.mini_app_conf.app_role == Some(AppRole::PullHub));
         let server = tutil::load_demo_server_sqlite(&app_conf, Some("localhost_2.yml"));
+
+        eprintln!("{:?}", server.working_dir);
+        eprintln!("{:?}", server.reports_dir);
 
         let a_dir = SlashPath::from_path(
             server

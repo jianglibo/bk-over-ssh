@@ -19,7 +19,7 @@ pub const PULL_CONF: &str = "pull-conf";
 pub const PULL_DATA: &str = "pull-data";
 
 pub const RECEIVE_SERVERS_CONF: &str = "receive-servers-conf";
-pub const RECEIVE_SERVERS_DATA: &str = "receive-servers-data";
+// pub const RECEIVE_SERVERS_DATA: &str = "receive-servers-data";
 
 // even passive leaf may have mulitple configuration file. For example when mulitple PullHubs pull this server.
 pub const PASSIVE_LEAF_CONF: &str = "passive-leaf-conf";
