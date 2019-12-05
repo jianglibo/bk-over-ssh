@@ -21,7 +21,6 @@ pub use client_loop::{client_push_loops, client_pull_loops};
 
 
 pub const SERVER_TEMPLATE_BYTES: &[u8] = include_bytes!("../server_template.yaml");
-pub const APP_CONFIG_BYTES: &[u8] = include_bytes!("../app_config_demo.yml");
 
 pub fn wait_progress_bar_finish(jh: Option<thread::JoinHandle<()>>) {
     if let Some(t) = jh {

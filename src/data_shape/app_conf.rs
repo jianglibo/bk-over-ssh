@@ -12,6 +12,7 @@ use std::sync::Arc;
 use std::{fs, io::Read, io::Write};
 use r2d2_sqlite::SqliteConnectionManager;
 
+pub const APP_CONFIG_BYTES: &[u8] = include_bytes!("../app_config_demo.yml");
 pub const CONF_FILE_NAME: &str = "bk_over_ssh.yml";
 
 pub const PULL_CONF: &str = "pull-conf";
@@ -163,8 +164,6 @@ pub struct AppConf {
 
 #[derive(Debug, Fail)]
 pub enum ReadAppConfException {
-    #[fail(display = "app conf file does not exist: {:?}", _0)]
-    AppConfFileNotExist(PathBuf),
     #[fail(display = "read app conf file failed: {:?}", _0)]
     ReadAppConfFileFailed(PathBuf),
     #[fail(display = "serde deserialize failed: {:?}", _0)]
@@ -240,13 +239,8 @@ impl AppConf {
     fn read_app_conf(
         file: impl AsRef<Path>,
         app_role: Option<&AppRole>,
-    ) -> Result<AppConf, ReadAppConfException> {
+    ) -> Result<AppConf, failure::Error> {
         let file = file.as_ref();
-        if !file.exists() {
-            return Err(ReadAppConfException::AppConfFileNotExist(
-                file.to_path_buf(),
-            ));
-        }
         if let Ok(mut f) = fs::OpenOptions::new().read(true).open(file) {
             let mut buf = String::new();
             if f.read_to_string(&mut buf).is_ok() {
@@ -256,7 +250,7 @@ impl AppConf {
                             if let Ok(gdd) = guess_data_dir(app_conf_yml.data_dir.trim()) {
                                 gdd
                             } else {
-                                return Err(ReadAppConfException::GuessDataDirFailed);
+                                bail!(ReadAppConfException::GuessDataDirFailed);
                             };
 
                         let log_full_path = {
@@ -297,7 +291,7 @@ impl AppConf {
                                     "create servers_conf_dir {:?}, failed: {:?}",
                                     &servers_conf_dir, err
                                 );
-                                return Err(ReadAppConfException::CreateServersConfDirFailed);
+                                bail!(ReadAppConfException::CreateServersConfDirFailed);
                             }
                         }
 
@@ -330,20 +324,20 @@ impl AppConf {
                     }
                     Err(err) => {
                         error!("deserialize failed: {:?}, {:?}", file, err);
-                        Err(ReadAppConfException::SerdeDeserializeFailed(
+                        bail!(ReadAppConfException::SerdeDeserializeFailed(
                             file.to_path_buf(),
                         ))
                     }
                 }
             } else {
                 error!("read_to_string failure: {:?}", file);
-                Err(ReadAppConfException::ReadAppConfFileFailed(
+                bail!(ReadAppConfException::ReadAppConfFileFailed(
                     file.to_path_buf(),
                 ))
             }
         } else {
             error!("open conf file failed: {:?}", file);
-            Err(ReadAppConfException::ReadAppConfFileFailed(
+            bail!(ReadAppConfException::ReadAppConfFileFailed(
                 file.to_path_buf(),
             ))
         }
@@ -366,7 +360,7 @@ impl AppConf {
     pub fn guess_conf_file(
         app_conf_file: Option<&str>,
         app_role: Option<&AppRole>,
-    ) -> Result<AppConf, ReadAppConfException> {
+    ) -> Result<AppConf, failure::Error> {
         let app_conf_file = if let Some(app_conf_file) = app_conf_file {
             if Path::new(app_conf_file).exists() {
                 Some(PathBuf::from(app_conf_file))
@@ -387,9 +381,15 @@ impl AppConf {
         } else if let Ok(current_dir) = env::current_dir() {
             current_dir.join(CONF_FILE_NAME)
         } else {
-            return Err(ReadAppConfException::GuessAppConfNameFailed);
+            bail!(ReadAppConfException::GuessAppConfNameFailed);
         };
-
+        if !app_conf_file.exists() {
+                let mut file = fs::OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .open(app_conf_file.as_path())?;
+                file.write_all(APP_CONFIG_BYTES)?;
+        }
         AppConf::read_app_conf(app_conf_file, app_role)
     }
     
