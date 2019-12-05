@@ -10,7 +10,6 @@ use log::*;
 use r2d2;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use std::io;
 use std::path::{Path, PathBuf};
 use walkdir::{DirEntry, WalkDir};
 
@@ -100,6 +99,7 @@ impl Directory {
 
     /// if has includes get includes first.
     /// if has excludes exclude files.
+    #[allow(dead_code)]
     pub fn match_path(&self, path: PathBuf) -> Option<PathBuf> {
         match_path(
             path,
@@ -203,6 +203,7 @@ impl Directory {
 
     /// When in receive hub mode, the local directory is absolute, the remote directory is relative.
     /// The remote directory is always relative to the 'directories' dir in the user's home directory.
+    #[allow(dead_code)]
     pub fn normalize_receive_hub_sync(
         &mut self,
         directories_dir: impl AsRef<Path>,
@@ -442,6 +443,7 @@ impl Directory {
     /// To avoid this kind of situation, add a confirm field to the table. when the taks is done, we chang the confirm field to true.
     /// Now we get the previous result by select the unconfirmed items.
     /// This iteration doesn't pick out deleted items!!!
+    #[allow(dead_code)]
     pub fn load_relative_item_to_sqlite<M, D>(
         &self,
         app_role: Option<&AppRole>,

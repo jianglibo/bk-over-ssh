@@ -70,6 +70,7 @@ pub fn create_ssh_session_password(
     Ok(sess)
 }
 
+#[allow(dead_code)]
 pub fn get_stdout_eprintln_stderr(channel: &mut ssh2::Channel, verbose: bool) -> (String, String) {
     let mut s = String::new();
     let std_out = if let Err(err) = channel.read_to_string(&mut s) {

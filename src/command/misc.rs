@@ -4,8 +4,8 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration};
 use crate::data_shape::{Server, ServerYml};
-use crate::db_accesses::{SqliteDbAccess};
-use r2d2_sqlite::SqliteConnectionManager;
+// use crate::db_accesses::{SqliteDbAccess};
+// use r2d2_sqlite::SqliteConnectionManager;
 use std::path::Path;
 
 pub fn polling_file<'a>(sub_matches: &'a clap::ArgMatches<'a>,) -> Result<(), failure::Error> {
@@ -35,7 +35,7 @@ pub fn polling_file<'a>(sub_matches: &'a clap::ArgMatches<'a>,) -> Result<(), fa
             Ok(())
 }
 
-pub fn verify_server_yml(mut server: Server<SqliteConnectionManager, SqliteDbAccess>) -> Result<(), failure::Error> {
+pub fn verify_server_yml(mut server: Server) -> Result<(), failure::Error> {
                 eprintln!(
                 "found server configuration yml at: {:?}",
                 server.yml_location.as_ref().expect("server.yml_location.as_ref should succeeded.")

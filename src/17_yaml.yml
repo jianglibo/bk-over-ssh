@@ -60,10 +60,10 @@ args:
         long: delay
         takes_value: true
         required: false
-    - no-db:
-        help: don't use db.
-        long: no-db
-        required: false
+    # - no-db:
+    #     help: don't use db.
+    #     long: no-db
+    #     required: false
     - no-pb:
         help: don't display progress bar.
         long: no-pb

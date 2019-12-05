@@ -1,20 +1,18 @@
 
-use crate::db_accesses::{SqliteDbAccess};
 use log::*;
 use rayon::prelude::*;
 
 use crate::data_shape::{AppConf, Indicator, Server};
-use r2d2_sqlite::SqliteConnectionManager;
 use super::*;
 
 pub fn archive_local(
-    app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
+    app_conf: &AppConf,
     server_yml: Option<&str>,
     prune: bool,
     prune_only: bool,
 ) -> Result<(), failure::Error>
 {
-    let mut servers: Vec<(Server<SqliteConnectionManager, SqliteDbAccess>, Indicator)> = Vec::new();
+    let mut servers: Vec<(Server, Indicator)> = Vec::new();
 
     if let Some(server_yml) = server_yml {
         let server = load_server_yml_by_name(app_conf, server_yml, true)?;

@@ -151,7 +151,7 @@ where
             window,
         })
     }
-
+    #[allow(dead_code)]
     pub fn read_delta_stream<T: io::Read>(
         delta_stream: T,
     ) -> Result<DeltaFileReader<T>, failure::Error> {

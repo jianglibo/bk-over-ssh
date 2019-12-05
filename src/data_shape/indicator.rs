@@ -21,6 +21,7 @@ pub struct Indicator {
     active_pb: u8, // 0 means pb_total is active, 1 means another.
 }
 
+#[allow(dead_code)]
 impl Indicator {
     pub fn new(multi_bar: Option<Arc<MultiProgress>>) -> Self {
         if let Some(mb) = multi_bar.as_ref() {
@@ -45,7 +46,6 @@ impl Indicator {
             Self::default()
         }
     }
-
     pub fn init_item_pb_style_1(&mut self, file_name: &str, file_len: u64) {
         if !self.is_some() {
             return;

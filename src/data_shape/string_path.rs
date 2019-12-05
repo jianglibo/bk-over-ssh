@@ -63,9 +63,9 @@ impl SlashPath {
         self.slash = sanitiaze(&self.slash);
     }
 
-    pub fn get_local_file_reader(&self) -> Result<impl std::io::Read, failure::Error> {
-        Ok(fs::OpenOptions::new().read(true).open(self.as_path())?)
-    }
+    // pub fn get_local_file_reader(&self) -> Result<impl std::io::Read, failure::Error> {
+    //     Ok(fs::OpenOptions::new().read(true).open(self.as_path())?)
+    // }
 
     pub fn as_str(&self) -> &str {
         self.slash.as_str()
@@ -181,10 +181,10 @@ impl SlashPath {
         fs::create_dir_all(&self.slash)
     }
 
-    pub fn slash_equal_to(&self, str_line: impl AsRef<str>) -> bool {
-        let another = SlashPath::new(str_line.as_ref().to_owned());
-        self == &another
-    }
+    // pub fn slash_equal_to(&self, str_line: impl AsRef<str>) -> bool {
+    //     let another = SlashPath::new(str_line.as_ref().to_owned());
+    //     self == &another
+    // }
 
     pub fn get_os_string(&self) -> std::ffi::OsString {
         std::ffi::OsString::from(&self.slash)
@@ -206,14 +206,14 @@ impl SlashPath {
     }
 }
 
-pub fn is_windows_path_start(s: &str) -> bool {
-    let mut chars = s.chars();
-    if let (Some(c0), Some(c1)) = (chars.next(), chars.next()) {
-        c0.is_ascii_alphabetic() && c1 == ':'
-    } else {
-        false
-    }
-}
+// pub fn is_windows_path_start(s: &str) -> bool {
+//     let mut chars = s.chars();
+//     if let (Some(c0), Some(c1)) = (chars.next(), chars.next()) {
+//         c0.is_ascii_alphabetic() && c1 == ':'
+//     } else {
+//         false
+//     }
+// }
 
 pub fn strip_verbatim_prefixed(s: impl AsRef<str>) -> String {
     let s = s.as_ref();
@@ -248,18 +248,18 @@ pub fn path_equal(
     aa == bb
 }
 
-pub fn join_path<P: AsRef<str> + fmt::Display>(path_parent: P, path_child: P) -> String {
-    let pp = path_parent.as_ref();
-    if pp.starts_with(VERBATIM_PREFIX) {
-        // it's a windows path.
-        let (_, pp1) = pp.split_at(4);
-        format!("{}\\{}", pp1, path_child)
-    } else if is_windows_path_start(pp) {
-        format!("{}\\{}", pp, path_child)
-    } else {
-        format!("{}/{}", pp, path_child)
-    }
-}
+// pub fn join_path<P: AsRef<str> + fmt::Display>(path_parent: P, path_child: P) -> String {
+//     let pp = path_parent.as_ref();
+//     if pp.starts_with(VERBATIM_PREFIX) {
+//         // it's a windows path.
+//         let (_, pp1) = pp.split_at(4);
+//         format!("{}\\{}", pp1, path_child)
+//     } else if is_windows_path_start(pp) {
+//         format!("{}\\{}", pp, path_child)
+//     } else {
+//         format!("{}/{}", pp, path_child)
+//     }
+// }
 
 #[cfg(test)]
 mod tests {
@@ -343,21 +343,21 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn t_join() {
-        let pp = r#"\\?\D:\Documents\GitHub\bk-over-ssh\fixtures\adir"#;
-        let ch = "a.txt";
-        let j = join_path(pp, ch);
-        assert_eq!(j, r#"D:\Documents\GitHub\bk-over-ssh\fixtures\adir\a.txt"#);
+//     #[test]
+//     fn t_join() {
+//         let pp = r#"\\?\D:\Documents\GitHub\bk-over-ssh\fixtures\adir"#;
+//         let ch = "a.txt";
+//         let j = join_path(pp, ch);
+//         assert_eq!(j, r#"D:\Documents\GitHub\bk-over-ssh\fixtures\adir\a.txt"#);
 
-        let pp = r#"D:\Documents\GitHub\bk-over-ssh\fixtures\adir"#;
-        let ch = "a.txt";
-        let j = join_path(pp, ch);
-        assert_eq!(j, r#"D:\Documents\GitHub\bk-over-ssh\fixtures\adir\a.txt"#);
+//         let pp = r#"D:\Documents\GitHub\bk-over-ssh\fixtures\adir"#;
+//         let ch = "a.txt";
+//         let j = join_path(pp, ch);
+//         assert_eq!(j, r#"D:\Documents\GitHub\bk-over-ssh\fixtures\adir\a.txt"#);
 
-        let pp = r#":\Documents\GitHub\bk-over-ssh\fixtures\adir"#;
-        let ch = "a.txt";
-        let j = join_path(pp, ch);
-        assert_eq!(j, r#":\Documents\GitHub\bk-over-ssh\fixtures\adir/a.txt"#);
-    }
+//         let pp = r#":\Documents\GitHub\bk-over-ssh\fixtures\adir"#;
+//         let ch = "a.txt";
+//         let j = join_path(pp, ch);
+//         assert_eq!(j, r#":\Documents\GitHub\bk-over-ssh\fixtures\adir/a.txt"#);
+//     }
 }

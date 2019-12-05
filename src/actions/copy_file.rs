@@ -1,6 +1,6 @@
-use crate::data_shape::{
-    Indicator, 
-};
+// use crate::data_shape::{
+//     Indicator, 
+// };
 // use crate::rustsync::{DeltaFileReader, DeltaReader, Signature};
 use log::*;
 // use r2d2;
@@ -24,36 +24,36 @@ pub fn copy_file_to_stream(
     Ok(())
 }
 
-pub fn copy_stream_with_pb(
-    from: &mut impl std::io::Read,
-    to: &mut impl std::io::Write,
-    buf: &mut [u8],
-    progress_bar: &Indicator,
-) -> Result<u64, failure::Error> {
-    let mut length = 0_u64;
-    loop {
-        match from.read(buf) {
-            Ok(n) if n > 0 => {
-                let nn = n as u64;
-                length += nn;
-                to.write_all(&buf[..n])?;
-                progress_bar.inc_pb(nn);
-            }
-            Ok(_) => {
-                trace!("end copy_stream_to_file_with_pb when read zero byte.");
-                break;
-            }
-            Err(err) => {
-                trace!(
-                    "end copy_stream_to_file_with_pb when catch error. {:?}",
-                    err
-                );
-                break;
-            }
-        }
-    }
-    Ok(length)
-}
+// pub fn copy_stream_with_pb(
+//     from: &mut impl std::io::Read,
+//     to: &mut impl std::io::Write,
+//     buf: &mut [u8],
+//     progress_bar: &Indicator,
+// ) -> Result<u64, failure::Error> {
+//     let mut length = 0_u64;
+//     loop {
+//         match from.read(buf) {
+//             Ok(n) if n > 0 => {
+//                 let nn = n as u64;
+//                 length += nn;
+//                 to.write_all(&buf[..n])?;
+//                 progress_bar.inc_pb(nn);
+//             }
+//             Ok(_) => {
+//                 trace!("end copy_stream_to_file_with_pb when read zero byte.");
+//                 break;
+//             }
+//             Err(err) => {
+//                 trace!(
+//                     "end copy_stream_to_file_with_pb when catch error. {:?}",
+//                     err
+//                 );
+//                 break;
+//             }
+//         }
+//     }
+//     Ok(length)
+// }
 
 
 // pub fn copy_stream_to_file_with_pb<T: AsRef<Path>>(
@@ -102,47 +102,47 @@ pub fn copy_stream_to_file<T: AsRef<Path>, F: FnMut(u64) -> ()>(
     Ok(length)
 }
 
-pub fn copy_stream_to_file_return_sha1_with_cb<T: AsRef<Path>>(
-    from: &mut impl std::io::Read,
-    to_file: T,
-    buf: &mut [u8],
-    progress_bar: &Indicator,
-) -> Result<(u64, String), failure::Error> {
-    let mut length = 0_u64;
-    let mut hasher = Sha1::new();
-    let path = to_file.as_ref();
-    trace!("start copy_stream_to_file_return_sha1_with_cb: {:?}", path);
-    if let Some(pp) = path.parent() {
-        if !pp.exists() {
-            fs::create_dir_all(pp)?;
-        }
-    }
-    let mut wf = fs::OpenOptions::new().create(true).write(true).open(path)?;
-    loop {
-        match from.read(buf) {
-            Ok(n) if n > 0 => {
-                length += n as u64;
-                wf.write_all(&buf[..n])?;
-                hasher.input(&buf[..n]);
-                // counter(length);
-                progress_bar.inc_pb(length);
-            }
-            Ok(_) => {
-                trace!("end copy_stream_to_file_return_sha1_with_cb when read zero byte");
-                break;
-            }
-            Err(err) => {
-                trace!(
-                    "end copy_stream_to_file_return_sha1_with_cb catch error. {:?}",
-                    err
-                );
-                break;
-            }
-        }
-    }
-    ensure!(path.exists(), "write_stream_to_file should be done.");
-    Ok((length, format!("{:X}", hasher.result())))
-}
+// pub fn copy_stream_to_file_return_sha1_with_cb<T: AsRef<Path>>(
+//     from: &mut impl std::io::Read,
+//     to_file: T,
+//     buf: &mut [u8],
+//     progress_bar: &Indicator,
+// ) -> Result<(u64, String), failure::Error> {
+//     let mut length = 0_u64;
+//     let mut hasher = Sha1::new();
+//     let path = to_file.as_ref();
+//     trace!("start copy_stream_to_file_return_sha1_with_cb: {:?}", path);
+//     if let Some(pp) = path.parent() {
+//         if !pp.exists() {
+//             fs::create_dir_all(pp)?;
+//         }
+//     }
+//     let mut wf = fs::OpenOptions::new().create(true).write(true).open(path)?;
+//     loop {
+//         match from.read(buf) {
+//             Ok(n) if n > 0 => {
+//                 length += n as u64;
+//                 wf.write_all(&buf[..n])?;
+//                 hasher.input(&buf[..n]);
+//                 // counter(length);
+//                 progress_bar.inc_pb(length);
+//             }
+//             Ok(_) => {
+//                 trace!("end copy_stream_to_file_return_sha1_with_cb when read zero byte");
+//                 break;
+//             }
+//             Err(err) => {
+//                 trace!(
+//                     "end copy_stream_to_file_return_sha1_with_cb catch error. {:?}",
+//                     err
+//                 );
+//                 break;
+//             }
+//         }
+//     }
+//     ensure!(path.exists(), "write_stream_to_file should be done.");
+//     Ok((length, format!("{:X}", hasher.result())))
+// }
 
 #[allow(dead_code)]
 pub fn write_str_to_file(
@@ -712,7 +712,7 @@ mod tests {
     use super::*;
     use crate::actions::{copy_a_file_sftp, ssh_util};
     use crate::data_shape::{
-        string_path, AppRole, Server, 
+        string_path
     };
     use crate::develope::tutil;
     use crate::log_util;
@@ -765,6 +765,7 @@ mod tests {
 
     #[test]
     fn t_visit() {
+        log();
         let mut _count = 0_u64;
         visit_dirs(Path::new("e:\\"), &|entry| {
             println!("{:?}", entry);

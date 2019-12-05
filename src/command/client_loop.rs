@@ -1,21 +1,21 @@
-use crate::actions;
+// use crate::actions;
 use crate::data_shape::{server, AppConf};
-use crate::db_accesses::SqliteDbAccess;
+// use crate::db_accesses::SqliteDbAccess;
 use job_scheduler::{Job, JobScheduler};
-use r2d2_sqlite::SqliteConnectionManager;
+// use r2d2_sqlite::SqliteConnectionManager;
 use std::time::Duration;
 
 use super::*;
 
 pub fn client_push_loops(
-    app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
+    app_conf: &AppConf,
     server_yml: Option<&str>,
 ) -> Result<(), failure::Error> {
     client_push_loops_follow_archive(app_conf, server_yml, false)
 }
 
 pub fn client_push_loops_follow_archive(
-    app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
+    app_conf: &AppConf,
     server_yml: Option<&str>,
     follow_archive: bool,
 ) -> Result<(), failure::Error> {
@@ -66,7 +66,7 @@ fn client_push_loop_by_spawn_do(
                 let mut sched = JobScheduler::new();
                 sched.add(Job::new(schedule_item.cron.parse().unwrap(), || {
                     match server.client_push_loop() {
-                        Ok(result) => {
+                        Ok(_result) => {
                             indicator.pb_finish();
                             // actions::write_dir_sync_result(&server, result.as_ref());
                             // archive when succeeded.
@@ -88,7 +88,7 @@ fn client_push_loop_by_spawn_do(
         }))
     } else {
         match server.client_push_loop() {
-            Ok(result) => {
+            Ok(_result) => {
                 indicator.pb_finish();
                 // actions::write_dir_sync_result(&server, result.as_ref());
                 // archive when succeeded.
@@ -105,14 +105,14 @@ fn client_push_loop_by_spawn_do(
 
 
 pub fn client_pull_loops(
-    app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
+    app_conf: &AppConf,
     server_yml: Option<&str>,
 ) -> Result<(), failure::Error> {
     client_pull_loops_follow_archive(app_conf, server_yml, false)
 }
 
 pub fn client_pull_loops_follow_archive(
-    app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
+    app_conf: &AppConf,
     server_yml: Option<&str>,
     follow_archive: bool,
 ) -> Result<(), failure::Error> {
@@ -163,7 +163,7 @@ fn client_pull_loop_by_spawn_do(
                 let mut sched = JobScheduler::new();
                 sched.add(Job::new(schedule_item.cron.parse().unwrap(), || {
                     match server.client_pull_loop() {
-                        Ok(result) => {
+                        Ok(_result) => {
                             indicator.pb_finish();
                             // actions::write_dir_sync_result(&server, result.as_ref());
                             // archive when succeeded.
@@ -185,7 +185,7 @@ fn client_pull_loop_by_spawn_do(
         }))
     } else {
         match server.client_pull_loop() {
-            Ok(result) => {
+            Ok(_result) => {
                 indicator.pb_finish();
                 // actions::write_dir_sync_result(&server, result.as_ref());
                 // archive when succeeded.

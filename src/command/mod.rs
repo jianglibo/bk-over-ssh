@@ -11,11 +11,9 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
-use std::{fs, io::Write};
 use log::*;
 
-use crate::data_shape::{AppConf, AppRole, Indicator, ReadAppConfException, Server};
-use r2d2_sqlite::SqliteConnectionManager;
+use crate::data_shape::{AppConf, Indicator, Server};
 
 pub use archives::archive_local;
 // pub use sync_dirs::{sync_pull_dirs, sync_push_dirs};
@@ -62,10 +60,10 @@ pub fn delay_exec(delay: &str) {
 }
 
 pub fn load_server_yml(
-    app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
+    app_conf: &AppConf,
     server_yml: Option<&str>,
     open_db: bool,
-) -> Result<(Server<SqliteConnectionManager, SqliteDbAccess>, Indicator), failure::Error> {
+) -> Result<(Server, Indicator), failure::Error> {
     load_server_yml_by_name(
         app_conf,
         server_yml.expect("server-yml should exist."),
@@ -86,9 +84,9 @@ pub fn load_server_yml(
 // }
 
 pub fn load_all_server_yml(
-    app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
+    app_conf: &AppConf,
     open_db: bool,
-) -> Vec<(Server<SqliteConnectionManager, SqliteDbAccess>, Indicator)> {
+) -> Vec<(Server, Indicator)> {
     app_conf
         .load_all_server_yml()
         .into_iter()
@@ -104,10 +102,10 @@ pub fn load_all_server_yml(
 
 /// we prepare the database when loading yml file.
 pub fn load_server_yml_by_name(
-    app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
+    app_conf: &AppConf,
     name: &str,
     open_db: bool,
-) -> Result<(Server<SqliteConnectionManager, SqliteDbAccess>, Indicator), failure::Error> {
+) -> Result<(Server, Indicator), failure::Error> {
     let mut s = app_conf.load_server_yml(name)?;
     if open_db {
         let sqlite_db_access = SqliteDbAccess::new(s.0.get_db_file());
@@ -116,53 +114,49 @@ pub fn load_server_yml_by_name(
     Ok(s)
 }
 
-pub fn process_app_config<M, D>(
-    conf: Option<&str>,
-    app_role_op: Option<&AppRole>,
-    re_try: bool,
-) -> Result<AppConf<M, D>, failure::Error>
-where
-    M: r2d2::ManageConnection,
-    D: DbAccess<M>,
-{
-    let message_pb = ProgressBar::new_spinner();
-    message_pb.enable_steady_tick(200);
-    let app_conf = match AppConf::guess_conf_file(
-        conf,
-        app_role_op,
-    ) {
-        Ok(cfg) => cfg,
-        Err(ReadAppConfException::SerdeDeserializeFailed(conf_file_path)) | Err(ReadAppConfException::AppConfFileNotExist(conf_file_path))=> {
-            if !re_try {
-                let mut file = fs::OpenOptions::new()
-                    .write(true)
-                    .create(true)
-                    .open(conf_file_path.as_path())?;
-                file.write_all(APP_CONFIG_BYTES)?;
-                return process_app_config(conf, app_role_op, true);
-            } else {
-                bail!("deserialize app_conf failed again.");
-            }
-        }
-        Err(err) => bail!("Read app configuration file failed:{:?}, {:?}", conf, err),
-    };
+// pub fn process_app_config(
+//     conf: Option<&str>,
+//     app_role_op: Option<&AppRole>,
+//     re_try: bool,
+// ) -> Result<AppConf, failure::Error> {
+//     let message_pb = ProgressBar::new_spinner();
+//     message_pb.enable_steady_tick(200);
+//     let app_conf = match AppConf::guess_conf_file(
+//         conf,
+//         app_role_op,
+//     ) {
+//         Ok(cfg) => cfg,
+//         Err(ReadAppConfException::SerdeDeserializeFailed(conf_file_path)) | Err(ReadAppConfException::AppConfFileNotExist(conf_file_path))=> {
+//             if !re_try {
+//                 let mut file = fs::OpenOptions::new()
+//                     .write(true)
+//                     .create(true)
+//                     .open(conf_file_path.as_path())?;
+//                 file.write_all(APP_CONFIG_BYTES)?;
+//                 return process_app_config(conf, app_role_op, true);
+//             } else {
+//                 bail!("deserialize app_conf failed again.");
+//             }
+//         }
+//         Err(err) => bail!("Read app configuration file failed:{:?}, {:?}", conf, err),
+//     };
 
-    let message = format!(
-        "using configuration file: {:?}",
-        app_conf.config_file_path.as_path()
-    );
+//     let message = format!(
+//         "using configuration file: {:?}",
+//         app_conf.config_file_path.as_path()
+//     );
 
-    message_pb.set_message(message.as_str());
+//     message_pb.set_message(message.as_str());
 
-    message_pb.finish_and_clear();
-    Ok(app_conf)
-}
+//     message_pb.finish_and_clear();
+//     Ok(app_conf)
+// }
 
 
-pub type ServerAndIndicatorSqlite = (Server<SqliteConnectionManager, SqliteDbAccess>, Indicator);
+pub type ServerAndIndicatorSqlite = (Server, Indicator);
 
 pub fn load_server_indicator_pairs(
-    app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
+    app_conf: &AppConf,
     server_yml: Option<&str>,
 ) -> Result<
     (

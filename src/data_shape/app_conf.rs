@@ -1,5 +1,5 @@
 use crate::data_shape::{string_path, Indicator, Server, ServerYml};
-use crate::db_accesses::DbAccess;
+use crate::db_accesses::{SqliteDbAccess};
 use indicatif::MultiProgress;
 use log::*;
 use log::{trace, warn};
@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
 use std::{fs, io::Read, io::Write};
+use r2d2_sqlite::SqliteConnectionManager;
 
 pub const CONF_FILE_NAME: &str = "bk_over_ssh.yml";
 
@@ -21,7 +22,7 @@ pub const RECEIVE_SERVERS_DATA: &str = "receive-servers-data";
 
 // even passive leaf may have mulitple configuration file. For example when mulitple PullHubs pull this server.
 pub const PASSIVE_LEAF_CONF: &str = "passive-leaf-conf";
-pub const PASSIVE_LEAF_DATA: &str = "passive-leaf-data";
+// pub const PASSIVE_LEAF_DATA: &str = "passive-leaf-data";
 
 // even active leaf may have multiple configuration file. For example push to mulitple ReceiveHubs.
 pub const PUSH_CONF: &str = "push-conf";
@@ -47,6 +48,7 @@ pub enum AppRole {
 }
 
 impl AppRole {
+    #[allow(dead_code)]
     pub fn to_str(&self) -> &str {
         match &self {
             AppRole::PullHub => "pull_hub",
@@ -142,20 +144,16 @@ pub struct MiniAppConf {
 }
 
 #[derive(Debug, Serialize)]
-pub struct AppConf<M, D>
-where
-    M: r2d2::ManageConnection,
-    D: DbAccess<M>,
-{
+pub struct AppConf {
     inner: AppConfYml,
     pub config_file_path: PathBuf,
     pub data_dir_full_path: PathBuf,
     pub log_full_path: PathBuf,
     pub servers_conf_dir: PathBuf,
     #[serde(skip)]
-    pub db_access: Option<D>,
+    pub db_access: Option<SqliteDbAccess>,
     #[serde(skip)]
-    _m: PhantomData<M>,
+    _m: PhantomData<SqliteConnectionManager>,
     #[serde(skip)]
     lock_file: Option<fs::File>,
     #[serde(skip)]
@@ -163,21 +161,23 @@ where
     pub mini_app_conf: MiniAppConf,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Fail)]
 pub enum ReadAppConfException {
+    #[fail(display = "app conf file does not exist: {:?}", _0)]
     AppConfFileNotExist(PathBuf),
+    #[fail(display = "read app conf file failed: {:?}", _0)]
     ReadAppConfFileFailed(PathBuf),
+    #[fail(display = "serde deserialize failed: {:?}", _0)]
     SerdeDeserializeFailed(PathBuf),
+    #[fail(display = "guess data dir failed.")]
     GuessDataDirFailed,
+    #[fail(display = "create server conf dir failed.")]
     CreateServersConfDirFailed,
+    #[fail(display = "guess app conf name failed.")]
     GuessAppConfNameFailed,
 }
 
-pub fn demo_app_conf<M, D>(data_dir: &str, app_role: AppRole) -> AppConf<M, D>
-where
-    M: r2d2::ManageConnection,
-    D: DbAccess<M>,
-{
+pub fn demo_app_conf(data_dir: &str, app_role: AppRole) -> AppConf {
     let servers_conf_dir_name = match app_role {
         AppRole::PullHub => PULL_CONF,
         AppRole::ActiveLeaf => PUSH_CONF,
@@ -207,12 +207,8 @@ where
     }
 }
 
-impl<M, D> AppConf<M, D>
-where
-    M: r2d2::ManageConnection,
-    D: DbAccess<M>,
-{
-    pub fn set_db_access(&mut self, db_access: D) {
+impl AppConf {
+    pub fn set_db_access(&mut self, db_access: SqliteDbAccess) {
         // if let Err(err) = db_access.create_database() {
         //     warn!("create database failed: {:?}", err);
         // }
@@ -228,7 +224,7 @@ where
         &self.inner
     }
     #[allow(dead_code)]
-    pub fn get_db_access(&self) -> Option<&D> {
+    pub fn get_db_access(&self) -> Option<&SqliteDbAccess> {
         self.db_access.as_ref()
     }
 
@@ -244,7 +240,7 @@ where
     fn read_app_conf(
         file: impl AsRef<Path>,
         app_role: Option<&AppRole>,
-    ) -> Result<AppConf<M, D>, ReadAppConfException> {
+    ) -> Result<AppConf, ReadAppConfException> {
         let file = file.as_ref();
         if !file.exists() {
             return Err(ReadAppConfException::AppConfFileNotExist(
@@ -370,7 +366,7 @@ where
     pub fn guess_conf_file(
         app_conf_file: Option<&str>,
         app_role: Option<&AppRole>,
-    ) -> Result<AppConf<M, D>, ReadAppConfException> {
+    ) -> Result<AppConf, ReadAppConfException> {
         let app_conf_file = if let Some(app_conf_file) = app_conf_file {
             if Path::new(app_conf_file).exists() {
                 Some(PathBuf::from(app_conf_file))
@@ -396,6 +392,7 @@ where
 
         AppConf::read_app_conf(app_conf_file, app_role)
     }
+    
     #[allow(dead_code)]
     pub fn lock_working_file(&mut self) -> Result<(), failure::Error> {
         let lof = self.data_dir_full_path.as_path().join("working.lock");
@@ -415,7 +412,7 @@ where
     pub fn load_server_yml(
         &self,
         yml_file_name: impl AsRef<str>,
-    ) -> Result<(Server<M, D>, Indicator), failure::Error> {
+    ) -> Result<(Server, Indicator), failure::Error> {
         let server = self.load_server_from_yml(yml_file_name.as_ref())?;
         if self.mini_app_conf.verbose {
             eprintln!(
@@ -428,7 +425,7 @@ where
     }
 
     /// load all .yml file under servers directory.
-    pub fn load_all_server_yml(&self) -> Vec<(Server<M, D>, Indicator)> {
+    pub fn load_all_server_yml(&self) -> Vec<(Server, Indicator)> {
         trace!("servers_conf_dir is: {:?}", self.servers_conf_dir);
         if let Ok(read_dir) = self.servers_conf_dir.read_dir() {
             read_dir
@@ -472,7 +469,7 @@ where
     pub fn load_server_from_yml(
         &self,
         name: impl AsRef<str>,
-    ) -> Result<Server<M, D>, failure::Error> {
+    ) -> Result<Server, failure::Error> {
         let name = name.as_ref();
         let mut server_yml_path = Path::new(name).to_path_buf();
         if (server_yml_path.is_absolute() || name.starts_with('/')) && !server_yml_path.exists() {

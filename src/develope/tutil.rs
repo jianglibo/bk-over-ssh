@@ -1,6 +1,5 @@
 use crate::data_shape::{demo_app_conf, AppConf, Server, AppRole};
 use crate::db_accesses::{DbAccess, SqliteDbAccess};
-use r2d2_sqlite::SqliteConnectionManager;
 use rand::Rng;
 use std::path::{Path, PathBuf};
 use std::{fs, io, io::BufRead, io::BufWriter, io::Seek, io::Write};
@@ -8,16 +7,16 @@ use tempfile::TempDir;
 
 /// data dir in the current directory.
 #[allow(dead_code)]
-pub fn load_demo_app_conf_sqlite(data_dir: Option<&str>, app_role: AppRole) -> AppConf<SqliteConnectionManager, SqliteDbAccess> {
+pub fn load_demo_app_conf_sqlite(data_dir: Option<&str>, app_role: AppRole) -> AppConf {
     let data_dir = data_dir.unwrap_or_else(||"data");
-    demo_app_conf::<SqliteConnectionManager, SqliteDbAccess>(data_dir, app_role)
+    demo_app_conf(data_dir, app_role)
 }
 
 #[allow(dead_code)]
 pub fn load_demo_server_sqlite (
-    app_conf: &AppConf<SqliteConnectionManager, SqliteDbAccess>,
+    app_conf: &AppConf,
     server_yml: Option<&str>,
-) -> Server<SqliteConnectionManager, SqliteDbAccess> {
+) -> Server {
     let server_yml = server_yml.unwrap_or_else(||"localhost.yml");
     app_conf.load_server_from_yml(
         server_yml,

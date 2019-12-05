@@ -3,7 +3,7 @@ use log::*;
 use std::fs;
 
 use crate::data_shape::AppConf;
-use r2d2_sqlite::SqliteConnectionManager;
+// use r2d2_sqlite::SqliteConnectionManager;
 
 use super::*;
 
@@ -25,7 +25,7 @@ use super::*;
 // }
 
 pub fn create_db<'a>(
-    app_conf: &mut AppConf<SqliteConnectionManager, SqliteDbAccess>,
+    app_conf: &mut AppConf,
     m: &'a clap::ArgMatches<'a>,
 ) -> Result<bool, failure::Error> {
     if let ("create-db", Some(sub_matches)) = m.subcommand() {

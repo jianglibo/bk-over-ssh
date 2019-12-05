@@ -85,7 +85,7 @@ impl RelativeFileItemInDb {
             confirmed: self.confirmed,
         }
     }
-
+    #[allow(dead_code)]
     pub fn from_path(
         base_path: &SlashPath,
         path: PathBuf,
@@ -124,6 +124,7 @@ impl RelativeFileItemInDb {
         }
     }
 
+    #[allow(dead_code)]
     pub fn to_insert_sql_string(&self) -> String {
         // path, sha1, len, time_modified, time_created, dir_id, changed
         format!("INSERT INTO relative_file_item (path, {}len, {}{}dir_id, changed, confirmed) VALUES ('{}', {}{}, {}{}{}, {}, {});"
@@ -141,6 +142,7 @@ impl RelativeFileItemInDb {
         )
     }
 
+    #[allow(dead_code)]
     pub fn to_update_sql_string(&self) -> String {
         format!(
             "UPDATE relative_file_item SET len = {}, {}{}changed = 1, confirmed = 0 where id = {};",
@@ -159,6 +161,7 @@ impl RelativeFileItemInDb {
         )
     }
 
+    #[allow(dead_code)]
     pub fn to_update_changed_sql_string(&self) -> String {
         format!(
             "UPDATE relative_file_item SET changed = {}, confirmed = 0 where id = {};",
@@ -167,6 +170,7 @@ impl RelativeFileItemInDb {
         )
     }
 
+    #[allow(dead_code)]
     pub fn to_sql_string(&self, da: &DbAction) -> String {
         match da {
             DbAction::Insert => self.to_insert_sql_string(),
