@@ -138,7 +138,7 @@ impl U64Message {
         v.append(&mut self.value.to_be_bytes().to_vec());
         v
     }
-
+    #[allow(dead_code)]
     pub fn as_bytes(&self) -> Vec<u8> {
         self.value.to_be_bytes().to_vec()
     }

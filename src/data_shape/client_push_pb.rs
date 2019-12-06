@@ -31,7 +31,7 @@ impl TransferFileProgressBar {
             self.pb.set_position(0);
             self.pb.set_length(file_len);
             self.pb.set_message(file_item.to_path.as_str());
-            let prefix = format!("{}/{}", self.consumed_files, self.total_files);
+            let prefix = format!("{}/~{}", self.consumed_files, self.total_files);
             self.pb.set_prefix(prefix.as_str());
         }
     }
@@ -42,7 +42,7 @@ impl TransferFileProgressBar {
             self.pb.set_position(0);
             self.pb.set_length(!0);
             self.pb.set_message("skipping");
-            let prefix = format!("{}/{}", self.consumed_files, self.total_files);
+            let prefix = format!("{}/~{}", self.consumed_files, self.total_files);
             self.pb.set_prefix(prefix.as_str());
         }
     }

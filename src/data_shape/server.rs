@@ -19,7 +19,7 @@ use std::io::prelude::Read;
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::{fs, io};
+use std::{fs, io, io::Write};
 use tar::Builder;
 
 pub const CRON_NAME_SYNC_PULL_DIRS: &str = "sync-pull-dirs";
@@ -170,13 +170,41 @@ impl Server {
         Ok(())
     }
 
-    pub fn count_from_dir_files(&self) -> u64 {
-        self.server_yml
-            .directories
-            .iter()
-            .map(|dir| dir.file_item_iter("", false).count() as u64)
-            .sum()
+    pub fn read_last_file_count(&self) -> u64 {
+        let cf = self.working_dir.join("last_counting.txt");
+        if cf.exists() {
+            let mut f = fs::OpenOptions::new()
+                .read(true)
+                .open(cf.as_path())
+                .expect("last_counting_file opened.");
+            let mut s = String::new();
+            f.read_to_string(&mut s).expect("read last counting file to string.");
+            s.trim()
+                .parse::<u64>()
+                .expect("last_counting_file content parse to u64.")
+        } else {
+            0
+        }
     }
+
+    pub fn write_last_file_count(&self, count: u64) {
+        let cf = self.working_dir.join("last_counting.txt");
+        let mut f = fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(cf.as_path())
+            .expect("last_counting_file opened.");
+        write!(f, "{}", count).expect("wrote file count to file.");
+    }
+
+    // pub fn count_from_dir_files(&self) -> u64 {
+    //     self.server_yml
+    //         .directories
+    //         .iter()
+    //         .map(|dir| dir.file_item_iter("", false).count() as u64)
+    //         .sum()
+    // }
 
     /// For app_role is ReceiveHub, remote exec is from user's home directory.
     pub fn get_remote_exec(&self) -> SlashPath {
@@ -527,14 +555,17 @@ impl Server {
         );
         message_hub.write_and_flush(server_yml.as_server_yml_sent_bytes().as_slice())?;
 
-        let file_count = U64Message::parse(&mut message_hub)?;
-        trace!("got file_count: {}", file_count.value);
+        // let file_count = U64Message::parse(&mut message_hub)?;
+        // trace!("got file_count: {}", file_count.value);
 
         let my_dir = SlashPath::from_path(self.get_my_dir())
             .expect("my_dir should exists.")
             .join("directories");
         trace!("save to my_dir: {:?}", my_dir);
-        let mut cppb = TransferFileProgressBar::new(file_count.value, self.app_conf.show_pb);
+        let file_count = self.read_last_file_count();
+        let mut cppb = TransferFileProgressBar::new(file_count, self.app_conf.show_pb);
+
+        let mut new_file_count = 0_u64;
 
         let mut last_df: Option<SlashPath> = None;
         let mut last_file_item: Option<FullPathFileItem> = None;
@@ -553,6 +584,7 @@ impl Server {
 
             match type_byte {
                 TransferType::FileItem => {
+                    new_file_count += 1;
                     let string_message = StringMessage::parse(&mut message_hub)?;
                     trace!("got file item: {}", string_message.content);
                     match serde_json::from_str::<FullPathFileItem>(&string_message.content) {
@@ -578,7 +610,9 @@ impl Server {
                             }
                         }
                         Err(err) => {
-                            message_hub.write_error_message(format!("{:?}", err))?;
+                            // why send error message to server side?
+                            // message_hub.write_error_message(format!("{:?}", err))?;
+                            error!("{:?}", err);
                         }
                     };
                 }
@@ -595,7 +629,8 @@ impl Server {
                             Some(&cppb),
                         ) {
                             Err(err) => {
-                                message_hub.write_error_message(format!("{:?}", err))?;
+                                // why send error message to server side?
+                                // message_hub.write_error_message(format!("{:?}", err))?;
                                 //log at client side.
                                 error!("copy_to_file got error {:?}", err);
                             }
@@ -604,9 +639,14 @@ impl Server {
                                     let ft = filetime::FileTime::from_unix_time(md as i64, 0);
                                     filetime::set_file_mtime(df.as_path(), ft)?;
                                 } else {
-                                    message_hub.write_error_message(
-                                        "push_primary_file_item has no modified value.",
-                                    )?;
+                                    // why send error message to server side?
+                                    // message_hub.write_error_message(
+                                    //     "push_primary_file_item has no modified value.",
+                                    // )?;
+                                    error!(
+                                        "push_primary_file_item has no modified: {:?}",
+                                        file_item
+                                    )
                                 }
                             }
                         }
@@ -625,6 +665,7 @@ impl Server {
             }
         }
         cppb.pb.finish_with_message("done.");
+        self.write_last_file_count(new_file_count);
         message_hub.close()?;
         Ok(None)
     }
@@ -639,10 +680,12 @@ impl Server {
         );
         trace!("invoke remote: {}", cmd);
         channel.exec(&cmd).expect("start remote server-loop");
-
+        let file_count = self.read_last_file_count();
         let mut cppb =
-            TransferFileProgressBar::new(self.count_from_dir_files(), self.app_conf.show_pb);
+            TransferFileProgressBar::new(file_count, self.app_conf.show_pb);
         let mut message_hub = SshChannelMessageHub::new(channel);
+
+        let mut new_file_count = 0_u64;
 
         let server_yml = StringMessage::from_path(
             self.yml_location
@@ -659,6 +702,7 @@ impl Server {
             let push_file_items =
                 dir.file_item_iter(&self.app_conf.app_instance_id, self.app_conf.skip_sha1);
             for fi in push_file_items {
+                new_file_count += 1;
                 match fi {
                     Ok(fi) => {
                         message_hub.write_and_flush(&fi.as_sent_bytes())?;
@@ -692,6 +736,7 @@ impl Server {
         message_hub.write_and_flush(&[TransferType::RepeatDone.to_u8()])?;
         info!("changed: {}, unchanged: {}", changed, unchanged);
         cppb.pb.finish_with_message("done.");
+        self.write_last_file_count(new_file_count);
         message_hub.close()?;
         Ok(None)
     }
