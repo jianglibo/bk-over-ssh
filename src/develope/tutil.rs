@@ -15,7 +15,7 @@ pub fn load_demo_app_conf_sqlite(data_dir: Option<&str>, app_role: AppRole) -> A
 #[allow(dead_code)]
 pub fn load_demo_server_sqlite(app_conf: &AppConf, server_yml: Option<&str>) -> Server {
     let server_yml = server_yml.unwrap_or_else(|| "localhost.yml");
-    app_conf.load_server_from_yml(server_yml).unwrap()
+    app_conf.load_server_from_yml(server_yml, false).unwrap()
 }
 
 #[allow(dead_code)]

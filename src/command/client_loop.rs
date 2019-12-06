@@ -10,37 +10,29 @@ use super::*;
 pub fn client_push_loops(
     app_conf: &AppConf,
     server_yml: Option<&str>,
+    open_db: bool,
 ) -> Result<(), failure::Error> {
-    client_push_loops_follow_archive(app_conf, server_yml, false)
+
+        let servers = if let Some(server_yml) = server_yml {
+        vec![app_conf.load_server_from_yml(server_yml, open_db)?]
+    } else {
+        app_conf.load_all_server_yml(false)
+    };
+
+    
+    client_push_loop_by_spawn(servers, false, false)
 }
 
-pub fn client_push_loops_follow_archive(
-    app_conf: &AppConf,
-    server_yml: Option<&str>,
-    follow_archive: bool,
-) -> Result<(), failure::Error> {
-    let (progress_bar_join_handler, server_indicator_pairs) =
-        load_server_indicator_pairs(app_conf, server_yml)?;
-
-    client_push_loop_by_spawn(
-        server_indicator_pairs,
-        follow_archive,
-        app_conf.mini_app_conf.as_service,
-    )?;
-
-    wait_progress_bar_finish(progress_bar_join_handler);
-    Ok(())
-}
 
 /// If invoking with parameter as-service, this branch will be called.
 /// Because it is a long running thread, We should choose to connect to server when schedule time is meet.
 /// and disconnect from server when task is done.
 fn client_push_loop_by_spawn(
-    server_indicator_pairs: Vec<ServerAndIndicatorSqlite>,
+    servers: Vec<Server>,
     follow_archive: bool,
     as_service: bool,
 ) -> Result<(), failure::Error> {
-    let handlers = server_indicator_pairs
+    let handlers = servers
         .into_iter()
         .map(|pair| client_push_loop_by_spawn_do(pair, follow_archive, as_service))
         .filter_map(|i| i)
@@ -54,11 +46,10 @@ fn client_push_loop_by_spawn(
 }
 
 fn client_push_loop_by_spawn_do(
-    pair: ServerAndIndicatorSqlite,
+    server: Server,
     follow_archive: bool,
     as_service: bool,
 ) -> Option<thread::JoinHandle<()>> {
-    let (server, mut indicator) = pair;
     if as_service {
         Some(thread::spawn(move || {
             if let Some(schedule_item) = server.find_cron_by_name(server::CRON_NAME_SYNC_PULL_DIRS)
@@ -67,11 +58,11 @@ fn client_push_loop_by_spawn_do(
                 sched.add(Job::new(schedule_item.cron.parse().unwrap(), || {
                     match server.client_push_loop() {
                         Ok(_result) => {
-                            indicator.pb_finish();
+                            // indicator.pb_finish();
                             // actions::write_dir_sync_result(&server, result.as_ref());
                             // archive when succeeded.
                             if follow_archive {
-                                server.archive_local(&mut indicator).ok();
+                                server.archive_local().ok();
                                 server.prune_backups().ok();
                             }
                         }
@@ -89,11 +80,11 @@ fn client_push_loop_by_spawn_do(
     } else {
         match server.client_push_loop() {
             Ok(_result) => {
-                indicator.pb_finish();
+                // indicator.pb_finish();
                 // actions::write_dir_sync_result(&server, result.as_ref());
                 // archive when succeeded.
                 if follow_archive {
-                    server.archive_local(&mut indicator).ok();
+                    server.archive_local().ok();
                     server.prune_backups().ok();
                 }
             }
@@ -107,33 +98,22 @@ fn client_push_loop_by_spawn_do(
 pub fn client_pull_loops(
     app_conf: &AppConf,
     server_yml: Option<&str>,
+    open_db: bool,
 ) -> Result<(), failure::Error> {
-    client_pull_loops_follow_archive(app_conf, server_yml, false)
+    let servers = if let Some(server_yml) = server_yml {
+        vec![app_conf.load_server_from_yml(server_yml, open_db)?]
+    } else {
+        app_conf.load_all_server_yml(false)
+    };
+    client_pull_loop_by_spawn(servers, false, false)
 }
 
-pub fn client_pull_loops_follow_archive(
-    app_conf: &AppConf,
-    server_yml: Option<&str>,
-    follow_archive: bool,
-) -> Result<(), failure::Error> {
-    let (progress_bar_join_handler, server_indicator_pairs) =
-        load_server_indicator_pairs(app_conf, server_yml)?;
-
-    client_pull_loop_by_spawn(
-        server_indicator_pairs,
-        follow_archive,
-        app_conf.mini_app_conf.as_service,
-    )?;
-
-    wait_progress_bar_finish(progress_bar_join_handler);
-    Ok(())
-}
 
 /// If invoking with parameter as-service, this branch will be called.
 /// Because it is a long running thread, We should choose to connect to server when schedule time is meet.
 /// and disconnect from server when task is done.
 fn client_pull_loop_by_spawn(
-    server_indicator_pairs: Vec<ServerAndIndicatorSqlite>,
+    server_indicator_pairs: Vec<Server>,
     follow_archive: bool,
     as_service: bool,
 ) -> Result<(), failure::Error> {
@@ -151,11 +131,10 @@ fn client_pull_loop_by_spawn(
 }
 
 fn client_pull_loop_by_spawn_do(
-    pair: ServerAndIndicatorSqlite,
+    server: Server,
     follow_archive: bool,
     as_service: bool,
 ) -> Option<thread::JoinHandle<()>> {
-    let (server, mut indicator) = pair;
     if as_service {
         Some(thread::spawn(move || {
             if let Some(schedule_item) = server.find_cron_by_name(server::CRON_NAME_SYNC_PULL_DIRS)
@@ -164,11 +143,11 @@ fn client_pull_loop_by_spawn_do(
                 sched.add(Job::new(schedule_item.cron.parse().unwrap(), || {
                     match server.client_pull_loop() {
                         Ok(_result) => {
-                            indicator.pb_finish();
+                            // indicator.pb_finish();
                             // actions::write_dir_sync_result(&server, result.as_ref());
                             // archive when succeeded.
                             if follow_archive {
-                                server.archive_local(&mut indicator).ok();
+                                server.archive_local().ok();
                                 server.prune_backups().ok();
                             }
                         }
@@ -186,11 +165,11 @@ fn client_pull_loop_by_spawn_do(
     } else {
         match server.client_pull_loop() {
             Ok(_result) => {
-                indicator.pb_finish();
+                // indicator.pb_finish();
                 // actions::write_dir_sync_result(&server, result.as_ref());
                 // archive when succeeded.
                 if follow_archive {
-                    server.archive_local(&mut indicator).ok();
+                    server.archive_local().ok();
                     server.prune_backups().ok();
                 }
             }

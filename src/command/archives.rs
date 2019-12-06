@@ -2,8 +2,7 @@
 use log::*;
 use rayon::prelude::*;
 
-use crate::data_shape::{AppConf, Indicator, Server};
-use super::*;
+use crate::data_shape::{AppConf};
 
 pub fn archive_local(
     app_conf: &AppConf,
@@ -12,16 +11,12 @@ pub fn archive_local(
     prune_only: bool,
 ) -> Result<(), failure::Error>
 {
-    let mut servers: Vec<(Server, Indicator)> = Vec::new();
-
-    if let Some(server_yml) = server_yml {
-        let server = load_server_yml_by_name(app_conf, server_yml, true)?;
-        servers.push(server);
+    let servers = if let Some(server_yml) = server_yml {
+        let server = app_conf.load_server_from_yml(server_yml, false)?;
+        vec![server]
     } else {
-        servers.append(&mut load_all_server_yml(app_conf, true));
-    }
-    // all progress bars already create from here on.
-    let t = join_multi_bars(app_conf.progress_bar.clone());
+        app_conf.load_all_server_yml(false)
+    };
 
     if servers.is_empty() {
         println!("found no server yml!");
@@ -34,9 +29,9 @@ pub fn archive_local(
     #[allow(clippy::suspicious_map)]
     servers
         .into_par_iter()
-        .map(|(server, mut indicator)| {
+        .map(|server| {
             if prune {
-                if let Err(err) = server.archive_local(&mut indicator) {
+                if let Err(err) = server.archive_local() {
                     error!("{:?}", err);
                     eprintln!("{:?}", err);
                 }
@@ -49,14 +44,11 @@ pub fn archive_local(
                     error!("{:?}", err);
                     eprintln!("{:?}", err);
                 }
-            } else if let Err(err) = server.archive_local(&mut indicator) {
+            } else if let Err(err) = server.archive_local() {
                 error!("{:?}", err);
                 eprintln!("{:?}", err);
             }
-            indicator.pb_finish();
         })
         .count();
-
-    wait_progress_bar_finish(t);
     Ok(())
 }

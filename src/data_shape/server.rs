@@ -178,7 +178,8 @@ impl Server {
                 .open(cf.as_path())
                 .expect("last_counting_file opened.");
             let mut s = String::new();
-            f.read_to_string(&mut s).expect("read last counting file to string.");
+            f.read_to_string(&mut s)
+                .expect("read last counting file to string.");
             s.trim()
                 .parse::<u64>()
                 .expect("last_counting_file content parse to u64.")
@@ -451,16 +452,17 @@ impl Server {
 
     /// Archive need not to schedule standalone.
     /// Because of conflict with the sync operation.
-    pub fn archive_local(&self, pb: &mut Indicator) -> Result<(), failure::Error> {
+    pub fn archive_local(&self) -> Result<(), failure::Error> {
         info!(
             "start archive_local on server: {} at: {}",
             self.get_host(),
             Local::now()
         );
+        let mut pb = Indicator::new(None);
         let cur = if self.app_conf.archive_cmd.is_empty() {
-            self.archive_internal(pb)?
+            self.archive_internal(&mut pb)?
         } else {
-            self.archive_out(pb)?
+            self.archive_out(&mut pb)?
         };
         let nf = self.next_archive_file();
         trace!("move fie to {:?}", nf);
@@ -681,8 +683,7 @@ impl Server {
         trace!("invoke remote: {}", cmd);
         channel.exec(&cmd).expect("start remote server-loop");
         let file_count = self.read_last_file_count();
-        let mut cppb =
-            TransferFileProgressBar::new(file_count, self.app_conf.show_pb);
+        let mut cppb = TransferFileProgressBar::new(file_count, self.app_conf.show_pb);
         let mut message_hub = SshChannelMessageHub::new(channel);
 
         let mut new_file_count = 0_u64;

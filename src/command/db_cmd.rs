@@ -34,8 +34,8 @@ pub fn create_db<'a>(
         if "sqlite" == db_type {
             // create server's db.
             if let Some(server_yml) = sub_matches.value_of("server-yml") {
-                let (mut server, _indicator) =
-                    load_server_yml_by_name(&app_conf, server_yml, false)?;
+                
+                let mut server = app_conf.load_server_from_yml(server_yml, true)?;
                 if force {
                     info!("removing server side db file: {:?}", server.get_db_file());
                     fs::remove_file(server.get_db_file()).ok();

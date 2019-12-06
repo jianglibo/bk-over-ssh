@@ -1,4 +1,4 @@
-use crate::data_shape::{string_path, Indicator, Server, ServerYml};
+use crate::data_shape::{string_path, Server, ServerYml};
 use crate::db_accesses::{SqliteDbAccess};
 use indicatif::MultiProgress;
 use log::*;
@@ -409,23 +409,23 @@ impl AppConf {
         Ok(())
     }
 
-    pub fn load_server_yml(
-        &self,
-        yml_file_name: impl AsRef<str>,
-    ) -> Result<(Server, Indicator), failure::Error> {
-        let server = self.load_server_from_yml(yml_file_name.as_ref())?;
-        if self.mini_app_conf.verbose {
-            eprintln!(
-                "load server yml from: {:?}",
-                server.yml_location.as_ref().map(|pb| pb.as_os_str())
-            );
-        }
-        let indicator = Indicator::new(self.progress_bar.clone());
-        Ok((server, indicator))
-    }
+    // pub fn load_server_yml(
+    //     &self,
+    //     yml_file_name: impl AsRef<str>,
+    // ) -> Result<(Server, Indicator), failure::Error> {
+    //     let server = self.load_server_from_yml(yml_file_name.as_ref())?;
+    //     if self.mini_app_conf.verbose {
+    //         eprintln!(
+    //             "load server yml from: {:?}",
+    //             server.yml_location.as_ref().map(|pb| pb.as_os_str())
+    //         );
+    //     }
+    //     let indicator = Indicator::new(self.progress_bar.clone());
+    //     Ok((server, indicator))
+    // }
 
     /// load all .yml file under servers directory.
-    pub fn load_all_server_yml(&self) -> Vec<(Server, Indicator)> {
+    pub fn load_all_server_yml(&self, open_db: bool) -> Vec<Server> {
         trace!("servers_conf_dir is: {:?}", self.servers_conf_dir);
         if let Ok(read_dir) = self.servers_conf_dir.read_dir() {
             read_dir
@@ -444,7 +444,7 @@ impl AppConf {
                     Ok(astr) => Some(astr),
                 })
                 .filter(|s|s.ends_with(".yml") || s.ends_with(".yaml"))
-                .map(|astr| self.load_server_yml(astr))
+                .map(|astr| self.load_server_from_yml(astr, open_db))
                 .filter_map(|rr| match rr {
                     Err(err) => {
                         warn!("load_server_yml failed: {:?}", err);
@@ -469,6 +469,7 @@ impl AppConf {
     pub fn load_server_from_yml(
         &self,
         name: impl AsRef<str>,
+        open_db: bool,
     ) -> Result<Server, failure::Error> {
         let name = name.as_ref();
         let mut server_yml_path = Path::new(name).to_path_buf();

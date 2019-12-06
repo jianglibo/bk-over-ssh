@@ -187,7 +187,7 @@ fn main_entry<'a>(
             if server_yml.is_none() {
                 app_conf.progress_bar.take();
             }
-            command::client_push_loops(&app_conf, server_yml)?;
+            command::client_push_loops(&app_conf, server_yml, false)?;
         }
         ("client-pull-loop", Some(sub_matches)) => {
             app_conf.mini_app_conf.app_role.replace(AppRole::PullHub);
@@ -195,7 +195,7 @@ fn main_entry<'a>(
             if server_yml.is_none() {
                 app_conf.progress_bar.take();
             }
-            command::client_pull_loops(&app_conf, server_yml)?;
+            command::client_pull_loops(&app_conf, server_yml, false)?;
         }
         ("send-test-mail", Some(sub_matches)) => {
             let to = sub_matches.value_of("to").unwrap();
@@ -205,8 +205,9 @@ fn main_entry<'a>(
             command::misc::polling_file(sub_matches)?;
         }
         ("copy-executable", Some(sub_matches)) => {
-            let (mut server, _indicator) =
-                command::load_server_yml(app_conf, sub_matches.value_of("server-yml"), false)?;
+            let server_yml = sub_matches.value_of("server-yml").expect("server-yml should be present");
+            let mut server = app_conf.load_server_from_yml(server_yml, false)?;
+
             let executable = sub_matches
                 .value_of("executable")
                 .expect("executable paramter missing");
@@ -221,8 +222,8 @@ fn main_entry<'a>(
             );
         }
         ("copy-server-yml", Some(sub_matches)) => {
-            let (mut server, _indicator) =
-                command::load_server_yml(app_conf, sub_matches.value_of("server-yml"), false)?;
+            let server_yml = sub_matches.value_of("server-yml").expect("server-yml should be present");
+            let mut server = app_conf.load_server_from_yml(server_yml, false)?;
             let remote = server.get_remote_server_yml();
             let local = server
                 .yml_location
@@ -271,8 +272,8 @@ fn main_entry<'a>(
             )?;
         }
         ("verify-server-yml", Some(sub_matches)) => {
-            let (server, _indicator) =
-                command::load_server_yml(app_conf, sub_matches.value_of("server-yml"), true)?;
+            let server_yml = sub_matches.value_of("server-yml").expect("server-yml should be present");
+            let server = app_conf.load_server_from_yml(server_yml, false)?;
             command::misc::verify_server_yml(server)?;
         }
         ("completions", Some(sub_matches)) => {
