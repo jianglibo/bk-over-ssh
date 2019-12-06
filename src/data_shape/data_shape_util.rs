@@ -2,6 +2,7 @@ use crate::actions::hash_file_sha1;
 use log::*;
 use std::path::Path;
 use std::time::SystemTime;
+use super::{FullPathFileItemError};
 
 pub struct FileMeta {
     pub sha1: Option<String>,
@@ -10,10 +11,10 @@ pub struct FileMeta {
     pub created: Option<u64>,
 }
 
-pub fn get_file_meta(file_path: impl AsRef<Path>, skip_sha1: bool) -> Option<FileMeta> {
+pub fn get_file_meta(file_path: impl AsRef<Path>, skip_sha1: bool) -> Result<FileMeta, failure::Error> {
     let lp = file_path.as_ref();
     if !lp.exists() {
-        return None;
+        bail!(FullPathFileItemError::NotExist(lp.to_path_buf()));
     }
     match lp.metadata() {
         Ok(mt) => {
@@ -33,7 +34,7 @@ pub fn get_file_meta(file_path: impl AsRef<Path>, skip_sha1: bool) -> Option<Fil
             } else {
                 None
             };
-            Some(FileMeta {
+            Ok(FileMeta {
                 len,
                 sha1,
                 modified,
@@ -42,7 +43,7 @@ pub fn get_file_meta(file_path: impl AsRef<Path>, skip_sha1: bool) -> Option<Fil
         }
         Err(err) => {
             error!("read meta failed: {}", err);
-            None
+            bail!(FullPathFileItemError::Meta(err));
         }
     }
 }

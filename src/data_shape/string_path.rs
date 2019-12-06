@@ -3,6 +3,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 use std::path::Path;
 use std::{fs, io};
+use super::{FullPathFileItemError};
 
 pub const VERBATIM_PREFIX: &str = r#"\\?\"#;
 
@@ -72,7 +73,7 @@ impl SlashPath {
     }
 
     /// relativelize the path.
-    pub fn strip_prefix(&self, full_path: impl AsRef<Path>) -> Option<String> {
+    pub fn strip_prefix(&self, full_path: impl AsRef<Path>) -> Result<String, failure::Error> {
         let full = SlashPath::from_path(full_path.as_ref());
         let len = self.as_str().len();
         let pos = if len == 1 {
@@ -83,12 +84,12 @@ impl SlashPath {
         full.map(|f| f.as_str().split_at(pos).1.to_owned())
     }
 
-    pub fn from_path(path: &Path) -> Option<Self> {
+    pub fn from_path(path: &Path) -> Result<Self, failure::Error> {
         match path.to_str() {
-            Some(s) => Some(SlashPath::new(s)),
+            Some(s) => Ok(SlashPath::new(s)),
             None => {
                 error!("path to string failed: {:?}", path);
-                None
+                bail!(FullPathFileItemError::Encode(path.to_path_buf()));
             }
         }
     }
@@ -131,6 +132,7 @@ impl SlashPath {
         &Path::new(&self.slash)
     }
 
+    #[allow(dead_code)]
     pub fn exists(&self) -> bool {
         Path::new(&self.slash).exists()
     }

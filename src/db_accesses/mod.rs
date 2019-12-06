@@ -3,10 +3,10 @@ pub mod sqlite_access;
 
 use crate::actions::hash_file_sha1;
 use crate::data_shape::SlashPath;
-use chrono::{DateTime, SecondsFormat, Utc, Local};
+use chrono::{DateTime, Local, SecondsFormat, Utc};
 use log::*;
 use r2d2;
-use std::path::{PathBuf};
+use std::path::PathBuf;
 
 #[derive(Debug)]
 pub enum DbAction {
@@ -100,19 +100,18 @@ impl RelativeFileItemInDb {
                 } else {
                     Option::<String>::None
                 };
-                if let Some(bp) = base_path.strip_prefix(path.as_path()) {
-                Some(Self {
-                    id: 0,
-                    path: bp,
-                    sha1,
-                    len: metadata.len() as i64,
-                    modified: metadata.modified().ok().map(Into::into),
-                    created: metadata.created().ok().map(Into::into),
-                    dir_id,
-                    changed: false,
-                    confirmed: false,
-                })
-
+                if let Ok(bp) = base_path.strip_prefix(path.as_path()) {
+                    Some(Self {
+                        id: 0,
+                        path: bp,
+                        sha1,
+                        len: metadata.len() as i64,
+                        modified: metadata.modified().ok().map(Into::into),
+                        created: metadata.created().ok().map(Into::into),
+                        dir_id,
+                        changed: false,
+                        confirmed: false,
+                    })
                 } else {
                     None
                 }

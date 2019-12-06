@@ -4,8 +4,18 @@ use crate::data_shape::data_shape_util;
 use crate::protocol::TransferType;
 use serde::{Deserialize, Serialize};
 use std::convert::TryInto;
-use std::path::Path;
-use std::path::PathBuf;
+use std::io;
+use std::path::{Path, PathBuf};
+
+#[derive(Debug, Fail)]
+pub enum FullPathFileItemError {
+    #[fail(display = "invalid encode: {:?}", _0)]
+    Encode(PathBuf),
+    #[fail(display = "get meta failed: {:?}", _0)]
+    Meta(#[fail(cause)] io::Error),
+    #[fail(display = "file not exist: {:?}", _0)]
+    NotExist(PathBuf),
+}
 
 #[derive(Debug)]
 pub enum FileChanged {
@@ -38,42 +48,27 @@ impl FullPathFileItem {
     /// for pushing the server_distinct_id is necessory because there is no way to determine where do the file come from.
     /// but for pull, there is an ip address as distinctness, so it's unnecessary.
     pub fn create_item_from_path(
-        dir_to_read: &SlashPath,
+        from_dir: &SlashPath,
         absolute_file_to_read: PathBuf,
-        server_distinct_id: impl AsRef<str>,
+        to_dir_base: &SlashPath,
         skip_sha1: bool,
-    ) -> Option<Self> {
-        let server_distinct_id = SlashPath::new(server_distinct_id);
-        if let Some(fmeta) =
-            data_shape_util::get_file_meta(absolute_file_to_read.as_path(), skip_sha1)
-        {
-            if let Some(relative_path) = dir_to_read
-                .parent()
-                .expect("dir to backup shouldn't be the root.")
-                .strip_prefix(absolute_file_to_read.as_path())
-            {
-                if let Some(from_path) = SlashPath::from_path(absolute_file_to_read.as_path()) {
-                    Some(Self {
-                        from_path,
-                        to_path: server_distinct_id.join(relative_path),
-                        sha1: fmeta.sha1,
-                        len: fmeta.len,
-                        modified: fmeta.modified,
-                        created: fmeta.created,
-                    })
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        } else {
-            None
-        }
+    ) -> Result<Self, failure::Error> {
+        let fmeta = data_shape_util::get_file_meta(absolute_file_to_read.as_path(), skip_sha1)?;
+        let relative_path = from_dir.strip_prefix(absolute_file_to_read.as_path())?;
+        let from_path = SlashPath::from_path(absolute_file_to_read.as_path())?;
+
+        Ok(Self {
+            from_path,
+            to_path: to_dir_base.join(relative_path),
+            sha1: fmeta.sha1,
+            len: fmeta.len,
+            modified: fmeta.modified,
+            created: fmeta.created,
+        })
     }
 
     pub fn changed(&self, file_path: impl AsRef<Path>) -> FileChanged {
-        if let Some(fmeta) = data_shape_util::get_file_meta(file_path, self.sha1.is_none()) {
+        if let Ok(fmeta) = data_shape_util::get_file_meta(file_path, self.sha1.is_none()) {
             if fmeta.len != self.len {
                 FileChanged::Len(fmeta.len, self.len)
             } else if fmeta.modified != self.modified {
@@ -105,8 +100,8 @@ impl FullPathFileItem {
 mod tests {
     use super::*;
     use crate::data_shape::Directory;
-    use crate::log_util;
     use crate::develope::tutil;
+    use crate::log_util;
 
     fn log() {
         log_util::setup_logger_detail(
@@ -124,15 +119,15 @@ mod tests {
         log();
 
         let tdir = tutil::TestDir::new();
-        let dir = tdir.create_sub_dir("a-dir/bbb");
+        let dir_pb = tdir.create_sub_dir("a-dir/bbb");
 
-        tutil::make_a_file_with_content(dir.as_path(), "a.txt", "abc")?;
-        tutil::make_a_file_with_content(dir.as_path(), "a.png", "abc")?;
-        tutil::make_a_file_with_content(dir.as_path(), "a.log", "abc")?;
-        tutil::make_a_file_with_content(dir.as_path(), "a.bak", "abc")?;
+        tutil::make_a_file_with_content(dir_pb.as_path(), "a.txt", "abc")?;
+        tutil::make_a_file_with_content(dir_pb.as_path(), "a.png", "abc")?;
+        tutil::make_a_file_with_content(dir_pb.as_path(), "a.log", "abc")?;
+        tutil::make_a_file_with_content(dir_pb.as_path(), "a.bak", "abc")?;
 
-
-        let yml = format!(r##"
+        let yml = format!(
+            r##"
 to_dir: ~
 from_dir: {}
 includes:
@@ -141,7 +136,9 @@ includes:
 excludes:
   - "*.log"
   - "*.bak"
-"##, dir.to_string_lossy());
+"##,
+            dir_pb.to_string_lossy()
+        );
 
         let mut dir = serde_yaml::from_str::<Directory>(&yml)?;
         println!("{}", dir.from_dir);
@@ -157,6 +154,7 @@ excludes:
 
         let files = dir
             .file_item_iter("abc", false)
+            .filter_map(|k| k.ok())
             .map(|it| {
                 println!("to_path: {:?}", it.to_path.slash);
                 it
@@ -165,11 +163,48 @@ excludes:
 
         assert_eq!(files.len(), 2);
         let s = &files.get(0).unwrap().to_path.slash;
-        eprintln!("{}", s);
+        eprintln!("the final to_path is: {}", s);
         assert!(
             // s.starts_with("abc/a-dir/bbb"),
             s.starts_with("abc/bbb"), // need the result like above.
-            "should starts_with fixtures/"
+            "should starts_with abc/bbb"
+        );
+
+        let yml = format!(
+            r##"
+to_dir: a-dir/bbb
+# if no to_dir the base should be 'bbb'
+from_dir: {}
+includes:
+  - "*.txt"
+  - "*.png"
+excludes:
+  - "*.log"
+  - "*.bak"
+"##,
+            dir_pb.to_string_lossy()
+        );
+
+        let mut dir = serde_yaml::from_str::<Directory>(&yml)?;
+        println!("{}", dir.from_dir);
+        dir.compile_patterns()?;
+
+        let files = dir
+            .file_item_iter("abc", false)
+            .filter_map(|k| k.ok())
+            .map(|it| {
+                println!("to_path: {:?}", it.to_path.slash);
+                it
+            })
+            .collect::<Vec<FullPathFileItem>>();
+
+        assert_eq!(files.len(), 2);
+        let s = &files.get(0).unwrap().to_path.slash;
+        eprintln!("the final to_path is: {}", s);
+        assert!(
+            // s.starts_with("abc/a-dir/bbb"),
+            s.starts_with("abc/a-dir/bbb"), // need the result like above.
+            "should starts_with abc/a-dir/bbb"
         );
         Ok(())
     }

@@ -286,11 +286,11 @@ impl Directory {
 
     fn file_item_iter_file_selector(
         &self,
-        server_distinct_id: String,
+        to_dir_base: SlashPath,
         dir_to_read: SlashPath,
         skip_sha1: bool,
         file_selector: &FileSelector,
-    ) -> impl Iterator<Item = FullPathFileItem> + '_ {
+    ) -> impl Iterator<Item = Result<FullPathFileItem, failure::Error>> + '_ {
         match file_selector {
             FileSelector::Latest(num) => {
                 WalkDir::new(dir_to_read.as_path())
@@ -311,11 +311,11 @@ impl Directory {
                     .filter_entry(|e| e.file_type().is_file())
                     .filter_map(|e| e.ok())
                     .filter_map(|dir_entry| dir_entry.path().canonicalize().ok())
-                    .filter_map(move |absolute_file_path| {
+                    .map(move |absolute_file_path| {
                         FullPathFileItem::create_item_from_path(
                             &dir_to_read,
                             absolute_file_path,
-                            &server_distinct_id,
+                            &to_dir_base,
                             skip_sha1,
                         )
                     })
@@ -335,10 +335,10 @@ impl Directory {
 
     fn file_item_iter_no_file_selector(
         &self,
-        server_distinct_id: String,
+        to_dir_base: SlashPath,
         dir_to_read: SlashPath,
         skip_sha1: bool,
-    ) -> impl Iterator<Item = FullPathFileItem> + '_ {
+    ) -> impl Iterator<Item = Result<FullPathFileItem, failure::Error>> + '_ {
         let includes_patterns = self.includes_patterns.clone();
         let excludes_patterns = self.excludes_patterns.clone();
         let excludes = self
@@ -374,11 +374,11 @@ impl Directory {
                     excludes_patterns.as_ref(),
                 )
             })
-            .filter_map(move |absolute_file_path| {
+            .map(move |absolute_file_path| {
                 FullPathFileItem::create_item_from_path(
                     &dir_to_read,
                     absolute_file_path,
-                    &server_distinct_id,
+                    &to_dir_base,
                     skip_sha1,
                 )
             })
@@ -389,23 +389,27 @@ impl Directory {
     pub fn file_item_iter(
         &self,
         server_distinct_id: impl AsRef<str>,
-        // dir_to_read: &SlashPath,
         skip_sha1: bool,
-    ) -> Box<dyn Iterator<Item = FullPathFileItem> + '_> {
-        let server_distinct_id = server_distinct_id.as_ref().to_string();
+    ) -> Box<dyn Iterator<Item = Result<FullPathFileItem, failure::Error>> + '_> {
         let dir_to_read = self.from_dir.clone();
+
+        let to_dir_base = SlashPath::new(server_distinct_id.as_ref()).join_another(&if self.to_dir.is_empty() {
+            SlashPath::new(self.from_dir.get_last_name())
+        } else {
+            self.to_dir.clone()
+        });
 
         if let Some(file_selector) = self.file_selector.as_ref() {
             trace!("find file_selector");
             Box::new(self.file_item_iter_file_selector(
-                server_distinct_id,
+                to_dir_base,
                 dir_to_read,
                 skip_sha1,
                 file_selector,
             ))
         } else {
             Box::new(self.file_item_iter_no_file_selector(
-                server_distinct_id,
+                to_dir_base,
                 dir_to_read,
                 skip_sha1,
             ))
@@ -572,6 +576,7 @@ excludes:
         d.compile_patterns()?;
         let files = d
             .file_item_iter("abc", false)
+            .filter_map(|k|k.ok())
             .collect::<Vec<FullPathFileItem>>();
         assert_eq!(files.len(), 3);
 
@@ -602,6 +607,7 @@ excludes:
         d.compile_patterns()?;
         let files = d
             .file_item_iter("abc", false)
+            .filter_map(|k|k.ok())
             .collect::<Vec<FullPathFileItem>>();
         assert_eq!(files.len(), 2);
         let a1 = &files.get(0).as_ref().unwrap().to_path;

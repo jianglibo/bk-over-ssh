@@ -180,22 +180,29 @@ pub fn server_send_loop(skip_sha1: bool) -> Result<(), failure::Error> {
         trace!("start proceess directory: {:?}", dir);
         let push_file_items = dir.file_item_iter("", skip_sha1);
         for fi in push_file_items {
-            message_hub.write_and_flush(&fi.as_sent_bytes())?;
-            match message_hub.read_type_byte().expect("read type byte.") {
-                TransferType::FileItemChanged => {
-                    let change_message = StringMessage::parse(&mut message_hub)?;
-                    trace!("changed file: {}.", change_message.content);
-                    message_hub.copy_from_file(&mut buf, &fi, None)?;
-                    trace!("send file content done.");
+            match fi {
+                Ok(fi) => {
+                    message_hub.write_and_flush(&fi.as_sent_bytes())?;
+                    match message_hub.read_type_byte().expect("read type byte.") {
+                        TransferType::FileItemChanged => {
+                            let change_message = StringMessage::parse(&mut message_hub)?;
+                            trace!("changed file: {}.", change_message.content);
+                            message_hub.copy_from_file(&mut buf, &fi, None)?;
+                            trace!("send file content done.");
+                        }
+                        TransferType::FileItemUnchanged => {
+                            trace!("unchanged file.");
+                        }
+                        TransferType::StringError => {
+                            let ss = StringMessage::parse(&mut message_hub)?;
+                            error!("string error: {:?}", ss.content);
+                        }
+                        i => error!("got unexpected transfer type {:?}", i),
+                    }
                 }
-                TransferType::FileItemUnchanged => {
-                    trace!("unchanged file.");
+                Err(e) => {
+                    error!("{:?}", e);
                 }
-                TransferType::StringError => {
-                    let ss = StringMessage::parse(&mut message_hub)?;
-                    error!("string error: {:?}", ss.content);
-                }
-                i => error!("got unexpected transfer type {:?}", i),
             }
         }
     }

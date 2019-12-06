@@ -287,7 +287,6 @@ impl Server {
         self.server_yml.directories = directories;
     }
 
-
     /// get archives_dir , archive_prefix, archive_postfix from server yml configuration file.
     fn next_archive_file(&self) -> PathBuf {
         rolling_files::get_next_file_name(
@@ -660,26 +659,33 @@ impl Server {
             let push_file_items =
                 dir.file_item_iter(&self.app_conf.app_instance_id, self.app_conf.skip_sha1);
             for fi in push_file_items {
-                message_hub.write_and_flush(&fi.as_sent_bytes())?;
-                match message_hub.read_type_byte().expect("read type byte.") {
-                    TransferType::FileItemChanged => {
-                        let change_message = StringMessage::parse(&mut message_hub)?;
-                        trace!("changed file: {}.", change_message.content);
-                        cppb.push_one(fi.len, &fi);
-                        message_hub.copy_from_file(&mut buf, &fi, Some(&cppb))?;
-                        changed += 1;
-                        trace!("send file content done.");
+                match fi {
+                    Ok(fi) => {
+                        message_hub.write_and_flush(&fi.as_sent_bytes())?;
+                        match message_hub.read_type_byte().expect("read type byte.") {
+                            TransferType::FileItemChanged => {
+                                let change_message = StringMessage::parse(&mut message_hub)?;
+                                trace!("changed file: {}.", change_message.content);
+                                cppb.push_one(fi.len, &fi);
+                                message_hub.copy_from_file(&mut buf, &fi, Some(&cppb))?;
+                                changed += 1;
+                                trace!("send file content done.");
+                            }
+                            TransferType::FileItemUnchanged => {
+                                cppb.skip_one();
+                                unchanged += 1;
+                                trace!("unchanged file.");
+                            }
+                            TransferType::StringError => {
+                                let ss = StringMessage::parse(&mut message_hub)?;
+                                error!("string error: {:?}", ss.content);
+                            }
+                            i => error!("got unexpected transfer type {:?}", i),
+                        }
                     }
-                    TransferType::FileItemUnchanged => {
-                        cppb.skip_one();
-                        unchanged += 1;
-                        trace!("unchanged file.");
+                    Err(err) => {
+                        error!("{:?}", err);
                     }
-                    TransferType::StringError => {
-                        let ss = StringMessage::parse(&mut message_hub)?;
-                        error!("string error: {:?}", ss.content);
-                    }
-                    i => error!("got unexpected transfer type {:?}", i),
                 }
             }
         }
@@ -698,10 +704,8 @@ mod tests {
     // use crate::db_accesses::{DbAccess, SqliteDbAccess};
     use crate::develope::tutil;
     use crate::log_util;
-    
-    
     use std::fs;
-    use std::io::{Write};
+    use std::io::Write;
 
     fn log() {
         log_util::setup_logger_detail(

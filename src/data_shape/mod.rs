@@ -27,7 +27,7 @@ pub use disk_directory::Directory;
 // pub use file_item_directory::{FileItemDirectory, FileItemDirectories, PrimaryFileItem};
 pub use indicator::{Indicator, PbProperties};
 // pub use relative_file_item::{RelativeFileItem};
-pub use full_path_item::{FullPathFileItem, FileChanged};
+pub use full_path_item::{FullPathFileItem, FileChanged, FullPathFileItemError};
 pub use server::{Server, ServerYml};
 pub use sha1_reader::Sha1Reader;
 pub use string_path::SlashPath;
