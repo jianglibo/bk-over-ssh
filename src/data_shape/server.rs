@@ -170,6 +170,11 @@ impl Server {
         Ok(())
     }
 
+    pub fn get_access_log(&self) -> Result<fs::File, failure::Error> {
+        let cf = self.working_dir.join("sync.log");
+        Ok(fs::OpenOptions::new().create(true).write(true).open(cf)?)
+    }
+
     pub fn read_last_file_count(&self) -> u64 {
         let cf = self.working_dir.join("last_counting.txt");
         if cf.exists() {
@@ -545,6 +550,8 @@ impl Server {
         trace!("invoke remote: {}", cmd);
         channel.exec(&cmd).expect("start remote server-loop");
 
+        let mut sync_log = self.get_access_log()?;
+
         let mut message_hub = SshChannelMessageHub::new(channel);
 
         let server_yml = StringMessage::from_path(
@@ -554,9 +561,6 @@ impl Server {
                 .as_path(),
         );
         message_hub.write_and_flush(server_yml.as_server_yml_sent_bytes().as_slice())?;
-
-        // let file_count = U64Message::parse(&mut message_hub)?;
-        // trace!("got file_count: {}", file_count.value);
 
         let my_dir = SlashPath::from_path(self.get_my_dir())
             .expect("my_dir should exists.")
@@ -621,6 +625,7 @@ impl Server {
                     // file item is from another side.
                     if let (Some(df), Some(file_item)) = (last_df.take(), last_file_item.take()) {
                         cppb.push_one(file_item.len, &file_item);
+                        writeln!(sync_log, "{}", file_item.to_path).ok();
                         trace!("copy to file: {:?}", df.as_path());
                         match message_hub.copy_to_file(
                             &mut buf,
@@ -654,6 +659,10 @@ impl Server {
                         error!("empty last_df.");
                     }
                 }
+                TransferType::StringError => { // must read it or else the stream will stall.
+                    let ss = StringMessage::parse(&mut message_hub)?;
+                    error!("string error: {:?}", ss.content);
+                }
                 TransferType::RepeatDone | TransferType::Eof => {
                     info!("got eof, exiting.");
                     break;
@@ -666,6 +675,7 @@ impl Server {
         }
         cppb.pb.finish_with_message("done.");
         self.write_last_file_count(new_file_count);
+        sync_log.flush()?;
         message_hub.close()?;
         Ok(None)
     }

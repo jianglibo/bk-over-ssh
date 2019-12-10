@@ -60,6 +60,9 @@ version = "~2.33"
 default-features = false
 features = ["suggestions", "color", "yaml"]
 
+[dependencies.encoding_rs]
+version = "0.8.20"
+
 # https://docs.rs/vcpkg/0.2.7/vcpkg/
 # https://github.com/microsoft/vcpkg/blob/master/docs/examples/installing-and-using-packages.md
 # set env, export VCPKGRS_DYNAMIC=1, Set-Item -path env:TEAMS -value ($env:TEAMS + 'finance')
