@@ -23,8 +23,6 @@ use std::{fs, io, io::Write};
 use tar::Builder;
 
 pub const CRON_NAME_SYNC_PULL_DIRS: &str = "sync-pull-dirs";
-// pub const CRON_NAME_SYNC_PUSH_DIRS: &str = "sync-push-dirs";
-// const FILE_LIST_FILE_NAME: &str = "file_list_file.txt";
 
 #[derive(Deserialize, Debug, Serialize)]
 #[serde(rename_all(deserialize = "snake_case"))]
@@ -121,19 +119,6 @@ impl Server {
                 .expect("compile_patterns should succeeded.")
         });
 
-        // if let Some(app_role) = app_conf.app_role.as_ref() {
-        //     if let AppRole::ActiveLeaf = app_role {
-        //         let remote_home = server_yml.remote_exec.as_str();
-        //         server_yml.directories.iter_mut().try_for_each(|d| {
-        //             d.normalize_push(
-        //                 directories_dir.as_path(),
-        //                 app_conf.app_instance_id.as_str(),
-        //                 remote_home,
-        //             )
-        //         })?;
-        //     }
-        // }
-
         Ok(Self {
             server_yml,
             db_access: None,
@@ -203,14 +188,6 @@ impl Server {
             .expect("last_counting_file opened.");
         write!(f, "{}", count).expect("wrote file count to file.");
     }
-
-    // pub fn count_from_dir_files(&self) -> u64 {
-    //     self.server_yml
-    //         .directories
-    //         .iter()
-    //         .map(|dir| dir.file_item_iter("", false).count() as u64)
-    //         .sum()
-    // }
 
     /// For app_role is ReceiveHub, remote exec is from user's home directory.
     pub fn get_remote_exec(&self) -> SlashPath {

@@ -143,9 +143,6 @@ fn client_pull_loop_by_spawn_do(
                 sched.add(Job::new(schedule_item.cron.parse().unwrap(), || {
                     match server.client_pull_loop() {
                         Ok(_result) => {
-                            // indicator.pb_finish();
-                            // actions::write_dir_sync_result(&server, result.as_ref());
-                            // archive when succeeded.
                             if follow_archive {
                                 server.archive_local().ok();
                                 server.prune_backups().ok();
@@ -165,9 +162,6 @@ fn client_pull_loop_by_spawn_do(
     } else {
         match server.client_pull_loop() {
             Ok(_result) => {
-                // indicator.pb_finish();
-                // actions::write_dir_sync_result(&server, result.as_ref());
-                // archive when succeeded.
                 if follow_archive {
                     server.archive_local().ok();
                     server.prune_backups().ok();

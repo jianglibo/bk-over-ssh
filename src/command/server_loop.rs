@@ -216,7 +216,7 @@ pub fn server_send_loop(skip_sha1: bool) -> Result<(), failure::Error> {
 #[cfg(test)]
 mod tests {
     use std::path::Path;
-    use std::ffi::OsStr;
+    use std::ffi::OsString;
 
     #[test]
     fn t_osstr_path() -> Result<(), failure::Error> {
@@ -273,6 +273,23 @@ mod tests {
             use std::os::unix::ffi::OsStrExt;
             let bytes = os_str.as_bytes();
             let (cow, encoding_used, had_errors) = SHIFT_JIS.decode(bytes);
+        }
+
+        #[cfg(windows)]
+        {
+            use std::os::windows::ffi::OsStrExt;
+            use std::os::windows::ffi::OsStringExt;
+            use std::os::windows::ffi::EncodeWide;
+
+            let source = [0x0055, 0x006E, 0x0069, 0x0063, 0x006F, 0x0064, 0x0065];
+            // Re-encodes an OsStr as a wide character sequence, i.e., potentially ill-formed UTF-16
+            let string = OsString::from_wide(&source[..]);
+
+            eprintln!("from_wide: {:?}", string);
+
+            let result: Vec<u16> = string.encode_wide().collect();
+            assert_eq!(&source[..], &result[..]);
+
         }
 
 
