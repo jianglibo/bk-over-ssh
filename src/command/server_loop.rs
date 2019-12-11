@@ -127,6 +127,8 @@ pub fn server_receive_loop() -> Result<(), failure::Error> {
     Ok(())
 }
 
+/// When sending the iteration happened at server side which may meet malformed path names.
+/// send these malfromed path names to the client side, log it, analysys it, solve it.
 pub fn server_send_loop(skip_sha1: bool) -> Result<(), failure::Error> {
     let stdin = io::stdin();
     let stdout = io::stdout();
@@ -201,6 +203,7 @@ pub fn server_send_loop(skip_sha1: bool) -> Result<(), failure::Error> {
                     }
                 }
                 Err(e) => {
+                    message_hub.write_error_message(format!("{}", e))?;
                     error!("{:?}", e);
                 }
             }
@@ -208,4 +211,72 @@ pub fn server_send_loop(skip_sha1: bool) -> Result<(), failure::Error> {
     }
     message_hub.write_and_flush(&[TransferType::RepeatDone.to_u8()])?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+    use std::ffi::OsStr;
+
+    #[test]
+    fn t_osstr_path() -> Result<(), failure::Error> {
+        #[cfg(any(unix, target_os = "redox"))]
+        {
+            use std::ffi::OsStr;
+            use std::os::unix::ffi::OsStrExt;
+
+            // Here, the values 0x66 and 0x6f correspond to 'f' and 'o'
+            // respectively. The value 0x80 is a lone continuation byte, invalid
+            // in a UTF-8 sequence.
+            let source = [0x66, 0x6f, 0x80, 0x6f];
+            let os_str = OsStr::from_bytes(&source[..]);
+
+            assert_eq!(os_str.to_string_lossy(), "fo�o");
+        }
+        #[cfg(windows)]
+        {
+            use std::ffi::OsString;
+            use std::os::windows::prelude::*;
+
+            // Here the values 0x0066 and 0x006f correspond to 'f' and 'o'
+            // respectively. The value 0xD800 is a lone surrogate half, invalid
+            // in a UTF-16 sequence.
+            let source = [0x0066, 0x006f, 0xD800, 0x006f];
+            let os_string = OsString::from_wide(&source[..]);
+            let os_str = os_string.as_os_str();
+
+            assert_eq!(os_str.to_string_lossy(), "fo�o");
+        }
+
+
+        use encoding_rs::*;
+
+        let expectation = "\u{30CF}\u{30ED}\u{30FC}\u{30FB}\u{30EF}\u{30FC}\u{30EB}\u{30C9}";
+        let bytes = b"\x83n\x83\x8D\x81[\x81E\x83\x8F\x81[\x83\x8B\x83h";
+
+        let (cow, encoding_used, had_errors) = SHIFT_JIS.decode(bytes);
+        eprintln!("{}", cow);
+        eprintln!("{}", expectation);
+        assert_eq!(&cow[..], expectation);
+        assert_eq!(encoding_used, SHIFT_JIS);
+        assert!(!had_errors);
+        // let os_str = OsStr::from_bytes(bytes);
+        // let path = Path::new(os_str);
+
+        // walkdir::DirEntry path()
+
+        let path = Path::new("abc");
+        let os_str = path.as_os_str();
+
+        #[cfg(any(unix, target_os = "redox"))]
+        {
+            use std::os::unix::ffi::OsStrExt;
+            let bytes = os_str.as_bytes();
+            let (cow, encoding_used, had_errors) = SHIFT_JIS.decode(bytes);
+        }
+
+
+
+        Ok(())
+    }
 }
