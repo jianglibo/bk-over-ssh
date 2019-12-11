@@ -504,32 +504,36 @@ impl AppConf {
             }
         };
 
-        let data_dir = self.data_dir_full_path.as_path();
+        let conf_data_dir = self.data_dir_full_path.as_path();
 
-        let servers_data_dir = if let Some(app_role) = self.mini_app_conf.app_role.as_ref() {
+        let data_dir_with_app_role = if let Some(app_role) = self.mini_app_conf.app_role.as_ref() {
             match app_role {
-                AppRole::PullHub => data_dir.join(PULL_DATA),
-                AppRole::ActiveLeaf => data_dir.join(PUSH_DATA),
+                AppRole::PullHub => conf_data_dir.join(PULL_DATA),
+                AppRole::ActiveLeaf => conf_data_dir.join(PUSH_DATA),
             }
         } else {
-            data_dir.to_path_buf()
+            conf_data_dir.to_path_buf()
         };
 
-        if !servers_data_dir.exists() {
-            fs::create_dir_all(&servers_data_dir)?;
+        trace!("conf_data_dir: {:?}", conf_data_dir);
+        trace!("data_dir_with_app_role: {:?}", data_dir_with_app_role);
+
+        if !data_dir_with_app_role.exists() {
+            fs::create_dir_all(&data_dir_with_app_role)?;
         }
 
         // Server's my_dir is composed of the 'data' dir and the host name of the server.
         // But for passive_leaf which host name it is?
         // We must use command line app_instance_id to override the value in the app_conf_yml,
         // Then use app_instance_id as my_dir.
-        let my_dir = if let Some(app_role) = self.mini_app_conf.app_role.as_ref() {
-            match app_role {
-                _ => servers_data_dir.join(&server_yml.host),
-            }
-        } else {
-            servers_data_dir.join(&server_yml.host)
-        };
+        let my_dir = data_dir_with_app_role.join(&server_yml.host);
+        // let my_dir = if let Some(app_role) = self.mini_app_conf.app_role.as_ref() {
+        //     match app_role {
+        //         _ => data_dir_with_app_role.join(&server_yml.host),
+        //     }
+        // } else {
+        //     data_dir_with_app_role.join(&server_yml.host)
+        // };
 
         let mut server = Server::new(self.mini_app_conf.clone(), my_dir, server_yml)?;
 

@@ -109,6 +109,8 @@ fn main() -> Result<(), failure::Error> {
         Some(AppRole::ActiveLeaf)
     } else if let ("client-pull-loop", Some(_)) = m.subcommand() {
         Some(AppRole::PullHub)
+    } else if let ("copy-executable", Some(_)) = m.subcommand() {
+        Some(AppRole::PullHub)
     } else {
         None
     };
@@ -187,7 +189,8 @@ fn main_entry<'a>(
             if server_yml.is_none() {
                 app_conf.progress_bar.take();
             }
-            command::client_push_loops(&app_conf, server_yml, false)?;
+            let archive_after_sync = sub_matches.is_present("archive");
+            command::client_push_loops(&app_conf, server_yml,archive_after_sync, app_conf.mini_app_conf.as_service, false)?;
         }
         ("client-pull-loop", Some(sub_matches)) => {
             app_conf.mini_app_conf.app_role.replace(AppRole::PullHub);
@@ -195,7 +198,8 @@ fn main_entry<'a>(
             if server_yml.is_none() {
                 app_conf.progress_bar.take();
             }
-            command::client_pull_loops(&app_conf, server_yml, false)?;
+            let archive_after_sync = sub_matches.is_present("archive");
+            command::client_pull_loops(&app_conf, server_yml, archive_after_sync, app_conf.mini_app_conf.as_service, false)?;
         }
         ("send-test-mail", Some(sub_matches)) => {
             let to = sub_matches.value_of("to").unwrap();
@@ -329,145 +333,3 @@ mod tests {
         Ok(())
     }
 }
-
-// if let ("mkdir", Some(sub_matches)) = m.subcommand() {
-//     let dir = sub_matches.value_of("dir").unwrap();
-//     let dir = base64::decode(dir).expect("decode dir name should succeed");
-//     let dir = std::str::from_utf8(dir.as_slice()).expect("dir name from_utf8 should succeed");
-//     if let Err(err) = fs::create_dir_all(dir) {
-//         error!("mkdir failed: {:?}", err);
-//         eprintln!("mkdir failed: {:?}", err);
-//         bail!("mkdir failed: {:?}", dir);
-//     } else {
-//         return Ok(());
-//     }
-// }
-
-// ("pull-and-archive", Some(sub_matches)) => {
-//     let server_yml = sub_matches.value_of("server-yml");
-//     app_conf.progress_bar.take();
-//     command::sync_dirs::sync_pull_dirs_follow_archive(&app_conf, server_yml, true)?;
-// }
-// ("sync-pull-dirs", Some(sub_matches)) => {
-//     let server_yml = sub_matches.value_of("server-yml");
-//     if server_yml.is_none() {
-//         app_conf.progress_bar.take();
-//     }
-//     command::sync_pull_dirs(&app_conf, server_yml)?;
-// }
-
-// ("sync-push-dirs", Some(sub_matches)) => {
-//     let server_yml = sub_matches.value_of("server-yml");
-//     if server_yml.is_none() {
-//         app_conf.progress_bar.take();
-//     }
-//     let force = sub_matches.is_present("force");
-//     command::sync_push_dirs(&app_conf, server_yml, force)?;
-// }
-
-// ("print-report", Some(sub_matches)) => {
-//     let (server, _indicator) =
-//         command::load_server_yml(app_conf, sub_matches.value_of("server-yml"), false)?;
-//     let buf_reader = io::BufReader::new(
-//         fs::OpenOptions::new()
-//             .read(true)
-//             .open(server.get_dir_sync_report_file())?,
-//     );
-
-//     if let Some(line) = buf_reader.lines().last() {
-//         let line = line?;
-//         let sdr: SyncDirReport = serde_json::from_str(line.as_str())?;
-//         println!("{}", serde_yaml::to_string(&sdr)?);
-//     } else {
-//         println!("empty report file.");
-//     }
-// }
-
-// if db_cmd::create_remote_db(&app_conf, &m)? {
-//     return Ok(());
-// }
-
-// ("confirm-remote-sync", Some(sub_matches)) => {
-//     let start = Instant::now();
-//     let (mut server, _indicator) =
-//         command::load_server_yml(app_conf, sub_matches.value_of("server-yml"), false)?;
-//     server.connect()?;
-//     server.confirm_remote_sync()?;
-//     eprintln!("time costs: {:?}", start.elapsed().as_secs());
-// }
-// ("confirm-local-sync", Some(sub_matches)) => {
-//     let (server, _indicator) =
-//         command::load_server_yml(app_conf, sub_matches.value_of("server-yml"), true)?;
-//     server.confirm_local_sync()?;
-// }
-// ("list-remote-files", Some(sub_matches)) => {
-//     let start = Instant::now();
-//     let (mut server, _indicator) =
-//         command::load_server_yml(app_conf, sub_matches.value_of("server-yml"), false)?;
-//     server.connect()?;
-//     server.list_remote_file_exec(no_db)?;
-
-//     if let Some(out) = sub_matches.value_of("out") {
-//         let mut out = fs::OpenOptions::new()
-//             .create(true)
-//             .truncate(true)
-//             .write(true)
-//             .open(out)?;
-//         let mut rf = fs::OpenOptions::new()
-//             .read(true)
-//             .open(&server.get_working_file_list_file())?;
-//         io::copy(&mut rf, &mut out)?;
-//     } else {
-//         let mut rf = fs::OpenOptions::new()
-//             .read(true)
-//             .open(&server.get_working_file_list_file())?;
-//         io::copy(&mut rf, &mut io::stdout())?;
-//     }
-
-//     println!("time costs: {:?}", start.elapsed().as_secs());
-// }
-// ("count-local-files", Some(sub_matches)) => {
-//     let (server, _indicator) = {
-//         let server_yml = sub_matches.value_of("server-yml").unwrap();
-//         command::load_server_yml_by_name(app_conf, server_yml, true)?
-//     };
-//     ssh_util::print_scalar_value(format!("{}", server.count_local_files()));
-// }
-// ("count-remote-files", Some(sub_matches)) => {
-//     let (server, _indicator) = {
-//         let server_yml = sub_matches.value_of("server-yml").unwrap();
-//         command::load_server_yml_by_name(app_conf, server_yml, true)?
-//     };
-//     server.count_remote_files()?;
-// }
-// ("list-local-files", Some(sub_matches)) => {
-//     let (mut server, _indicator) =
-//         if let Some(server_yml) = sub_matches.value_of("server-yml") {
-//             command::load_server_yml_by_name(app_conf, server_yml, true)?
-//         } else {
-//             let mut all_yml = command::load_all_server_yml(app_conf, true);
-//             if all_yml.len() == 1 {
-//                 all_yml.remove(0)
-//             } else {
-//                 bail!("no server-yml or multiple server-yml found.");
-//             }
-//         };
-//     if no_db {
-//         server.server_yml.use_db = false;
-//     } else if !server.get_db_file().exists() || server.get_db_file().metadata()?.len() < 100
-//     {
-//         warn!("sqlite db doesn't initialized yet. try to initialize it.");
-//         let sqlite_db_access = SqliteDbAccess::new(server.get_db_file());
-//         sqlite_db_access.create_database()?;
-//     }
-//     if let Some(out) = sub_matches.value_of("out") {
-//         let mut out = fs::OpenOptions::new()
-//             .create(true)
-//             .truncate(true)
-//             .write(true)
-//             .open(out)?;
-//         server.create_file_list_files(&mut out)?;
-//     } else {
-//         server.create_file_list_files(&mut io::stdout())?;
-//     }
-// }

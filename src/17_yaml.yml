@@ -133,29 +133,6 @@ subcommands:
     #             index: 1
     - print-conf:
         about: print out the current configuration of application.
-    # - count-local-files:
-    #     about: count the files in the configuration file.
-    #     args:
-    #         - server-yml:
-    #             help: the configuration file.
-    #             long: server-yml
-    #             required: true
-    #             index: 1
-    # - count-remote-files:
-    #     about: count the files in the configuration file at another side..
-    #     args:
-    #         - server-yml:
-    #             help: the configuration file.
-    #             long: server-yml
-    #             required: true
-    #             index: 1
-    # - mkdir:
-    #     about: create a new directory.
-    #     args:
-    #         - dir:
-    #             help: the dir to create.
-    #             required: true
-    #             index: 1
     - print-env:
         about: print out environment variables.
     - polling-file:
@@ -264,34 +241,6 @@ subcommands:
             - to:
                 required: true
                 index: 1
-    # - list-remote-files:
-    #     args:
-    #         - server-yml:
-    #             required: true
-    #             index: 1
-    #         - out:
-    #             long: out
-    #             required: false
-    #             takes_value: true
-    # - list-local-files:
-    #     args:
-    #         - server-yml:
-    #             required: false
-    #             index: 1
-    #         - out:
-    #             long: out
-    #             required: false
-    #             takes_value: true
-    # - sync-pull-dirs:
-    #     about: sync directories in the configuration file.
-    #     args:
-    #         - server-yml:
-    #             required: false
-    #             index: 1
-    #         - rsync-window:
-    #             long: rsync-window
-    #             takes_value: true
-    #             required: false
     - ping:
         about: ping a message to server.
     - pong:
@@ -306,6 +255,10 @@ subcommands:
                 long: rsync-window
                 takes_value: true
                 required: false
+            - archive:
+                help: archive folder after sync.
+                long: archive
+                required: false
     - client-pull-loop:
         about: client side pull loop.
         args:
@@ -315,6 +268,10 @@ subcommands:
             - rsync-window:
                 long: rsync-window
                 takes_value: true
+                required: false
+            - archive:
+                help: archive folder after sync.
+                long: archive
                 required: false
     - server-receive-loop:
         about: server side receive loop.
@@ -330,38 +287,6 @@ subcommands:
                 long: rsync-window
                 takes_value: true
                 required: false
-    # - sync-push-dirs:
-    #     about: sync directories in the configuration file. The configuration file is at fixed location.
-    #     args:
-    #         - server-yml:
-    #             required: false
-    #             index: 1
-    #         - rsync-window:
-    #             long: rsync-window
-    #             takes_value: true
-    #             required: false
-    #         - force:
-    #             help: upload all file to the target server.
-    #             long: force
-    #             required: false
-    - pull-and-archive:
-        about: run all tasks.
-        args:
-            - server-yml:
-                required: false
-                index: 1
-    - confirm-remote-sync:
-        about: confirm the last sync-pull-dirs action, execute confirm-local-sync on remote server.
-        args:
-            - server-yml:
-                required: false
-                index: 1
-    - confirm-local-sync:
-        about: confirm the last sync-pull-dirs action.
-        args:
-            - server-yml:
-                required: false
-                index: 1
     - rsync:
         about: sync relative functions.
         subcommands:

@@ -659,7 +659,7 @@ impl Server {
         Ok(None)
     }
 
-    pub fn client_push_loop(&self) -> Result<Option<(u64, u64)>, failure::Error> {
+    pub fn client_push_loop(&self, _follow_archive: bool) -> Result<Option<(u64, u64)>, failure::Error> {
         let session = self.create_ssh_session()?;
         let mut channel: ssh2::Channel = session.channel_session()?;
         let cmd = format!(
@@ -860,7 +860,7 @@ mod tests {
         )
         .expect("get slash path from home_dir");
 
-        server.client_push_loop()?;
+        server.client_push_loop(false)?;
 
         info!("a_dir is {:?}", a_dir);
         let cc_txt = a_dir.join("b").join("c c").join("c c .txt");

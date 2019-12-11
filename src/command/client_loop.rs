@@ -10,6 +10,8 @@ use super::*;
 pub fn client_push_loops(
     app_conf: &AppConf,
     server_yml: Option<&str>,
+    follow_archive: bool,
+    as_service: bool,
     open_db: bool,
 ) -> Result<(), failure::Error> {
 
@@ -20,7 +22,7 @@ pub fn client_push_loops(
     };
 
     
-    client_push_loop_by_spawn(servers, false, false)
+    client_push_loop_by_spawn(servers, follow_archive, as_service)
 }
 
 
@@ -56,15 +58,15 @@ fn client_push_loop_by_spawn_do(
             {
                 let mut sched = JobScheduler::new();
                 sched.add(Job::new(schedule_item.cron.parse().unwrap(), || {
-                    match server.client_push_loop() {
+                    match server.client_push_loop(follow_archive) {
                         Ok(_result) => {
                             // indicator.pb_finish();
                             // actions::write_dir_sync_result(&server, result.as_ref());
                             // archive when succeeded.
-                            if follow_archive {
-                                server.archive_local().ok();
-                                server.prune_backups().ok();
-                            }
+                            // if follow_archive {
+                            //     server.archive_local().ok();
+                            //     server.prune_backups().ok();
+                            // }
                         }
                         Err(err) => println!("client-push-loop failed: {:?}", err),
                     }
@@ -78,7 +80,7 @@ fn client_push_loop_by_spawn_do(
             }
         }))
     } else {
-        match server.client_push_loop() {
+        match server.client_push_loop(follow_archive) {
             Ok(_result) => {
                 // indicator.pb_finish();
                 // actions::write_dir_sync_result(&server, result.as_ref());
@@ -98,6 +100,8 @@ fn client_push_loop_by_spawn_do(
 pub fn client_pull_loops(
     app_conf: &AppConf,
     server_yml: Option<&str>,
+    follow_archive: bool,
+    as_service: bool,
     open_db: bool,
 ) -> Result<(), failure::Error> {
     let servers = if let Some(server_yml) = server_yml {
@@ -105,7 +109,7 @@ pub fn client_pull_loops(
     } else {
         app_conf.load_all_server_yml(false)
     };
-    client_pull_loop_by_spawn(servers, false, false)
+    client_pull_loop_by_spawn(servers, follow_archive, as_service)
 }
 
 
