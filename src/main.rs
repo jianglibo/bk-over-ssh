@@ -111,6 +111,8 @@ fn main() -> Result<(), failure::Error> {
         Some(AppRole::PullHub)
     } else if let ("copy-executable", Some(_)) = m.subcommand() {
         Some(AppRole::PullHub)
+    } else if let ("archive-local", Some(_)) = m.subcommand() {
+        Some(AppRole::PullHub)
     } else {
         None
     };

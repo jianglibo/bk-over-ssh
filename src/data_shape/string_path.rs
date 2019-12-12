@@ -1,7 +1,7 @@
 use log::*;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::{fs, io};
 use super::{FullPathFileItemError};
 
@@ -11,12 +11,14 @@ pub const VERBATIM_PREFIX: &str = r#"\\?\"#;
 #[derive(Debug, Clone, PartialEq)]
 pub struct SlashPath {
     pub slash: String,
+    pub origin: Option<PathBuf>,
 }
 
 impl std::default::Default for SlashPath {
     fn default() -> Self {
         Self {
             slash: "".to_string(),
+            origin: None,
         }
     }
 }
@@ -41,7 +43,7 @@ where
     D: Deserializer<'de>,
 {
     let s: String = Deserialize::deserialize(deserializer)?;
-    Ok(SlashPath { slash: s })
+    Ok(SlashPath { slash: s, origin: None })
 }
 
 fn sanitiaze(any_path: impl AsRef<str>) -> String {
@@ -57,6 +59,7 @@ impl SlashPath {
     pub fn new(any_path: impl AsRef<str>) -> Self {
         Self {
             slash: sanitiaze(any_path),
+            origin: None,
         }
     }
 
@@ -84,6 +87,18 @@ impl SlashPath {
         full.map(|f| f.as_str().split_at(pos).1.to_owned())
     }
 
+    #[cfg(any(unix))]
+    pub fn from_path(path: &Path) -> Result<Self, failure::Error> {
+        match path.to_str() {
+            Some(s) => Ok(SlashPath::new(s)),
+            None => {
+                error!("path to string failed: {:?}", path);
+                bail!(FullPathFileItemError::Encode(path.to_path_buf()));
+            }
+        }
+    }
+
+    #[cfg(windows)]
     pub fn from_path(path: &Path) -> Result<Self, failure::Error> {
         match path.to_str() {
             Some(s) => Ok(SlashPath::new(s)),
@@ -128,6 +143,9 @@ impl SlashPath {
         self.slash.ends_with(end_str.as_ref())
     }
 
+    /// If this is a ill-formed file name, when converting to SlashPath it's already corrected, But lost the original os_str.
+    /// There is no way to find back the original.
+    /// So keep the origin path is a must.
     pub fn as_path(&self) -> &Path {
         &Path::new(&self.slash)
     }
@@ -203,6 +221,7 @@ impl SlashPath {
             let s = if vs[1].is_empty() { "/" } else { vs[1] };
             Ok(SlashPath {
                 slash: s.to_string(),
+                origin: None,
             })
         }
     }
@@ -272,7 +291,7 @@ mod tests {
         D: Deserializer<'de>,
     {
         let s: Option<String> = Deserialize::deserialize(deserializer)?;
-        Ok(s.map(|ss| SlashPath { slash: ss }))
+        Ok(s.map(|ss| SlashPath { slash: ss, origin: None }))
     }
 
     #[derive(Deserialize, Serialize, Debug, PartialEq)]

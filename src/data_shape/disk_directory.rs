@@ -384,6 +384,20 @@ impl Directory {
             })
     }
 
+    /// When the role of running was determined, the absolute path of the to_dir is also determined.
+    pub fn normalize_to_dir(&mut self, my_directories: &SlashPath, server_distinct_id: impl AsRef<str>) {
+        let d = my_directories.join_another(&self.get_to_dir_base(server_distinct_id));
+        self.to_dir = d;
+    }
+
+    fn get_to_dir_base(&self, server_distinct_id: impl AsRef<str>) -> SlashPath {
+        SlashPath::new(server_distinct_id.as_ref()).join_another(&if self.to_dir.is_empty() {
+            SlashPath::new(self.from_dir.get_last_name())
+        } else {
+            self.to_dir.clone()
+        })
+    }
+
     /// When push to remote server the server_distinct_id is app_instance_id,
     /// When be pulled the server_distinct_id is unnecessary.
     pub fn file_item_iter(
@@ -393,11 +407,7 @@ impl Directory {
     ) -> Box<dyn Iterator<Item = Result<FullPathFileItem, failure::Error>> + '_> {
         let dir_to_read = self.from_dir.clone();
 
-        let to_dir_base = SlashPath::new(server_distinct_id.as_ref()).join_another(&if self.to_dir.is_empty() {
-            SlashPath::new(self.from_dir.get_last_name())
-        } else {
-            self.to_dir.clone()
-        });
+        let to_dir_base = self.get_to_dir_base(server_distinct_id);
 
         if let Some(file_selector) = self.file_selector.as_ref() {
             trace!("find file_selector");

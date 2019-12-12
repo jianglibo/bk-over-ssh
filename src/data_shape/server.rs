@@ -116,10 +116,10 @@ impl Server {
 
         server_yml.directories.iter_mut().for_each(|d| {
             d.compile_patterns()
-                .expect("compile_patterns should succeeded.")
+                .expect("compile_patterns should succeeded.");
         });
 
-        Ok(Self {
+        let mut s = Self {
             server_yml,
             db_access: None,
             session: None,
@@ -131,13 +131,33 @@ impl Server {
             app_conf,
             _m: PhantomData,
             lock_file: None,
-        })
+        };
+
+        if let Some(app_role) = s.app_conf.app_role.as_ref() {
+            let directories = s.get_my_directories();
+
+            let server_distinct_id = match app_role {
+                AppRole::PullHub => "",
+                AppRole::ActiveLeaf => s.app_conf.app_instance_id.as_str(),
+            };
+
+            s.server_yml.directories.iter_mut().for_each(|dir| {
+                dir.normalize_to_dir(&directories, server_distinct_id);
+            });
+        }
+        Ok(s)
     }
 
     /// Server's my_dir is composed of the app_setting's 'data dir' and the server distinctness, app_instance_id o/r hostname.
     /// It varies on the role of the application.
     pub fn get_my_dir(&self) -> &Path {
         self.my_dir.as_path()
+    }
+
+    pub fn get_my_directories(&self) -> SlashPath {
+        SlashPath::from_path(self.get_my_dir())
+            .expect("my_dir should exists.")
+            .join("directories")
     }
     /// Lock the server, preventing server from concurrently executing.
     pub fn lock_working_file(&mut self) -> Result<(), failure::Error> {
@@ -315,6 +335,11 @@ impl Server {
         ))
     }
 
+    fn current_archive_file_slash_path(&self) -> SlashPath {
+        SlashPath::from_path(self.current_archive_file_path().as_path())
+            .expect("current_archive_file_path got.")
+    }
+
     fn archive_internal(&self, pb: &mut Indicator) -> Result<PathBuf, failure::Error> {
         let total_size = self.count_from_dirs_size();
 
@@ -379,8 +404,8 @@ impl Server {
     }
 
     fn archive_out(&self, pb: &mut Indicator) -> Result<PathBuf, failure::Error> {
-        let cur_archive_path = self.current_archive_file_path();
-        let cur_archive_name = cur_archive_path.as_os_str();
+        let cur_archive_path = self.current_archive_file_slash_path();
+        // let cur_archive_name = cur_archive_path.get_os_string();
 
         let style = ProgressStyle::default_bar().template("{spinner} {wide_msg}");
 
@@ -390,6 +415,8 @@ impl Server {
             set_message: None,
             ..PbProperties::default()
         });
+
+        let my_directories = self.get_my_directories();
 
         for dir in self.server_yml.directories.iter() {
             pb.set_message(format!(
@@ -403,33 +430,57 @@ impl Server {
                 .iter()
                 .map(|s| {
                     if s == "archive_file_name" {
-                        cur_archive_name.to_owned()
+                        cur_archive_path.get_os_string()
                     } else if s == "files_and_dirs" {
-                        dir.from_dir.get_os_string()
+                        // let df = my_directories.join_another(&dir.get_to_dir_base("")); // use to path.
+                        // df.get_os_string()
+                        dir.to_dir.get_os_string()
                     } else {
                         OsString::from(s)
                     }
                 })
                 .collect::<Vec<OsString>>();
+            trace!("run archive_cmd: {:?}", archive_cmd);
 
-            let output = if cfg!(target_os = "windows") {
-                let mut c = Command::new("cmd");
-                c.arg("/C");
-                for seg in archive_cmd {
-                    c.arg(seg);
-                }
-                c.output().expect("failed to execute process")
-            } else {
-                let mut c = Command::new("sh");
-                c.arg("-c");
-                for seg in archive_cmd {
-                    c.arg(seg);
-                }
-                c.output().expect("failed to execute process")
-            };
+            let mut c = self.get_archive_cmd();
+
+            for seg in archive_cmd {
+                c.arg(seg);
+            }
+            let output = c.output().expect("failed to execute process");
+
+            // let output = if cfg!(target_os = "windows") {
+            //     let mut c = Command::new("cmd");
+            //     c.arg("/C");
+            //     for seg in archive_cmd {
+            //         c.arg(seg);
+            //     }
+            //     c.output().expect("failed to execute process")
+            // } else {
+            //     let mut c = Command::new("sh");
+            //     c.arg("-c");
+            //     for seg in archive_cmd {
+            //         c.arg(seg);
+            //     }
+            //     c.output().expect("failed to execute process")
+            // };
             trace!("archive_cmd output: {:?}", output);
         }
-        Ok(cur_archive_path)
+        Ok(cur_archive_path.as_path().to_path_buf())
+    }
+
+    #[cfg(unix)]
+    fn get_archive_cmd(&self) -> Command {
+        let mut c = Command::new("sh");
+        c.arg("-c");
+        c
+    }
+
+    #[cfg(windows)]
+    fn get_archive_cmd(&self) -> Command {
+        let mut c = Command::new("cmd");
+        c.arg("/C");
+        c
     }
 
     /// Archive need not to schedule standalone.
@@ -541,10 +592,10 @@ impl Server {
         );
         message_hub.write_and_flush(server_yml.as_server_yml_sent_bytes().as_slice())?;
 
-        let my_dir = SlashPath::from_path(self.get_my_dir())
+        let my_directories = SlashPath::from_path(self.get_my_dir())
             .expect("my_dir should exists.")
             .join("directories");
-        trace!("save to my_dir: {:?}", my_dir);
+        trace!("save to my_directories: {:?}", my_directories);
         let file_count = self.read_last_file_count();
         let mut cppb = TransferFileProgressBar::new(file_count, self.app_conf.show_pb);
 
@@ -572,7 +623,7 @@ impl Server {
                     trace!("got file item: {}", string_message.content);
                     match serde_json::from_str::<FullPathFileItem>(&string_message.content) {
                         Ok(file_item) => {
-                            let df = my_dir.join_another(&file_item.to_path); // use to path.
+                            let df = my_directories.join_another(&file_item.to_path); // use to path.
                             match file_item.changed(df.as_path()) {
                                 FileChanged::NoChange => {
                                     message_hub.write_transfer_type_only(
@@ -638,7 +689,8 @@ impl Server {
                         error!("empty last_df.");
                     }
                 }
-                TransferType::StringError => { // must read it or else the stream will stall.
+                TransferType::StringError => {
+                    // must read it or else the stream will stall.
                     let ss = StringMessage::parse(&mut message_hub)?;
                     error!("string error: {:?}", ss.content);
                 }
@@ -659,7 +711,10 @@ impl Server {
         Ok(None)
     }
 
-    pub fn client_push_loop(&self, _follow_archive: bool) -> Result<Option<(u64, u64)>, failure::Error> {
+    pub fn client_push_loop(
+        &self,
+        _follow_archive: bool,
+    ) -> Result<Option<(u64, u64)>, failure::Error> {
         let session = self.create_ssh_session()?;
         let mut channel: ssh2::Channel = session.channel_session()?;
         let cmd = format!(
