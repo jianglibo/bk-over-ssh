@@ -100,8 +100,9 @@ impl SlashPath {
                 if had_errors {
                     bail!(FullPathFileItemError::Encode(path.to_path_buf()));
                 } else {
-                    self.origin.replace(path.to_path_buf());
-                    Ok(SlashPath::new(cow))
+                    let mut p = SlashPath::new(cow);
+                    p.origin.replace(path.to_path_buf());
+                    Ok(p)
                 }
             }
         }
