@@ -98,7 +98,14 @@ impl SlashPath {
                 error!("path to string failed:{:?}, {:?}",path, bytes);
                 let (cow, encoding_used, had_errors) = GBK.decode(bytes);
                 if had_errors {
-                    bail!(FullPathFileItemError::Encode(path.to_path_buf()));
+                    let (cow, encoding_used, had_errors) = UTF_8.decode(bytes);
+                    if had_errors {
+                        bail!(FullPathFileItemError::Encode(path.to_path_buf()));
+                    } else {
+                        let mut p = SlashPath::new(cow);
+                        p.origin.replace(path.to_path_buf());
+                        Ok(p)
+                    }
                 } else {
                     let mut p = SlashPath::new(cow);
                     p.origin.replace(path.to_path_buf());
