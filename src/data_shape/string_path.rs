@@ -88,7 +88,7 @@ impl SlashPath {
     }
 
     #[cfg(unix)]
-    pub fn from_path(path: &Path) -> Result<Self, failure::Error> {
+    pub fn from_path(path: &Path) -> Result<SlashPath, failure::Error> {
         use std::os::unix::ffi::OsStrExt;
         use encoding_rs::*;
         match path.to_str() {
@@ -108,7 +108,7 @@ impl SlashPath {
     }
 
     #[cfg(windows)]
-    pub fn from_path(path: &Path) -> Result<Self, failure::Error> {
+    pub fn from_path(path: &Path) -> Result<SlashPath, failure::Error> {
         use std::os::windows::ffi::OsStrExt;
         // use std::os::windows::ffi::OsStringExt;
         // use std::ffi::OsString;
