@@ -87,7 +87,7 @@ impl SlashPath {
         full.map(|f| f.as_str().split_at(pos).1.to_owned())
     }
 
-    #[cfg(any(unix))]
+    #[cfg(unix)]
     pub fn from_path(path: &Path) -> Result<Self, failure::Error> {
         use std::os::unix::ffi::OsStrExt;
         use encoding_rs::*;
