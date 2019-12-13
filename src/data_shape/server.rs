@@ -119,7 +119,7 @@ impl Server {
                 .expect("compile_patterns should succeeded.");
         });
 
-        let mut s = Self {
+        Ok(Self {
             server_yml,
             db_access: None,
             session: None,
@@ -131,21 +131,7 @@ impl Server {
             app_conf,
             _m: PhantomData,
             lock_file: None,
-        };
-
-        if let Some(app_role) = s.app_conf.app_role.as_ref() {
-            let directories = s.get_my_directories();
-
-            let server_distinct_id = match app_role {
-                AppRole::PullHub => "",
-                AppRole::ActiveLeaf => s.app_conf.app_instance_id.as_str(),
-            };
-
-            s.server_yml.directories.iter_mut().for_each(|dir| {
-                dir.normalize_to_dir(&directories, server_distinct_id);
-            });
-        }
-        Ok(s)
+        })
     }
 
     /// Server's my_dir is composed of the app_setting's 'data dir' and the server distinctness, app_instance_id o/r hostname.
@@ -405,7 +391,6 @@ impl Server {
 
     fn archive_out(&self, pb: &mut Indicator) -> Result<PathBuf, failure::Error> {
         let cur_archive_path = self.current_archive_file_slash_path();
-        // let cur_archive_name = cur_archive_path.get_os_string();
 
         let style = ProgressStyle::default_bar().template("{spinner} {wide_msg}");
 
@@ -434,7 +419,7 @@ impl Server {
                     } else if s == "files_and_dirs" {
                         // let df = my_directories.join_another(&dir.get_to_dir_base("")); // use to path.
                         // df.get_os_string()
-                        dir.to_dir.get_os_string()
+                        my_directories.join_another(&dir.get_to_dir_base("")).get_os_string()
                     } else {
                         OsString::from(s)
                     }

@@ -89,22 +89,43 @@ impl SlashPath {
 
     #[cfg(any(unix))]
     pub fn from_path(path: &Path) -> Result<Self, failure::Error> {
+        use std::os::unix::ffi::OsStrExt;
+        use encoding_rs::*;
         match path.to_str() {
             Some(s) => Ok(SlashPath::new(s)),
             None => {
-                error!("path to string failed: {:?}", path);
-                bail!(FullPathFileItemError::Encode(path.to_path_buf()));
+                let bytes = path.as_os_str().as_bytes();
+                error!("path to string failed:{:?}, {:?}",path, bytes);
+                let (cow, encoding_used, had_errors) = GBK.decode(bytes);
+                if had_errors {
+                    bail!(FullPathFileItemError::Encode(path.to_path_buf()));
+                } else {
+                    self.origin.replace(path.to_path_buf());
+                    Ok(SlashPath::new(cow))
+                }
             }
         }
     }
 
     #[cfg(windows)]
     pub fn from_path(path: &Path) -> Result<Self, failure::Error> {
+        use std::os::windows::ffi::OsStrExt;
+        // use std::os::windows::ffi::OsStringExt;
+        // use std::ffi::OsString;
+        // use encoding_rs::*;
         match path.to_str() {
             Some(s) => Ok(SlashPath::new(s)),
             None => {
-                error!("path to string failed: {:?}", path);
+                let os_str = path.as_os_str();
+                let result: Vec<u16> = os_str.encode_wide().collect();
+                error!("path to string failed: {:?}, {:?}", path, result);
+                // os_str.as_bytes();
+                // if had_errors {
                 bail!(FullPathFileItemError::Encode(path.to_path_buf()));
+                // } else {
+                //     self.origin.replace(path.to_path_buf());
+                //     Ok(SlashPath::new(cow))
+                // }
             }
         }
     }
@@ -147,12 +168,20 @@ impl SlashPath {
     /// There is no way to find back the original.
     /// So keep the origin path is a must.
     pub fn as_path(&self) -> &Path {
-        &Path::new(&self.slash)
+        if let Some(path) = self.origin.as_ref() {
+            path
+        } else {
+            &Path::new(&self.slash)
+        }
     }
 
     #[allow(dead_code)]
     pub fn exists(&self) -> bool {
-        Path::new(&self.slash).exists()
+        if let Some(path) = self.origin.as_ref() {
+            path.exists()
+        } else {
+            Path::new(&self.slash).exists()
+        }
     }
 
     fn get_not_slash_start_str(&self) -> &str {
