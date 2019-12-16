@@ -7,6 +7,7 @@ use chrono::{DateTime, Local, SecondsFormat, Utc};
 use log::*;
 use r2d2;
 use std::path::PathBuf;
+use encoding_rs::*;
 
 #[derive(Debug)]
 pub enum DbAction {
@@ -91,6 +92,7 @@ impl RelativeFileItemInDb {
         path: PathBuf,
         skip_sha1: bool,
         dir_id: i64,
+        possible_encoding: &Vec<&Encoding>,
     ) -> Option<Self> {
         let metadata_r = path.metadata();
         match metadata_r {
@@ -100,7 +102,7 @@ impl RelativeFileItemInDb {
                 } else {
                     Option::<String>::None
                 };
-                if let Ok(bp) = base_path.strip_prefix(path.as_path()) {
+                if let Ok(bp) = base_path.strip_prefix(path.as_path(), possible_encoding) {
                     Some(Self {
                         id: 0,
                         path: bp,

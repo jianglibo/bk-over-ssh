@@ -19,6 +19,7 @@ pub fn server_receive_loop() -> Result<(), failure::Error> {
             .as_path()
             .join("directories")
             .as_path(),
+        &vec![],
     )
     .expect("get slash path from home_dir");
 
@@ -178,9 +179,12 @@ pub fn server_send_loop(skip_sha1: bool) -> Result<(), failure::Error> {
 
     // let server_distinct_id = format!("{}/directories", server_yml.host);
     let mut buf = vec![0; 8192];
+
+    let possible_encoding = server_yml.get_possible_encoding();
+
     for dir in server_yml.directories.iter() {
         trace!("start proceess directory: {:?}", dir);
-        let push_file_items = dir.file_item_iter("", skip_sha1);
+        let push_file_items = dir.file_item_iter("", skip_sha1, &possible_encoding);
         for fi in push_file_items {
             match fi {
                 Ok(fi) => {
@@ -215,13 +219,20 @@ pub fn server_send_loop(skip_sha1: bool) -> Result<(), failure::Error> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
-    use std::ffi::OsString;
     use encoding_rs::*;
+    use std::ffi::OsString;
+    use std::path::Path;
 
     #[test]
     fn t_sample_string() -> Result<(), failure::Error> {
-        let bytes: Vec<u8> = vec![47, 117, 115, 114, 47, 11, 08, 111, 99, 97, 108, 47, 102, 104, 113, 108, 47, 87, 101, 98, 82, 111, 111, 116, 47, 87, 69, 66, 45, 73, 78, 70, 47, 99, 108, 97, 115, 115, 101, 115, 47, 99, 111, 109, 47, 108, 105, 110, 101, 119, 101, 108, 108, 47, 119, 97, 115, 47, 103, 114, 97, 100, 101, 47, 101, 110, 103, 105, 110, 101, 47, 112, 97, 114, 97, 109, 115, 47, 229, 174, 161, 230, 137, 185, 228, 186, 139, 233, 161, 185, 231, 138, 182, 230, 128, 95, 99, 108, 97, 115, 115];
+        let bytes: Vec<u8> = vec![
+            47, 117, 115, 114, 47, 11, 08, 111, 99, 97, 108, 47, 102, 104, 113, 108, 47, 87, 101,
+            98, 82, 111, 111, 116, 47, 87, 69, 66, 45, 73, 78, 70, 47, 99, 108, 97, 115, 115, 101,
+            115, 47, 99, 111, 109, 47, 108, 105, 110, 101, 119, 101, 108, 108, 47, 119, 97, 115,
+            47, 103, 114, 97, 100, 101, 47, 101, 110, 103, 105, 110, 101, 47, 112, 97, 114, 97,
+            109, 115, 47, 229, 174, 161, 230, 137, 185, 228, 186, 139, 233, 161, 185, 231, 138,
+            182, 230, 128, 95, 99, 108, 97, 115, 115,
+        ];
         let (cow, _encoding_used, had_errors) = GBK.decode(&bytes[..]);
         eprintln!("{}", cow);
         eprintln!("{}", had_errors);
@@ -262,7 +273,6 @@ mod tests {
             assert_eq!(os_str.to_string_lossy(), "fo�o");
         }
 
-
         use encoding_rs::*;
 
         let expectation = "\u{30CF}\u{30ED}\u{30FC}\u{30FB}\u{30EF}\u{30FC}\u{30EB}\u{30C9}";
@@ -291,9 +301,9 @@ mod tests {
 
         #[cfg(windows)]
         {
+            use std::os::windows::ffi::EncodeWide;
             use std::os::windows::ffi::OsStrExt;
             use std::os::windows::ffi::OsStringExt;
-            use std::os::windows::ffi::EncodeWide;
 
             let source = [0x0055, 0x006E, 0x0069, 0x0063, 0x006F, 0x0064, 0x0065];
             // Re-encodes an OsStr as a wide character sequence, i.e., potentially ill-formed UTF-16
@@ -303,10 +313,7 @@ mod tests {
 
             let result: Vec<u16> = string.encode_wide().collect();
             assert_eq!(&source[..], &result[..]);
-
         }
-
-
 
         Ok(())
     }

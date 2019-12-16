@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::path::{Path, PathBuf};
 use walkdir::{DirEntry, WalkDir};
+use encoding_rs::*;
 
 /// if has includes get includes first.
 /// if has excludes exclude files.
@@ -200,28 +201,28 @@ impl Directory {
 
     /// When in receive hub mode, the local directory is absolute, the remote directory is relative.
     /// The remote directory is always relative to the 'directories' dir in the user's home directory.
-    #[allow(dead_code)]
-    pub fn normalize_receive_hub_sync(
-        &mut self,
-        directories_dir: impl AsRef<Path>,
-    ) -> Result<(), failure::Error> {
-        let directories_dir = directories_dir.as_ref();
-        trace!("origin directory: {:?}", self);
+    // #[allow(dead_code)]
+    // pub fn normalize_receive_hub_sync(
+    //     &mut self,
+    //     directories_dir: impl AsRef<Path>,
+    // ) -> Result<(), failure::Error> {
+    //     let directories_dir = directories_dir.as_ref();
+    //     trace!("origin directory: {:?}", self);
 
-        if self.from_dir.is_empty() || !self.from_dir.as_path().is_absolute() {
-            bail!("from_dir is always absolute and existing.");
-        }
+    //     if self.from_dir.is_empty() || !self.from_dir.as_path().is_absolute() {
+    //         bail!("from_dir is always absolute and existing.");
+    //     }
 
-        if self.to_dir.is_empty() {
-            self.to_dir.set_slash(self.from_dir.get_last_name());
-        }
+    //     if self.to_dir.is_empty() {
+    //         self.to_dir.set_slash(self.from_dir.get_last_name());
+    //     }
 
-        let to_path = SlashPath::from_path(directories_dir)
-            .expect("directories_dir to_str should succeed.")
-            .join(self.to_dir.get_slash());
-        self.to_dir = to_path;
-        Ok(())
-    }
+    //     let to_path = SlashPath::from_path(directories_dir)
+    //         .expect("directories_dir to_str should succeed.")
+    //         .join(self.to_dir.get_slash());
+    //     self.to_dir = to_path;
+    //     Ok(())
+    // }
 
     // pub fn load_relative_item<O>(
     //     &self,
@@ -284,13 +285,14 @@ impl Directory {
     //         })
     // }
 
-    fn file_item_iter_file_selector(
+    fn file_item_iter_file_selector<'a>(
         &self,
         to_dir_base: SlashPath,
         dir_to_read: SlashPath,
         skip_sha1: bool,
-        file_selector: &FileSelector,
-    ) -> impl Iterator<Item = Result<FullPathFileItem, failure::Error>> + '_ {
+        file_selector: &'a FileSelector,
+        possible_encoding: &'a Vec<&Encoding>,
+    ) -> impl Iterator<Item = Result<FullPathFileItem, failure::Error>> + 'a {
         match file_selector {
             FileSelector::Latest(num) => {
                 WalkDir::new(dir_to_read.as_path())
@@ -317,6 +319,7 @@ impl Directory {
                             absolute_file_path,
                             &to_dir_base,
                             skip_sha1,
+                            possible_encoding,
                         )
                     })
                     .take(*num)
@@ -333,12 +336,13 @@ impl Directory {
         }
     }
 
-    fn file_item_iter_no_file_selector(
+    fn file_item_iter_no_file_selector<'a>(
         &self,
         to_dir_base: SlashPath,
         dir_to_read: SlashPath,
         skip_sha1: bool,
-    ) -> impl Iterator<Item = Result<FullPathFileItem, failure::Error>> + '_ {
+        possible_encoding: &'a Vec<&Encoding>,
+    ) -> impl Iterator<Item = Result<FullPathFileItem, failure::Error>> + 'a {
         let includes_patterns = self.includes_patterns.clone();
         let excludes_patterns = self.excludes_patterns.clone();
         let excludes = self
@@ -380,6 +384,7 @@ impl Directory {
                     absolute_file_path,
                     &to_dir_base,
                     skip_sha1,
+                    possible_encoding,
                 )
             })
     }
@@ -402,11 +407,12 @@ impl Directory {
     /// When be pulled the server_distinct_id is unnecessary.
     /// to_dir is made here so it's becaming stateless, the other side just receive item and
     /// join the my_directories dir with to_dir no matter which definition of dir it is.
-    pub fn file_item_iter(
-        &self,
+    pub fn file_item_iter<'a>(
+        &'a self,
         server_distinct_id: impl AsRef<str>,
         skip_sha1: bool,
-    ) -> Box<dyn Iterator<Item = Result<FullPathFileItem, failure::Error>> + '_> {
+        possible_encoding: &'a Vec<&Encoding>,
+    ) -> Box<dyn Iterator<Item = Result<FullPathFileItem, failure::Error>> + 'a> {
         let dir_to_read = self.from_dir.clone();
 
         let to_dir_base = self.get_to_dir_base(server_distinct_id);
@@ -418,12 +424,14 @@ impl Directory {
                 dir_to_read,
                 skip_sha1,
                 file_selector,
+                possible_encoding,
             ))
         } else {
             Box::new(self.file_item_iter_no_file_selector(
                 to_dir_base,
                 dir_to_read,
                 skip_sha1,
+                possible_encoding,
             ))
         }
     }
@@ -465,6 +473,7 @@ impl Directory {
         sql_batch_size: usize,
         sig_ext: &str,
         delta_ext: &str,
+        possible_encoding: &Vec<&Encoding>,
     ) -> Result<(), failure::Error>
     where
         M: r2d2::ManageConnection,
@@ -499,7 +508,7 @@ impl Directory {
                 .filter(|d| d.file_type().is_file())
                 .filter_map(|d| d.path().canonicalize().ok())
                 .filter_map(|d| self.match_path(d))
-                .filter_map(|d| RelativeFileItemInDb::from_path(dir_to_read, d, skip_sha1, dir_id))
+                .filter_map(|d| RelativeFileItemInDb::from_path(dir_to_read, d, skip_sha1, dir_id, possible_encoding))
                 .filter(|rfi| !(rfi.path.ends_with(sig_ext) || rfi.path.ends_with(delta_ext)))
                 .filter_map(|rfi| db_access.insert_or_update_relative_file_item(rfi, true))
                 .map(|(rfi, da)| rfi.to_sql_string(&da))
@@ -518,7 +527,7 @@ impl Directory {
                 .filter(|d| d.file_type().is_file())
                 .filter_map(|d| d.path().canonicalize().ok())
                 .filter_map(|d| self.match_path(d))
-                .filter_map(|d| RelativeFileItemInDb::from_path(dir_to_read, d, skip_sha1, dir_id))
+                .filter_map(|d| RelativeFileItemInDb::from_path(dir_to_read, d, skip_sha1, dir_id, possible_encoding))
                 .filter_map(|rfi| db_access.insert_or_update_relative_file_item(rfi, false))
                 .count();
         }
@@ -567,7 +576,7 @@ excludes:
         std::fs::create_dir(d1.as_path())?;
         tutil::make_a_file_with_content(d1.as_path(), "ccc", "cccc")?;
 
-        let d1_path = SlashPath::from_path(d1.as_path()).expect("from path.");
+        let d1_path = SlashPath::from_path(d1.as_path(), &vec![]).expect("from path.");
         println!("ccc dir: {}", d1_path);
 
         let yml = format!(
@@ -587,7 +596,7 @@ excludes:
         let mut d = serde_yaml::from_str::<Directory>(&yml)?;
         d.compile_patterns()?;
         let files = d
-            .file_item_iter("abc", false)
+            .file_item_iter("abc", false,&vec![])
             .filter_map(|k|k.ok())
             .collect::<Vec<FullPathFileItem>>();
         assert_eq!(files.len(), 3);
@@ -618,7 +627,7 @@ excludes:
         let mut d = serde_yaml::from_str::<Directory>(&yml)?;
         d.compile_patterns()?;
         let files = d
-            .file_item_iter("abc", false)
+            .file_item_iter("abc", false, &vec![])
             .filter_map(|k|k.ok())
             .collect::<Vec<FullPathFileItem>>();
         assert_eq!(files.len(), 2);

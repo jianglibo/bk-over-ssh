@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::convert::TryInto;
 use std::io;
 use std::path::{Path, PathBuf};
+use encoding_rs::*;
 
 #[derive(Debug, Fail)]
 pub enum FullPathFileItemError {
@@ -52,10 +53,11 @@ impl FullPathFileItem {
         absolute_file_to_read: PathBuf,
         to_dir_base: &SlashPath,
         skip_sha1: bool,
+        possible_encoding: &Vec<&Encoding>,
     ) -> Result<Self, failure::Error> {
         let fmeta = data_shape_util::get_file_meta(absolute_file_to_read.as_path(), skip_sha1)?;
-        let relative_path = from_dir.strip_prefix(absolute_file_to_read.as_path())?;
-        let from_path = SlashPath::from_path(absolute_file_to_read.as_path())?;
+        let relative_path = from_dir.strip_prefix(absolute_file_to_read.as_path(), possible_encoding)?;
+        let from_path = SlashPath::from_path(absolute_file_to_read.as_path(), possible_encoding)?;
 
         Ok(Self {
             from_path,
@@ -153,7 +155,7 @@ excludes:
         assert!(dir.excludes_patterns.is_some());
 
         let files = dir
-            .file_item_iter("abc", false)
+            .file_item_iter("abc", false, &vec![])
             .filter_map(|k| k.ok())
             .map(|it| {
                 println!("to_path: {:?}", it.to_path.slash);
@@ -190,7 +192,7 @@ excludes:
         dir.compile_patterns()?;
 
         let files = dir
-            .file_item_iter("abc", false)
+            .file_item_iter("abc", false, &vec![])
             .filter_map(|k| k.ok())
             .map(|it| {
                 println!("to_path: {:?}", it.to_path.slash);

@@ -23,6 +23,7 @@ buf_len: 8192
 use_db: true
 skip_sha1: true
 sql_batch_size: 50000
+possible_encoding: ["utf8", "gbk"] // SHIFT_JIS
 exclude_by_sql: [] # selected item will delete from database, that's as if excluded too.
 #SELECT id FROM relative_file_item WHERE path LIKE '%.zip' ORDER BY path DESC LIMIT 100000 OFFSET 1 # both limit and offset are required.
 rsync:

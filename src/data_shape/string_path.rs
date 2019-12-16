@@ -4,6 +4,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::{fs, io};
 use super::{FullPathFileItemError};
+use encoding_rs::*;
 
 pub const VERBATIM_PREFIX: &str = r#"\\?\"#;
 
@@ -76,8 +77,8 @@ impl SlashPath {
     }
 
     /// relativelize the path.
-    pub fn strip_prefix(&self, full_path: impl AsRef<Path>) -> Result<String, failure::Error> {
-        let full = SlashPath::from_path(full_path.as_ref());
+    pub fn strip_prefix(&self, full_path: impl AsRef<Path>, possible_encoding: &Vec<&Encoding>) -> Result<String, failure::Error> {
+        let full = SlashPath::from_path(full_path.as_ref(), possible_encoding);
         let len = self.as_str().len();
         let pos = if len == 1 {
             1
@@ -88,35 +89,43 @@ impl SlashPath {
     }
 
     #[cfg(unix)]
-    pub fn from_path(path: &Path) -> Result<SlashPath, failure::Error> {
+    pub fn from_path(path: &Path, possible_encoding: Vec<&Encoding>) -> Result<SlashPath, failure::Error> {
         use std::os::unix::ffi::OsStrExt;
-        use encoding_rs::*;
         match path.to_str() {
             Some(s) => Ok(SlashPath::new(s)),
             None => {
                 let bytes = path.as_os_str().as_bytes();
                 error!("path to string failed:{:?}, {:?}",path, bytes);
-                let (cow, encoding_used, had_errors) = GBK.decode(bytes);
-                if had_errors {
-                    let (cow, encoding_used, had_errors) = UTF_8.decode(bytes);
-                    if had_errors {
-                        bail!(FullPathFileItemError::Encode(path.to_path_buf()));
-                    } else {
+                for ec in possible_encoding {
+                    let (cow, encoding_used, had_errors) = ec.decode(bytes);
+                    if !had_errors {
                         let mut p = SlashPath::new(cow);
                         p.origin.replace(path.to_path_buf());
-                        Ok(p)
+                        break Ok(p);
                     }
-                } else {
-                    let mut p = SlashPath::new(cow);
-                    p.origin.replace(path.to_path_buf());
-                    Ok(p)
                 }
+                bail!(FullPathFileItemError::Encode(path.to_path_buf()));
+                // let (cow, encoding_used, had_errors) = GBK.decode(bytes);
+                // if had_errors {
+                //     let (cow, encoding_used, had_errors) = UTF_8.decode(bytes);
+                //     if had_errors {
+                //         bail!(FullPathFileItemError::Encode(path.to_path_buf()));
+                //     } else {
+                //         let mut p = SlashPath::new(cow);
+                //         p.origin.replace(path.to_path_buf());
+                //         Ok(p)
+                //     }
+                // } else {
+                //     let mut p = SlashPath::new(cow);
+                //     p.origin.replace(path.to_path_buf());
+                //     Ok(p)
+                // }
             }
         }
     }
 
     #[cfg(windows)]
-    pub fn from_path(path: &Path) -> Result<SlashPath, failure::Error> {
+    pub fn from_path(path: &Path, _possible_encoding: &Vec<&Encoding>) -> Result<SlashPath, failure::Error> {
         use std::os::windows::ffi::OsStrExt;
         // use std::os::windows::ffi::OsStringExt;
         // use std::ffi::OsString;
@@ -361,7 +370,7 @@ mod tests {
     #[test]
     fn t_strip_one_level_dir() -> Result<(), failure::Error> {
         let s1 = SlashPath::new("/data");
-        let s2 = s1.parent().expect("at least have one").strip_prefix("/abc/cc").unwrap();
+        let s2 = s1.parent().expect("at least have one").strip_prefix("/abc/cc", &vec![]).unwrap();
         assert_eq!(s2.as_str(), "abc/cc");
         println!("{}", s2);
         Ok(())

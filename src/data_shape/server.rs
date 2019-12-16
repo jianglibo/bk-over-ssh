@@ -9,6 +9,7 @@ use crate::protocol::{MessageHub, SshChannelMessageHub, StringMessage, TransferT
 use bzip2::write::BzEncoder;
 use bzip2::Compression;
 use chrono::Local;
+use encoding_rs::*;
 use indicatif::ProgressStyle;
 use log::*;
 use r2d2_sqlite::SqliteConnectionManager;
@@ -60,6 +61,22 @@ pub struct ServerYml {
     pub sql_batch_size: usize,
     pub schedules: Vec<ScheduleItem>,
     pub exclude_by_sql: Vec<String>,
+    pub possible_encoding: Vec<String>,
+}
+
+impl ServerYml {
+    pub fn get_possible_encoding(&self) -> Vec<&Encoding> {
+        self.possible_encoding
+            .iter()
+            .map(|s| s.to_uppercase())
+            .filter_map(|ename| match ename.as_str() {
+                "UTF8" => Some(UTF_8),
+                "GBK" => Some(GBK),
+                "SHIFT_JIS" => Some(SHIFT_JIS),
+                _ => None,
+            })
+            .collect()
+    }
 }
 
 pub struct Server {
@@ -141,7 +158,7 @@ impl Server {
     }
 
     pub fn get_my_directories(&self) -> SlashPath {
-        SlashPath::from_path(self.get_my_dir())
+        SlashPath::from_path(self.get_my_dir(), &vec![])
             .expect("my_dir should exists.")
             .join("directories")
     }
@@ -322,7 +339,7 @@ impl Server {
     }
 
     fn current_archive_file_slash_path(&self) -> SlashPath {
-        SlashPath::from_path(self.current_archive_file_path().as_path())
+        SlashPath::from_path(self.current_archive_file_path().as_path(), &vec![])
             .expect("current_archive_file_path got.")
     }
 
@@ -419,7 +436,9 @@ impl Server {
                     } else if s == "files_and_dirs" {
                         // let df = my_directories.join_another(&dir.get_to_dir_base("")); // use to path.
                         // df.get_os_string()
-                        my_directories.join_another(&dir.get_to_dir_base("")).get_os_string()
+                        my_directories
+                            .join_another(&dir.get_to_dir_base(""))
+                            .get_os_string()
                     } else {
                         OsString::from(s)
                     }
@@ -577,7 +596,7 @@ impl Server {
         );
         message_hub.write_and_flush(server_yml.as_server_yml_sent_bytes().as_slice())?;
 
-        let my_directories = SlashPath::from_path(self.get_my_dir())
+        let my_directories = SlashPath::from_path(self.get_my_dir(), &vec![])
             .expect("my_dir should exists.")
             .join("directories");
         trace!("save to my_directories: {:?}", my_directories);
@@ -725,10 +744,14 @@ impl Server {
         let mut changed = 0_u64;
         let mut unchanged = 0_u64;
         let mut buf = [0; 8192];
+        let possible_encoding = self.server_yml.get_possible_encoding();
         // after sent server_yml, will send push_primary_file_item repeatly, when finish sending follow a RepeatDone message.
         for dir in self.server_yml.directories.iter() {
-            let push_file_items =
-                dir.file_item_iter(&self.app_conf.app_instance_id, self.app_conf.skip_sha1);
+            let push_file_items = dir.file_item_iter(
+                &self.app_conf.app_instance_id,
+                self.app_conf.skip_sha1,
+                &possible_encoding,
+            );
             for fi in push_file_items {
                 new_file_count += 1;
                 match fi {
@@ -864,6 +887,7 @@ mod tests {
                 .join("directories")
                 .join("a-dir")
                 .as_path(),
+            &vec![],
         )
         .expect("get slash path from home_dir");
 
@@ -897,6 +921,7 @@ mod tests {
                 .join(&app_conf.mini_app_conf.app_instance_id)
                 .join("a-dir")
                 .as_path(),
+            &vec![],
         )
         .expect("get slash path from home_dir");
 
