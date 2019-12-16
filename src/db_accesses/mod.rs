@@ -92,7 +92,7 @@ impl RelativeFileItemInDb {
         path: PathBuf,
         skip_sha1: bool,
         dir_id: i64,
-        possible_encoding: &Vec<&Encoding>,
+        possible_encoding: &Vec<&'static Encoding>,
     ) -> Option<Self> {
         let metadata_r = path.metadata();
         match metadata_r {

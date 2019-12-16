@@ -77,7 +77,7 @@ impl SlashPath {
     }
 
     /// relativelize the path.
-    pub fn strip_prefix(&self, full_path: impl AsRef<Path>, possible_encoding: &Vec<&Encoding>) -> Result<String, failure::Error> {
+    pub fn strip_prefix(&self, full_path: impl AsRef<Path>, possible_encoding: &Vec<&'static encoding_rs::Encoding>) -> Result<String, failure::Error> {
         let full = SlashPath::from_path(full_path.as_ref(), possible_encoding);
         let len = self.as_str().len();
         let pos = if len == 1 {
@@ -89,7 +89,7 @@ impl SlashPath {
     }
 
     #[cfg(unix)]
-    pub fn from_path(path: &Path, possible_encoding: Vec<&Encoding>) -> Result<SlashPath, failure::Error> {
+    pub fn from_path(path: &Path, possible_encoding: &Vec<&'static encoding_rs::Encoding>) -> Result<SlashPath, failure::Error> {
         use std::os::unix::ffi::OsStrExt;
         match path.to_str() {
             Some(s) => Ok(SlashPath::new(s)),
@@ -101,7 +101,7 @@ impl SlashPath {
                     if !had_errors {
                         let mut p = SlashPath::new(cow);
                         p.origin.replace(path.to_path_buf());
-                        break Ok(p);
+                        return Ok(p);
                     }
                 }
                 bail!(FullPathFileItemError::Encode(path.to_path_buf()));

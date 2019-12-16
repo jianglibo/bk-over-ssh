@@ -53,7 +53,7 @@ impl FullPathFileItem {
         absolute_file_to_read: PathBuf,
         to_dir_base: &SlashPath,
         skip_sha1: bool,
-        possible_encoding: &Vec<&Encoding>,
+        possible_encoding: &Vec<&'static Encoding>,
     ) -> Result<Self, failure::Error> {
         let fmeta = data_shape_util::get_file_meta(absolute_file_to_read.as_path(), skip_sha1)?;
         let relative_path = from_dir.strip_prefix(absolute_file_to_read.as_path(), possible_encoding)?;

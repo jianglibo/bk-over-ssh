@@ -65,7 +65,7 @@ pub struct ServerYml {
 }
 
 impl ServerYml {
-    pub fn get_possible_encoding(&self) -> Vec<&Encoding> {
+    pub fn get_possible_encoding(&self) -> Vec<&'static Encoding> {
         self.possible_encoding
             .iter()
             .map(|s| s.to_uppercase())

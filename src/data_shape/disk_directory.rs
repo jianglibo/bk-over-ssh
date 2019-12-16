@@ -291,7 +291,7 @@ impl Directory {
         dir_to_read: SlashPath,
         skip_sha1: bool,
         file_selector: &'a FileSelector,
-        possible_encoding: &'a Vec<&Encoding>,
+        possible_encoding: &'a Vec<&'static Encoding>,
     ) -> impl Iterator<Item = Result<FullPathFileItem, failure::Error>> + 'a {
         match file_selector {
             FileSelector::Latest(num) => {
@@ -341,7 +341,7 @@ impl Directory {
         to_dir_base: SlashPath,
         dir_to_read: SlashPath,
         skip_sha1: bool,
-        possible_encoding: &'a Vec<&Encoding>,
+        possible_encoding: &'a Vec<&'static Encoding>,
     ) -> impl Iterator<Item = Result<FullPathFileItem, failure::Error>> + 'a {
         let includes_patterns = self.includes_patterns.clone();
         let excludes_patterns = self.excludes_patterns.clone();
@@ -411,7 +411,7 @@ impl Directory {
         &'a self,
         server_distinct_id: impl AsRef<str>,
         skip_sha1: bool,
-        possible_encoding: &'a Vec<&Encoding>,
+        possible_encoding: &'a Vec<&'static Encoding>,
     ) -> Box<dyn Iterator<Item = Result<FullPathFileItem, failure::Error>> + 'a> {
         let dir_to_read = self.from_dir.clone();
 
@@ -473,7 +473,7 @@ impl Directory {
         sql_batch_size: usize,
         sig_ext: &str,
         delta_ext: &str,
-        possible_encoding: &Vec<&Encoding>,
+        possible_encoding: &Vec<&'static Encoding>,
     ) -> Result<(), failure::Error>
     where
         M: r2d2::ManageConnection,
