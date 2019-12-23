@@ -659,8 +659,8 @@ impl Server {
                     // file item is from another side.
                     if let (Some(df), Some(file_item)) = (last_df.take(), last_file_item.take()) {
                         cppb.push_one(file_item.len, &file_item);
-                        writeln!(sync_log, "{}", file_item.to_path).ok();
-                        trace!("copy to file: {:?}", df.as_path());
+                        writeln!(sync_log, "[{}]{}", chrono::Local::now(), file_item.to_path).ok();
+                        writeln!(sync_log, "copy to file: {:?}", df.as_path()).ok();
                         match message_hub.copy_to_file(
                             &mut buf,
                             content_len.value,
