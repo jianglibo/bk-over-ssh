@@ -38,6 +38,14 @@ jobs:
             echo $PWD
             docker run -v "${{github.workspace}}/cargo/registry:/root/.cargo/registry" -v "${{github.workspace}}:/volume"  -v "${{github.workspace}}cargo/git:/root/.cargo/git" -w /volume --rm jianglibo/c7-rust-vcpkg cargo build --release
             ls -lh target/
+        - name: Upload binaries to release
+          uses: svenstaro/upload-release-action@v1-release
+          with:
+            repo_token: ${{ secrets.GITHUB_TOKEN }}
+            file: target/release/bk-over-ssh
+            asset_name: bk-over-ssh
+            tag: ${{ github.ref }}
+            overwrite: true
           # sudo docker build -t jianglibo/web-private -f DockerfileWeb .
           # sudo docker save jianglibo/web-private | gzip -c > web-docker.tar.gz
           # ls -lh web-docker.tar.gz
