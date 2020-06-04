@@ -36,8 +36,8 @@ jobs:
           run: |
             echo ${{github.workspace}}
             echo $PWD
-            docker run -v "${{github.workspace}}/cargo/registry:/root/.cargo/registry" -v "${{github.workspace}}:/volume"  -v "${{github.workspace}}cargo/git:/root/.cargo/git" --rm clux/muslrust cargo build --release
-            ls -lh target/x86_64-unknown-linux-musl/release/bk-over-ssh
+            docker run -v "${{github.workspace}}/cargo/registry:/root/.cargo/registry" -v "${{github.workspace}}:/"  -v "${{github.workspace}}cargo/git:/root/.cargo/git" -w / --rm jianglibo/c7-rust-vcpkg cargo build --release
+            ls -lh target/
           # sudo docker build -t jianglibo/web-private -f DockerfileWeb .
           # sudo docker save jianglibo/web-private | gzip -c > web-docker.tar.gz
           # ls -lh web-docker.tar.gz
