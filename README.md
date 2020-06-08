@@ -23,6 +23,7 @@ cons:
 1. too simple, don't know how to handle constantly changing files.
 
 ## initialize commands.
+Create the executalbe folder on the server, copy and make it executable.
 ```
 .\bk-over-ssh.exe --console-log --vv copy-executable .\data\pull-servers-conf\xx.xx.xx.xx.yml C:\Users\Administrator\bk-over-ssh
 .\bk-over-ssh.exe --console-log --vv client-pull-loop
