@@ -44,7 +44,7 @@ jobs:
             repo_token: ${{ secrets.GITHUB_TOKEN }}
             file: target/release/bk-over-ssh
             asset_name: bk-over-ssh
-            tag: ${{ github.ref }}
+            tag: ${{ github.sha }}
             overwrite: true
           # sudo docker build -t jianglibo/web-private -f DockerfileWeb .
           # sudo docker save jianglibo/web-private | gzip -c > web-docker.tar.gz
