@@ -38,7 +38,7 @@ jobs:
             echo $PWD
             docker run -v "${{github.workspace}}/cargo/registry:/root/.cargo/registry" -v "${{github.workspace}}:/volume"  -v "${{github.workspace}}cargo/git:/root/.cargo/git" -w /volume --rm jianglibo/c7-rust-vcpkg cargo build --release
             ls -lh target/
-        - name: Upload binaries to release
+        - name: Upload binary to release
           uses: svenstaro/upload-release-action@v1-release
           with:
             repo_token: ${{ secrets.GITHUB_TOKEN }}
