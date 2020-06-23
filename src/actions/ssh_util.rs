@@ -22,9 +22,9 @@ pub fn create_ssh_session_agent(
     agent.connect()?;
     agent.list_identities()?;
 
-    for id in agent.identities() {
-        match id {
-            Ok(identity) => {
+    match agent.identities() {
+        Ok(identities) => {
+            for identity in identities {
                 trace!("start authenticate with public key.");
                 if let Err(err) = agent.userauth(username, &identity) {
                     warn!("ssh agent authentication failed. {:?}", err);
@@ -32,9 +32,23 @@ pub fn create_ssh_session_agent(
                     break;
                 }
             }
-            Err(err) => warn!("can't get key from ssh agent {:?}.", err),
         }
+        Err(err) => warn!("can't get key from ssh agent {:?}.", err),
     }
+
+    // for id in agent.identities() {
+    //     match id {
+    //         Ok(identity) => {
+    //             trace!("start authenticate with public key.");
+    //             if let Err(err) = agent.userauth(username, &identity) {
+    //                 warn!("ssh agent authentication failed. {:?}", err);
+    //             } else {
+    //                 break;
+    //             }
+    //         }
+    //         Err(err) => warn!("can't get key from ssh agent {:?}.", err),
+    //     }
+    // }
     Ok(sess)
 }
 
