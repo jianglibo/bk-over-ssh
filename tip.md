@@ -1,3 +1,7 @@
+## deploy new release
+1. git tag v20200623
+2. git push origin --tags
+3. download from github.
 ## windows openssh
 executable location: C:\Windows\System32\OpenSSH-Win64
 environment variables: Get-Childitem env:
