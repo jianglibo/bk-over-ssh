@@ -1,10 +1,15 @@
 name: Rust
 
 on:
-  push:
-    branches: [ master ]
-  pull_request:
-    branches: [ master ]
+    push:
+    # Sequence of patterns matched against refs/tags
+      tags:
+        - 'v*' # Push events to matching v*, i.e. v1.0, v20.15.10
+
+  # push:
+  #   branches: [ master ]
+  # pull_request:
+  #   branches: [ master ]
 
 env:
   CARGO_TERM_COLOR: always
@@ -44,7 +49,7 @@ jobs:
             repo_token: ${{ secrets.GITHUB_TOKEN }}
             file: target/release/bk-over-ssh
             asset_name: bk-over-ssh
-            tag: ${{ github.sha }}
+            tag: ${{ github.ref }}
             overwrite: true
           # sudo docker build -t jianglibo/web-private -f DockerfileWeb .
           # sudo docker save jianglibo/web-private | gzip -c > web-docker.tar.gz
