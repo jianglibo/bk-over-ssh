@@ -48,7 +48,7 @@ r2d2_sqlite = "0.13.0"
 lazy_static = "1.4.0"
 # ctrlc = { version = "3", features = ["termination"] }
 itertools = "0.8"
-time = "0.2.9"
+time = "0.2.23"
 dirs = "2.0.2"
 job_scheduler = "*"
 base64 = "0.12.0"
